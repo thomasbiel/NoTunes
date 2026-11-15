@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Source/NoTunes.csproj" />
+  <Project Path="Tests/NoTunes.Tests.csproj" />
+</Solution>
