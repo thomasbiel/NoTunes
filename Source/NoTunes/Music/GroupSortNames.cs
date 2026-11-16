@@ -12,17 +12,21 @@ internal sealed record GroupSortNames(
         new Dictionary<string, string?>(),
         new Dictionary<string, string?>());
 
-    public bool Preserves(GroupSortNames expected)
+    public bool Preserves(GroupSortNames expected, bool allowRemovedGroups = false)
     {
-        return Preserves(this.Albums, expected.Albums) && Preserves(this.AlbumArtists, expected.AlbumArtists)
-            && Preserves(this.Artists, expected.Artists) && Preserves(this.Composers, expected.Composers);
+        return Preserves(this.Albums, expected.Albums, allowRemovedGroups)
+            && Preserves(this.AlbumArtists, expected.AlbumArtists, allowRemovedGroups)
+            && Preserves(this.Artists, expected.Artists, allowRemovedGroups)
+            && Preserves(this.Composers, expected.Composers, allowRemovedGroups);
     }
 
     private static bool Preserves(
         IReadOnlyDictionary<string, string?> actual,
-        IReadOnlyDictionary<string, string?> expected)
+        IReadOnlyDictionary<string, string?> expected,
+        bool allowRemovedGroups)
     {
         return expected.All(pair => actual.TryGetValue(pair.Key, out var value)
-            && StringComparer.Ordinal.Equals(value, pair.Value));
+            ? StringComparer.Ordinal.Equals(value, pair.Value)
+            : allowRemovedGroups);
     }
 }

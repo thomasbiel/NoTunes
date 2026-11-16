@@ -5,6 +5,47 @@ namespace NoTunes.Tests;
 
 public sealed class CatalogueReaderTests
 {
+    [TestCase("''")]
+    [TestCase("NULL")]
+    public async Task Reads_Unfinished_Transfers_Without_Inventing_An_Audio_Path(string location)
+    {
+        using var fixture = new CatalogueFixture();
+        fixture.Execute("UPDATE item SET base_location_id=0 WHERE item_pid=1;");
+        fixture.Execute($"UPDATE item_extra SET location={location},file_size=0 WHERE item_pid=1;");
+        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var track = catalogue.Tracks.Single();
+        Assert.That(track.Id, Is.EqualTo(101));
+        Assert.That(track.Path, Is.Null);
+        var json = System.Text.Json.JsonSerializer.SerializeToElement(track);
+        Assert.That(json.GetProperty("IsIncomplete").GetBoolean(), Is.True);
+        var plan = await SyncPlanner.CreateAsync(
+            "phone",
+            new SourceLibrary("source", [new SourceTrack(
+                "empty.mp3",
+                0,
+                DateTime.UnixEpoch,
+                "hash")]),
+            catalogue,
+            (_, _) => throw new AssertionException("An unfinished transfer has no audio to hash."),
+            CancellationToken.None);
+        Assert.That(plan.Delete, Is.EqualTo(catalogue.Tracks));
+        Assert.That(plan.Add, Has.Count.EqualTo(1));
+        Assert.That(plan.Unchanged, Is.Zero);
+        Assert.That(() => SyncEngine.RequireCompleteAudio(catalogue),
+            Throws.TypeOf<IOException>().With.Message.Contains("--dry-run"));
+    }
+
+    [TestCase("UPDATE item SET base_location_id=999 WHERE item_pid=1")]
+    [TestCase("UPDATE item_extra SET location='',file_size=0 WHERE item_pid=1")]
+    [TestCase("UPDATE item SET base_location_id=0 WHERE item_pid=1")]
+    public void Rejects_Broken_Locations_That_Do_Not_Describe_An_Unfinished_Transfer(string mutation)
+    {
+        using var fixture = new CatalogueFixture();
+        fixture.Execute(mutation);
+        Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(
+            fixture.Snapshot(), CancellationToken.None));
+    }
+
     [Test]
     public async Task Keeps_Unrelated_Ambiguous_Groups_Readable()
     {
@@ -36,6 +77,8 @@ public sealed class CatalogueReaderTests
         Assert.That(result.DatabaseId, Is.EqualTo(1001));
         Assert.That(result.Tracks.Select(track => track.Id), Is.EqualTo([101L]));
         Assert.That(result.Tracks[0].Path, Is.EqualTo("iTunes_Control/Music/F01/one.mp3"));
+        Assert.That(result.Tracks[0].IsIncomplete, Is.False);
+        Assert.DoesNotThrow(() => SyncEngine.RequireCompleteAudio(result));
         Assert.That(result.Albums[CatalogueReader.GroupKey("Album", "Artist")], Is.EqualTo(1012));
         Assert.That(result.Artists["Artist"], Is.EqualTo(1011));
         Assert.That(result.OccupiedIds, Does.Contain(105L));

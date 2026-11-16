@@ -11,6 +11,26 @@ namespace NoTunes.Tests;
 public sealed class ProtocolTests
 {
     [Test]
+    public async Task Concurrent_Writers_Preserve_Complete_Plist_Frames()
+    {
+        await using var stream = new PausingWriteStream();
+        await using var connection = new PlistConnection(stream, TimeSpan.FromSeconds(3), atc: true);
+        var ping = Plist.Dict((AtcKeys.Command, AtcCommands.Ping), (AtcKeys.Session, SyncProtocol.Session));
+        var pong = Plist.Dict((AtcKeys.Command, AtcCommands.Pong), (AtcKeys.Session, SyncProtocol.Session));
+        var first = connection.SendAsync(ping, CancellationToken.None);
+        await stream.FirstWriteStarted.Task;
+        var second = connection.SendAsync(pong, CancellationToken.None);
+        stream.ResumeFirstWrite.TrySetResult();
+        await Task.WhenAll(first, second);
+        byte[] expected =
+        [
+            .. ProtocolFrames.PlistMessage(ping, atc: true),
+            .. ProtocolFrames.PlistMessage(pong, atc: true)
+        ];
+        Assert.That(stream.Written, Is.EqualTo(expected));
+    }
+
+    [Test]
     public async Task Lists_Only_Usb_Devices_And_Normalizes_Modern_Udids()
     {
         await WithMuxServer(async stream =>

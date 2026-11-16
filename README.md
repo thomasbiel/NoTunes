@@ -159,8 +159,10 @@ paired ATC connection. The saved library identity and current catalogue must
 still match the plan. The live `ReadyForSync` anchor must match too. A signed
 binary operation file and its `.cig` sidecar are staged and read back before
 metadata completion is announced. Audio is streamed in bounded chunks, read
-back, renamed in the Airlock and completed through ATC. Only expected audio and
-known ancillary-only asset requests are accepted. The host never edits the
+back, renamed in the Airlock and completed through ATC. ATC messages are processed
+throughout the transfer: pings are answered and failures or revoked permissions
+cancel the upload. Only expected audio and known ancillary-only asset requests
+are accepted. The host never edits the
 phone's SQLite database or directly deletes its audio files.
 
 Success requires the current session's `SyncFinished`, the next catalogue
@@ -178,6 +180,10 @@ available to inspect the current state. Automatic recovery of interrupted
 sessions is not implemented: retain the journal and reconcile its operations
 with the phone before clearing it. Completed batches remain recorded even if a
 later batch fails; a multi-batch mirror is not atomic.
+
+If an interrupted transfer left catalogue entries without audio, the dry-run
+lists them as incomplete. JSON entries have `Path: null` and `IsIncomplete: true`.
+Write runs refuse such a catalogue until the interrupted sync has been reconciled.
 
 An empty source requires `--allow-empty-source` for a write run. A source access
 error aborts the scan and cannot be interpreted as an empty source.

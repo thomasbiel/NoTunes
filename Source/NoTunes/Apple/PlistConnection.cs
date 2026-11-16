@@ -7,6 +7,7 @@ public sealed class PlistConnection(Stream stream, TimeSpan timeout, bool atc = 
 {
     private const int HeaderBytes = sizeof(int);
     private const string ConnectionClosedMessage = "The device connection is closed.";
+    private readonly SemaphoreSlim sendOperation = new(1, 1);
     private bool broken;
 
     public Stream Stream { get; private set; } = stream;
@@ -24,15 +25,20 @@ public sealed class PlistConnection(Stream stream, TimeSpan timeout, bool atc = 
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
+        var acquired = false;
         try
         {
+            await this.sendOperation.WaitAsync(deadline.Token);
+            acquired = true;
+            if (this.broken) throw new IOException(ConnectionClosedMessage);
+
             var payload = atc ? BinaryPlist.Write(message) : Plist.ToXml(message);
             var packet = new byte[HeaderBytes + payload.Length];
             if (atc)
                 BinaryPrimitives.WriteInt32LittleEndian(packet, payload.Length);
             else
                 BinaryPrimitives.WriteInt32BigEndian(packet, payload.Length);
-            
+
             payload.CopyTo(packet, HeaderBytes);
             await this.Stream.WriteAsync(packet, deadline.Token);
         }
@@ -46,14 +52,24 @@ public sealed class PlistConnection(Stream stream, TimeSpan timeout, bool atc = 
             await this.DisposeAsync();
             throw;
         }
+        finally
+        {
+            if (acquired) this.sendOperation.Release();
+        }
     }
 
-    public async Task<Dictionary<string, object>> ReceiveAsync(CancellationToken cancellationToken)
+    public Task<Dictionary<string, object>> ReceiveAsync(CancellationToken cancellationToken)
+    {
+        return this.ReceiveAsync(cancellationToken, useTimeout: true);
+    }
+
+    internal async Task<Dictionary<string, object>> ReceiveAsync(CancellationToken cancellationToken, bool useTimeout)
     {
         if (this.broken) throw new IOException(ConnectionClosedMessage);
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(timeout);
+        if (useTimeout) deadline.CancelAfter(timeout);
+
         try
         {
             var header = new byte[HeaderBytes];

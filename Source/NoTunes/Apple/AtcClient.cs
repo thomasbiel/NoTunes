@@ -4,21 +4,22 @@ public sealed class AtcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
 {
     private const int StartupMessageLimit = 24;
     private const long ProbeSession = 1;
-    private readonly PlistConnection connection = new(stream, timeout, atc: true);
 
-    internal PlistConnection Connection => this.connection;
+    internal PlistConnection Connection { get; } = new(stream, timeout, atc: true);
+
+    internal TimeSpan RequestTimeout => timeout;
 
     internal bool SupportsGrappa { get; private set; }
 
     public async Task<AtcSyncStatus> ReadSyncStatusAsync(CancellationToken cancellationToken)
     {
-        await this.connection.SendAsync(Plist.Dict((AtcKeys.Command, AtcCommands.Ping), (AtcKeys.Session, ProbeSession)), cancellationToken);
+        await this.Connection.SendAsync(Plist.Dict((AtcKeys.Command, AtcCommands.Ping), (AtcKeys.Session, ProbeSession)), cancellationToken);
         long? count = null;
         long? bytes = null;
         // Bound unsolicited startup frames rather than waiting indefinitely for a particular message.
         for (var i = 0; i < StartupMessageLimit; i++)
         {
-            var message = await this.connection.ReceiveAsync(cancellationToken);
+            var message = await this.Connection.ReceiveAsync(cancellationToken);
             var command = message.Text(AtcKeys.Command);
             if (command == AtcCommands.Capabilities && message.TryGetValue(AtcKeys.Parameters, out var capabilities)
                 && capabilities.AsDict().TryGetValue(AtcKeys.Capabilities, out var grappa))
@@ -30,7 +31,7 @@ public sealed class AtcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
 
             if (command == AtcCommands.Ping)
             {
-                await this.connection.SendAsync(Plist.Dict((AtcKeys.Command, AtcCommands.Pong), (AtcKeys.Session, message.Number(AtcKeys.Session))), cancellationToken);
+                await this.Connection.SendAsync(Plist.Dict((AtcKeys.Command, AtcCommands.Pong), (AtcKeys.Session, message.Number(AtcKeys.Session))), cancellationToken);
                 continue;
             }
 
@@ -96,5 +97,5 @@ public sealed class AtcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         }
     }
 
-    public ValueTask DisposeAsync() => this.connection.DisposeAsync();
+    public ValueTask DisposeAsync() => this.Connection.DisposeAsync();
 }

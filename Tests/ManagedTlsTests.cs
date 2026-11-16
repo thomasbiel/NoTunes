@@ -15,6 +15,27 @@ public sealed class ManagedTlsTests
 {
     private static readonly Lazy<TlsTestCredentials> Keys = new(() => new TlsTestCredentials());
 
+    [TestCase(3)]
+    [TestCase(80_000)]
+    public async Task A_Pending_Read_Does_Not_Block_Outgoing_Tls_Records(int length)
+    {
+        var payload = Enumerable.Range(0, length).Select(index => (byte)index).ToArray();
+        await WithPeer(new PairedTlsServer(Keys.Value), payload, async raw =>
+        {
+            await using var tls = await ManagedTlsStream.ConnectAsync(
+                raw,
+                Keys.Value.Identity,
+                TimeSpan.FromSeconds(5),
+                CancellationToken.None);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var echoed = new byte[payload.Length];
+            var read = tls.ReadExactlyAsync(echoed, deadline.Token).AsTask();
+            var write = tls.WriteAsync(payload, deadline.Token).AsTask();
+            await Task.WhenAll(read, write);
+            Assert.That(echoed, Is.EqualTo(payload));
+        });
+    }
+
     [Test]
     public async Task Authenticates_Both_Peers_And_Transfers_Multiple_Tls_Records()
     {

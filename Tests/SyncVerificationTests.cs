@@ -6,6 +6,36 @@ namespace NoTunes.Tests;
 public sealed class SyncVerificationTests
 {
     [Test]
+    public async Task Accepts_Collected_Groups_After_Verifying_The_Deleted_Track_Inventory()
+    {
+        using var fixture = new CatalogueFixture();
+        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        fixture.Execute("""
+            DELETE FROM item WHERE item_pid=1;
+            DELETE FROM item_store WHERE item_pid=1;
+            DELETE FROM item_extra WHERE item_pid=1;
+            DELETE FROM album;
+            DELETE FROM album_artist;
+            DELETE FROM item_artist;
+            DELETE FROM composer;
+            UPDATE _MLDatabaseProperties SET value='8';
+            """);
+        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
+            before,
+            after,
+            [],
+            before.Tracks));
+        Assert.That(after.SortNames.Preserves(before.SortNames), Is.False,
+            "The catalogue comparison before a batch must still reject missing groups.");
+        Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
+            before,
+            after,
+            [],
+            []));
+    }
+
+    [Test]
     public void Rejects_Changes_To_Existing_Group_Sort_Names()
     {
         var before = SyncPlannerTests.Catalogue([]) with

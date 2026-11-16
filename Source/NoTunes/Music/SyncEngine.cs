@@ -17,7 +17,7 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
         SyncPlan plan;
         DeviceCatalogue catalogue;
         LibraryIdentity identity;
-        
+
         await using (var phone = await DeviceSyncConnection.OpenAsync(
             mux,
             device,
@@ -34,9 +34,10 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
                 catalogue,
                 (track, token) => this.ReadHashAsync(phone.Afc, track, token),
                 cancellationToken);
-            
+
             if (!options.DryRun && plan.HasChanges)
             {
+                RequireCompleteAudio(catalogue);
                 if (source.Tracks.Count == 0 && !options.AllowEmptySource)
                     throw new IOException("The source contains no MP3 files. Use --allow-empty-source to deliberately remove all synced music.");
 
@@ -45,7 +46,7 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
         }
 
         if (options.DryRun || !plan.HasChanges) return new SyncResult(plan, options.DryRun, 0);
-        
+
         await error.WriteLineAsync($"Plan: add {plan.Add.Count}, delete {plan.Delete.Count}, unchanged {plan.Unchanged}.");
         var stateRoot = options.StateFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppleClient.Name);
         using var journal = new SyncJournal(stateRoot, device.Udid);
@@ -58,7 +59,7 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
             fileSystem,
             workspace,
             cancellationToken);
-        
+
         var batches = 0;
         // Finish and verify additions first; removals are separate batches and never fund the required free-space estimate.
         var added = 0;
@@ -74,7 +75,7 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
                 batch,
                 journal,
                 cancellationToken);
-            
+
             added += batch.Additions.Count;
             batches++;
         }
@@ -92,7 +93,7 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
                 batch,
                 journal,
                 cancellationToken);
-            
+
             deleted += batch.Deletions.Count;
             batches++;
         }
@@ -117,7 +118,7 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
             device,
             timeout,
             cancellationToken);
-        
+
         await using var syncLock = await phone.Afc.AcquireSyncLockAsync(cancellationToken);
         var currentIdentity = await LibraryIdentity.ReadAsync(phone.Afc, cancellationToken);
         var before = await ReadCatalogueAsync(phone.Afc, cancellationToken);
@@ -133,32 +134,32 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
         await RequireEmptyStagingAsync(phone.Afc, cancellationToken);
         var operation = batch.Operation;
         var signature = signer.Sign(operation);
-        
+
         var batchPlan = new SyncPlan(
             device.Udid,
             before.Anchor,
             [.. additions.Select(track => track.Source)],
             deletions,
             before.Tracks.Count - deletions.Count);
-        
+
         journal.Start(
             identity,
             batchPlan,
             operation,
             signature);
-        
+
         await WriteVerifiedAsync(
             phone.Afc,
             SyncPaths.Metadata,
             operation,
             cancellationToken);
-        
+
         await WriteVerifiedAsync(
             phone.Afc,
             SyncPaths.Metadata + SyncPaths.SignatureSuffix,
             signature,
             cancellationToken);
-        
+
         await session.FinishMetadataAsync(before.Anchor, cancellationToken);
         var retained = before.Tracks.Select(track => track.Id).Except(deletions.Select(track => track.Id)).ToHashSet();
         await session.TransferAsync(
@@ -166,14 +167,14 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
             additions,
             retained,
             cancellationToken);
-        
+
         var after = await ReadCatalogueAsync(phone.Afc, cancellationToken);
         VerifyResult(
             before,
             after,
             additions,
             deletions);
-        
+
         foreach (var track in additions)
         {
             await AtcSyncSession.VerifyHashAsync(
@@ -182,7 +183,7 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
                 track.Source,
                 cancellationToken);
         }
-        
+
         if (await LibraryIdentity.ReadAsync(phone.Afc, cancellationToken) != identity)
         {
             throw new IOException("Library identity changed during synchronization.");
@@ -209,14 +210,14 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
             .Where(id => !deletedIds.Contains(id))
             .Concat(additions.Select(track => track.Id))
             .ToHashSet();
-        
+
         if (!expectedIds.SetEquals(after.Tracks.Select(track => track.Id)))
         {
             throw new IOException("The iPhone track inventory differs from the requested changes.");
         }
 
         var actual = after.Tracks.ToDictionary(track => track.Id);
-        if (!after.SortNames.Preserves(before.SortNames)
+        if (!after.SortNames.Preserves(before.SortNames, allowRemovedGroups: true)
             || before.Tracks.Where(track => !deletedIds.Contains(track.Id)).Any(track => actual[track.Id] != track)
             || additions.Any(track => actual[track.Id].Path != track.DevicePath || actual[track.Id].Size != track.Source.Size
                 || actual[track.Id].Title != (string)track.Metadata.Item[MediaKeys.Title]))
@@ -236,9 +237,11 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
 
     private async Task<string?> ReadHashAsync(AfcClient afc, DeviceTrack track, CancellationToken cancellationToken)
     {
-        var info = await afc.GetFileInfoAsync(track.Path, cancellationToken);
+        if (track.Path is not { } path) return null;
+
+        var info = await afc.GetFileInfoAsync(path, cancellationToken);
         if (info is null) return null;
-        
+
         if (!long.TryParse(
             info.GetValueOrDefault(AfcKeys.FileSize),
             NumberStyles.None,
@@ -250,7 +253,14 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
         }
 
         await error.WriteLineAsync($"Compare: {track.Title}");
-        return await afc.HashFileAsync(track.Path, track.Size, cancellationToken);
+        return await afc.HashFileAsync(path, track.Size, cancellationToken);
+    }
+
+    internal static void RequireCompleteAudio(DeviceCatalogue catalogue)
+    {
+        if (catalogue.Tracks.Any(track => track.IsIncomplete))
+            throw new IOException("The iPhone contains unfinished music transfers. Use --dry-run to inspect them "
+                + "and reconcile the interrupted sync before starting another write session.");
     }
 
     private static async Task RequireEmptyStagingAsync(AfcClient afc, CancellationToken cancellationToken)
@@ -282,7 +292,7 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
             input,
             content.Length,
             cancellationToken);
-        
+
         var actual = await afc.ReadFileAsync(path, content.Length, cancellationToken);
         if (!actual.AsSpan().SequenceEqual(content)) throw new IOException("Staged sync metadata failed read-back verification.");
     }

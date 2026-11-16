@@ -5,7 +5,7 @@ using Org.BouncyCastle.Tls;
 namespace NoTunes.Apple;
 
 // Managed TLS over an async USB tunnel. No Windows key storage, native TLS DLLs or global TLS changes.
-// A connection serializes its operations, matching the request/reply protocols using this stream.
+// TLS state changes are serialized; a pending socket read does not block outgoing records.
 public sealed class ManagedTlsStream : Stream
 {
     private const int EncryptedRecordBufferBytes = 18 * 1024;
@@ -13,6 +13,7 @@ public sealed class ManagedTlsStream : Stream
     private readonly Stream raw;
     private readonly TlsClientProtocol protocol;
     private readonly SemaphoreSlim operation = new(1, 1);
+    private readonly SemaphoreSlim readOperation = new(1, 1);
     private readonly byte[] incoming = new byte[EncryptedRecordBufferBytes];
     private readonly byte[] outgoing = new byte[EncryptedRecordBufferBytes];
     private int disposed;
@@ -38,7 +39,6 @@ public sealed class ManagedTlsStream : Stream
                 if (protocol.IsClosed) throw new AuthenticationException("The iPhone closed the TLS handshake.");
 
                 await stream.ReceiveRecordsAsync(deadline.Token);
-                await stream.FlushRecordsAsync(deadline.Token);
             }
 
             return stream;
@@ -65,34 +65,46 @@ public sealed class ManagedTlsStream : Stream
 
     public override long Position
     {
-        get => throw new NotSupportedException(); set => throw new NotSupportedException();
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
     }
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        await this.operation.WaitAsync(cancellationToken);
+        await this.readOperation.WaitAsync(cancellationToken);
         try
         {
-            ObjectDisposedException.ThrowIf(this.disposed != 0, this);
-            if (buffer.IsEmpty) return 0;
-            
-            while (this.protocol.GetAvailableInputBytes() == 0)
+            while (true)
             {
-                if (this.protocol.IsClosed) return 0;
-                await this.ReceiveRecordsAsync(cancellationToken);
-                await this.FlushRecordsAsync(cancellationToken);
-            }
+                await this.operation.WaitAsync(cancellationToken);
+                try
+                {
+                    ObjectDisposedException.ThrowIf(this.disposed != 0, this);
+                    if (buffer.IsEmpty) return 0;
 
-            var cleartext = new byte[Math.Min(buffer.Length, MaxPlaintextRecordBytes)];
-            try
-            {
-                var count = this.protocol.ReadInput(cleartext, 0, cleartext.Length);
-                cleartext.AsMemory(0, count).CopyTo(buffer);
-                return count;
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(cleartext);
+                    if (this.protocol.GetAvailableInputBytes() > 0)
+                    {
+                        var cleartext = new byte[Math.Min(buffer.Length, MaxPlaintextRecordBytes)];
+                        try
+                        {
+                            var count = this.protocol.ReadInput(cleartext, 0, cleartext.Length);
+                            cleartext.AsMemory(0, count).CopyTo(buffer);
+                            return count;
+                        }
+                        finally
+                        {
+                            CryptographicOperations.ZeroMemory(cleartext);
+                        }
+                    }
+
+                    if (this.protocol.IsClosed) return 0;
+                }
+                finally
+                {
+                    this.operation.Release();
+                }
+
+                await this.ReceiveRecordsAsync(cancellationToken);
             }
         }
         catch
@@ -102,7 +114,7 @@ public sealed class ManagedTlsStream : Stream
         }
         finally
         {
-            this.operation.Release();
+            this.readOperation.Release();
         }
     }
 
@@ -111,33 +123,36 @@ public sealed class ManagedTlsStream : Stream
         await this.operation.WaitAsync(cancellationToken);
         try
         {
-            ObjectDisposedException.ThrowIf(this.disposed != 0, this);
-            while (!buffer.IsEmpty)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var count = Math.Min(buffer.Length, MaxPlaintextRecordBytes);
-                var cleartext = buffer[..count].ToArray();
-                try
+                ObjectDisposedException.ThrowIf(this.disposed != 0, this);
+                while (!buffer.IsEmpty)
                 {
-                    this.protocol.WriteApplicationData(cleartext, 0, cleartext.Length);
-                }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(cleartext);
-                }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var count = Math.Min(buffer.Length, MaxPlaintextRecordBytes);
+                    var cleartext = buffer[..count].ToArray();
+                    try
+                    {
+                        this.protocol.WriteApplicationData(cleartext, 0, cleartext.Length);
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(cleartext);
+                    }
 
-                await this.FlushRecordsAsync(cancellationToken);
-                buffer = buffer[count..];
+                    await this.FlushRecordsAsync(cancellationToken);
+                    buffer = buffer[count..];
+                }
+            }
+            finally
+            {
+                this.operation.Release();
             }
         }
         catch
         {
             await this.DisposeAsync();
             throw;
-        }
-        finally
-        {
-            this.operation.Release();
         }
     }
 
@@ -146,7 +161,17 @@ public sealed class ManagedTlsStream : Stream
         var count = await this.raw.ReadAsync(this.incoming, cancellationToken);
         if (count == 0) throw new EndOfStreamException("The iPhone closed the encrypted connection unexpectedly.");
 
-        this.protocol.OfferInput(this.incoming, 0, count);
+        await this.operation.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(this.disposed != 0, this);
+            this.protocol.OfferInput(this.incoming, 0, count);
+            await this.FlushRecordsAsync(cancellationToken);
+        }
+        finally
+        {
+            this.operation.Release();
+        }
     }
 
     private async Task FlushRecordsAsync(CancellationToken cancellationToken)
@@ -185,18 +210,21 @@ public sealed class ManagedTlsStream : Stream
         await this.operation.WaitAsync(cancellationToken);
         try
         {
-            ObjectDisposedException.ThrowIf(this.disposed != 0, this);
-            await this.FlushRecordsAsync(cancellationToken);
-            await this.raw.FlushAsync(cancellationToken);
+            try
+            {
+                ObjectDisposedException.ThrowIf(this.disposed != 0, this);
+                await this.FlushRecordsAsync(cancellationToken);
+                await this.raw.FlushAsync(cancellationToken);
+            }
+            finally
+            {
+                this.operation.Release();
+            }
         }
         catch
         {
             await this.DisposeAsync();
             throw;
-        }
-        finally
-        {
-            this.operation.Release();
         }
     }
 
@@ -206,9 +234,22 @@ public sealed class ManagedTlsStream : Stream
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && Interlocked.Exchange(ref this.disposed, 1) == 0)
+        if (disposing) this.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref this.disposed, 1) != 0) return;
+
+        try
         {
-            this.raw.Dispose();
+            await this.raw.DisposeAsync();
+        }
+        finally
+        {
+            await this.operation.WaitAsync();
             try
             {
                 this.protocol.Close();
@@ -217,9 +258,8 @@ public sealed class ManagedTlsStream : Stream
             {
                 CryptographicOperations.ZeroMemory(this.incoming);
                 CryptographicOperations.ZeroMemory(this.outgoing);
+                this.operation.Release();
             }
         }
-
-        base.Dispose(disposing);
     }
 }

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using NoTunes.Music;
 
 namespace NoTunes.Apple;
@@ -63,8 +64,88 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
 
         // Validate the complete manifest before uploading or replying to any individual entry.
         var manifest = SyncManifest.Validate(response.Dictionary(AtcKeys.Parameters), additions, retained);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var transferFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var repliesRemaining = manifest.Count;
+        ExceptionDispatchInfo? controlFailure = null;
+        var receiver = MonitorAsync();
+        var sender = SendAssetsAsync();
+        try
+        {
+            var first = await Task.WhenAny(receiver, sender);
+            await first;
+            await Task.WhenAll(receiver, sender);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw;
+        }
+        catch
+        {
+            // Preserve the control error when it cancels an in-flight AFC request.
+            Volatile.Read(ref controlFailure)?.Throw();
+            throw;
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            try
+            {
+                await Task.WhenAll(receiver, sender);
+            }
+            catch
+            {
+                // Both tasks have stopped; retain the original failure.
+            }
+        }
+
+        async Task MonitorAsync()
+        {
+            try
+            {
+                await this.WaitAsync([AtcCommands.SyncFinished], stop.Token, transferFinished.Task);
+                if (Volatile.Read(ref repliesRemaining) != 0)
+                    throw new IOException("Sync finished before every requested asset was completed.");
+            }
+            catch (Exception exception)
+            {
+                if (!stop.IsCancellationRequested)
+                {
+                    Volatile.Write(ref controlFailure, ExceptionDispatchInfo.Capture(exception));
+                    stop.Cancel();
+                }
+
+                throw;
+            }
+        }
+
+        async Task SendAssetsAsync()
+        {
+            try
+            {
+                await this.TransferAssetsAsync(
+                    afc,
+                    manifest,
+                    () => Interlocked.Decrement(ref repliesRemaining),
+                    stop.Token);
+            }
+            finally
+            {
+                transferFinished.TrySetResult();
+            }
+        }
+    }
+
+    private async Task TransferAssetsAsync(
+        AfcClient afc,
+        IReadOnlyList<SyncAsset> manifest,
+        Action completingAsset,
+        CancellationToken cancellationToken)
+    {
         foreach (var asset in manifest.Where(asset => asset.Track is not null))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var track = asset.Track!;
             var staged = SyncPaths.Airlock + track.AssetId;
             await this.error.WriteLineAsync($"Transfer: {track.Source.RelativePath}");
@@ -89,6 +170,7 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
                 track.Source,
                 cancellationToken);
             await afc.RenameNewFileAsync(staged + SyncPaths.Mp3Extension, staged, cancellationToken);
+            completingAsset();
             await this.SendAsync(AtcCommands.FileComplete, Plist.Dict(
                 (AtcKeys.AssetId, track.AssetId),
                 (AtcKeys.Dataclass, AtcKeys.Media),
@@ -97,6 +179,8 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
 
         foreach (var asset in manifest.Where(asset => asset.Track is null))
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            completingAsset();
             await this.SendAsync(AtcCommands.FileError, Plist.Dict(
                 (AtcKeys.AssetId, asset.AssetId),
                 (AtcKeys.Dataclass, AtcKeys.Media),
@@ -104,7 +188,6 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
                 (AtcKeys.ErrorIsVisible, false)), cancellationToken);
         }
 
-        await this.WaitAsync([AtcCommands.SyncFinished], cancellationToken);
     }
 
     internal static async Task VerifyHashAsync(AfcClient afc, string path, SourceTrack source, CancellationToken cancellationToken)
@@ -127,11 +210,16 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
             (AtcKeys.Command, command), (AtcKeys.Session, SyncProtocol.Session), (AtcKeys.Parameters, parameters)), cancellationToken);
     }
 
-    private async Task<Dictionary<string, object>> WaitAsync(string[] expected, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, object>> WaitAsync(
+        string[] expected,
+        CancellationToken cancellationToken,
+        Task? transferFinished = null)
     {
         for (var i = 0; i < SyncProtocol.MessageLimit; i++)
         {
-            var message = await client.Connection.ReceiveAsync(cancellationToken);
+            var message = transferFinished is null
+                ? await client.Connection.ReceiveAsync(cancellationToken)
+                : await this.ReceiveDuringTransferAsync(transferFinished, cancellationToken);
             var command = message.Text(AtcKeys.Command);
             if (command == AtcCommands.Ping)
             {
@@ -162,6 +250,26 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
         }
 
         throw new IOException("ATC sync message limit exceeded.");
+    }
+
+    private async Task<Dictionary<string, object>> ReceiveDuringTransferAsync(
+        Task transferFinished,
+        CancellationToken cancellationToken)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var receive = client.Connection.ReceiveAsync(deadline.Token, useTimeout: false);
+        await Task.WhenAny(receive, transferFinished);
+        // Uploads may be silent on ATC; once they end, each response has the usual request timeout.
+        if (transferFinished.IsCompleted) deadline.CancelAfter(client.RequestTimeout);
+
+        try
+        {
+            return await receive;
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new IOException("Timed out waiting for the iPhone to finish music synchronization.", exception);
+        }
     }
 
     private static Dictionary<string, object> Anchors(uint anchor)

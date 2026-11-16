@@ -14,6 +14,10 @@ internal sealed class AtcPeer : Stream
 
     public Action? BeforeRead { get; init; }
 
+    public Func<int, CancellationToken, Task>? BeforeFrameAsync { get; init; }
+
+    public Action<Dictionary<string, object>>? OnMessageSent { get; init; }
+
     public bool WasDisposed { get; private set; }
 
     public int ResponsesRead => this.frameEnds.Count(end => end <= this.incoming.Position);
@@ -74,6 +78,12 @@ internal sealed class AtcPeer : Stream
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         this.BeforeRead?.Invoke();
+        if (this.BeforeFrameAsync is not null
+            && (this.incoming.Position == 0 || this.frameEnds.Contains(this.incoming.Position)))
+        {
+            await this.BeforeFrameAsync(this.ResponsesRead, cancellationToken);
+        }
+
         if (this.StallAtEnd && this.incoming.Position == this.incoming.Length)
             await Task.Delay(Timeout.Infinite, cancellationToken);
         return await this.incoming.ReadAsync(buffer[..Math.Min(buffer.Length, 3)], cancellationToken);
@@ -81,9 +91,10 @@ internal sealed class AtcPeer : Stream
 
     public override void Write(byte[] buffer, int offset, int count) => this.written.Write(buffer, offset, count);
 
-    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        return this.written.WriteAsync(buffer, cancellationToken);
+        await this.written.WriteAsync(buffer, cancellationToken);
+        this.OnMessageSent?.Invoke(BinaryPlist.Read(buffer[sizeof(int)..].ToArray()).AsDict());
     }
 
     protected override void Dispose(bool disposing)

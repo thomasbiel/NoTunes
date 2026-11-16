@@ -110,7 +110,8 @@ public sealed class Commands(SourceScanner sourceScanner, IUsbMuxTransport trans
 
             foreach (var track in result.Plan.Delete)
             {
-                await output.WriteLineAsync($"- {track.Title} ({track.Id})");
+                var state = track.IsIncomplete ? " [incomplete: no audio]" : string.Empty;
+                await output.WriteLineAsync($"- {track.Title} ({track.Id}){state}");
             }
 
             await output.WriteLineAsync($"{(result.DryRun ? "Preview" : "Verified")}: {result.Plan.Add.Count} added, {result.Plan.Delete.Count} removed, {result.Plan.Unchanged} unchanged.");

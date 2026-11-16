@@ -15,7 +15,7 @@ internal static class SyncPlanner
         foreach (var track in catalogue.Tracks)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!sourceSizes.Contains(track.Size))
+            if (track.IsIncomplete || !sourceSizes.Contains(track.Size))
                 continue;
             var hash = await readHash(track, cancellationToken);
             if (hash is null)

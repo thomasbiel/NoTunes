@@ -1,11 +1,14 @@
 using System.Buffers.Binary;
 using System.Text;
+using NoTunes.Apple;
 using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
 internal sealed class AfcPeer : Stream
 {
+    private const int OperationOffset = 4 * sizeof(ulong);
+
     public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
 
     public bool AllowWrites { get; init; }
@@ -33,6 +36,8 @@ internal sealed class AfcPeer : Stream
     public bool WasDisposed { get; private set; }
 
     public Action? OnClose { get; set; }
+
+    public Func<CancellationToken, Task>? BeforeFileWriteReplyAsync { get; init; }
 
     public int Opens { get; private set; }
 
@@ -72,11 +77,15 @@ internal sealed class AfcPeer : Stream
         return await this.input.ReadAsync(buffer[..Math.Min(buffer.Length, 5)], cancellationToken);
     }
 
-    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         this.Handle(buffer.ToArray());
-        return ValueTask.CompletedTask;
+        if (this.BeforeFileWriteReplyAsync is not null
+            && BinaryPrimitives.ReadUInt64LittleEndian(buffer.Span[OperationOffset..]) == (ulong)AfcOperation.FileWrite)
+        {
+            await this.BeforeFileWriteReplyAsync(cancellationToken);
+        }
     }
 
     public override void Write(byte[] buffer, int offset, int count) => this.Handle([.. buffer.AsSpan(offset, count)]);

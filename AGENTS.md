@@ -36,7 +36,7 @@
 - Use injected `TextWriter` instances for output and diagnostics. Only the
   application entry point selects `System.Console.Out` and `System.Console.Error`;
   pass them through callers/DI instead of accessing the global console in services.
-- Always enclose `for` and `foreach` loop bodies in braces, including single-statement bodies.
+- Always enclose `for`, `foreach` and `while` loop bodies in braces, including single-statement bodies.
 
 ## Dependency licenses
 

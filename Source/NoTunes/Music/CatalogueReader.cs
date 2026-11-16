@@ -15,6 +15,8 @@ internal static class CatalogueReader
     private const int FileSizeColumn = 4;
     private const int MusicTypeColumn = 5;
     private const int RemoteLocationColumn = 6;
+    private const int BaseLocationIdColumn = 7;
+    private const long MissingBaseLocationId = 0;
     private const string ConfigureSql = "PRAGMA trusted_schema=OFF; PRAGMA query_only=ON;";
     private const string IntegritySql = "PRAGMA quick_check";
     private const string IntegritySuccess = "ok";
@@ -37,7 +39,7 @@ internal static class CatalogueReader
     private const string ArtistSortsSql = "SELECT item_artist,COALESCE(sort_item_artist,item_artist,'') FROM item_artist";
     private const string ComposerSortsSql = "SELECT composer,COALESCE(sort_composer,composer,'') FROM composer";
     private const string TracksSql = """
-        SELECT s.sync_id, e.title, b.path, e.location, e.file_size, i.media_type, i.remote_location_id
+        SELECT s.sync_id, e.title, b.path, e.location, e.file_size, i.media_type, i.remote_location_id, i.base_location_id
         FROM item i JOIN item_store s USING(item_pid)
         LEFT JOIN item_extra e USING(item_pid) LEFT JOIN base_location b USING(base_location_id)
         WHERE s.sync_id<>0 AND s.store_saga_id=0 ORDER BY s.sync_id
@@ -49,18 +51,25 @@ internal static class CatalogueReader
         var path = Path.Combine(workspace.Root, SyncPaths.DatabaseFile);
         await File.WriteAllBytesAsync(path, snapshot.Database, cancellationToken);
         if (snapshot.Wal is not null)
+        {
             await File.WriteAllBytesAsync(path + SyncPaths.WalSuffix, snapshot.Wal, cancellationToken);
+        }
+
         try
         {
             // SQLite replays only committed WAL frames in our private local copy. Never open the phone's file.
-            await using var connection = new SQLiteConnection(new SQLiteConnectionStringBuilder
+            var builder = new SQLiteConnectionStringBuilder
             {
                 DataSource = path,
                 FailIfMissing = true,
                 Pooling = false
-            }.ToString());
+            };
+
+            await using var connection = new SQLiteConnection(builder.ToString());
+
             connection.Open();
             Execute(connection, ConfigureSql);
+
             if (!StringComparer.Ordinal.Equals(Scalar(connection, IntegritySql), IntegritySuccess))
                 throw new InvalidDataException("The captured music catalogue failed SQLite integrity checks.");
             if (long.Parse(Scalar(connection, VersionSql), CultureInfo.InvariantCulture) < MinimumSchemaVersion)
@@ -74,7 +83,9 @@ internal static class CatalogueReader
             var databaseId = rows.GetInt64(0);
             var containerId = rows.GetInt64(1);
             if (databaseId == 0 || containerId == 0 || rows.Read())
+            {
                 throw new InvalidDataException("Ambiguous music database identity.");
+            }
 
             rows.Close();
             var anchorText = Scalar(connection, AnchorSql, SyncProtocol.InitialMediaAnchor);
@@ -82,9 +93,10 @@ internal static class CatalogueReader
                 anchorText,
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
-                out var anchor)
-                || anchor == uint.MaxValue || anchor.ToString(CultureInfo.InvariantCulture) != anchorText)
+                out var anchor) || anchor == uint.MaxValue || anchor.ToString(CultureInfo.InvariantCulture) != anchorText)
+            {
                 throw new InvalidDataException("Invalid Media sync anchor.");
+            }
 
             var occupied = new HashSet<long> { databaseId, containerId };
             await using (var occupiedCommand = connection.CreateCommand())
@@ -92,7 +104,9 @@ internal static class CatalogueReader
                 occupiedCommand.CommandText = OccupiedIdsSql;
                 await using var occupiedRows = occupiedCommand.ExecuteReader();
                 while (occupiedRows.Read())
+                {
                     occupied.Add(occupiedRows.GetInt64(0));
+                }
             }
 
             var artists = ReadGroups(connection, ArtistsSql, occupied);
@@ -117,25 +131,42 @@ internal static class CatalogueReader
                 occupied.Add(id);
                 // Preserve cloud purchases, videos and other nonlocal/nonmusic rows.
                 if (reader.GetInt64(MusicTypeColumn) != MusicMediaType || reader.GetInt64(RemoteLocationColumn) != 0)
+                {
                     continue;
-                var fullPath = reader.GetString(BasePathColumn) + "/" + reader.GetString(FilenameColumn);
-                AfcClient.ValidatePath(fullPath);
-                if (!fullPath.StartsWith(SyncPaths.MusicBucketPrefix, StringComparison.Ordinal)
-                    || !trackIds.Add(id) || !paths.Add(fullPath) || reader.GetInt64(FileSizeColumn) < 0)
-                    throw new InvalidDataException("Unsafe or ambiguous music catalogue entry.");
+                }
+
+                var size = reader.GetInt64(FileSizeColumn);
+                var incomplete = reader.GetInt64(BaseLocationIdColumn) == MissingBaseLocationId && size == 0
+                    && (reader.IsDBNull(FilenameColumn) || reader.GetString(FilenameColumn).Length == 0);
+
+                string? fullPath = null;
+                if (!incomplete)
+                {
+                    fullPath = reader.GetString(BasePathColumn) + "/" + reader.GetString(FilenameColumn);
+                    AfcClient.ValidatePath(fullPath);
+                    if (!fullPath.StartsWith(SyncPaths.MusicBucketPrefix, StringComparison.Ordinal) || !paths.Add(fullPath))
+                    {
+                        throw new InvalidDataException("Unsafe or ambiguous music catalogue entry.");
+                    }
+                }
+
+                if (!trackIds.Add(id) || size < 0) throw new InvalidDataException("Unsafe or ambiguous music catalogue entry.");
 
                 tracks.Add(new DeviceTrack(
                     id,
                     reader.GetString(TitleColumn),
                     fullPath,
-                    reader.GetInt64(FileSizeColumn)));
+                    size));
             }
 
             await using var containers = connection.CreateCommand();
             containers.CommandText = ContainersSql;
             await using var containerRows = containers.ExecuteReader();
             while (containerRows.Read())
+            {
                 occupied.Add(containerRows.GetInt64(0));
+            }
+
             return new DeviceCatalogue(
                 databaseId,
                 containerId,
@@ -171,13 +202,15 @@ internal static class CatalogueReader
         while (rows.Read())
         {
             var id = rows.GetInt64(0);
-            if (id == 0)
-                continue;
+            if (id == 0) continue;
+
             occupied.Add(id);
             var name = rows.IsDBNull(1) ? string.Empty : rows.GetString(1);
             var key = album ? GroupKey(name, rows.IsDBNull(2) ? string.Empty : rows.GetString(2)) : name;
             if (!result.TryAdd(key, id) && result[key] != id)
+            {
                 result[key] = 0; // Duplicate labels need a fresh identity; never choose an arbitrary group.
+            }
         }
 
         return result;
@@ -202,7 +235,9 @@ internal static class CatalogueReader
             var key = album ? GroupKey(name, rows.IsDBNull(1) ? string.Empty : rows.GetString(1)) : name;
             var sort = rows.GetString(album ? 2 : 1);
             if (!result.TryAdd(key, sort) && !StringComparer.Ordinal.Equals(result[key], sort))
+            {
                 result[key] = null;
+            }
         }
 
         return result;
