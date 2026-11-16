@@ -17,7 +17,9 @@ internal sealed class WindowsSourceSession : ISourceSession
     private const uint Overlapped = 0x40000000;
     private readonly List<SafeFileHandle> directories = [];
 
-    private WindowsSourceSession() { }
+    private WindowsSourceSession()
+    {
+    }
 
     public static WindowsSourceSession Acquire(DirectoryInfo root, CancellationToken cancellationToken)
     {
@@ -33,39 +35,81 @@ internal sealed class WindowsSourceSession : ISourceSession
                 cancellationToken.ThrowIfCancellationRequested();
                 guard.AddDirectory(directory);
             }
+
             return guard;
         }
-        catch { guard.Dispose(); throw; }
+        catch
+        {
+            guard.Dispose();
+            throw;
+        }
     }
 
     // Attribute-only handles do not enforce Windows sharing restrictions.
-    public void AddDirectory(DirectoryInfo directory) =>
-        directories.Add(Open(directory.FullName, ReadAttributes | ListDirectory, BackupSemantics, directory: true));
+    public void AddDirectory(DirectoryInfo directory)
+    {
+        this.directories.Add(Open(
+            directory.FullName,
+            ReadAttributes | ListDirectory,
+            BackupSemantics,
+            directory: true));
+    }
+
+    // Windows must keep sharing guards until the complete inventory is finished.
+    public void ReleaseDirectory(DirectoryInfo directory)
+    {
+    }
 
     public IEnumerable<SourceEntry> EnumerateDirectory(DirectoryInfo directory)
     {
-        var options = new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0 };
+        var options = new EnumerationOptions
+        {
+            IgnoreInaccessible = false,
+            AttributesToSkip = 0
+        };
         return directory.EnumerateFileSystemInfos(SourceFileDefaults.AllEntriesPattern, options).Select(entry => new SourceEntry(entry.Name, entry.Attributes));
     }
 
     public FileStream OpenRead(FileInfo file)
     {
-        var handle = Open(file.FullName, GenericRead, Overlapped | SequentialScan, directory: false);
-        try { return new FileStream(handle, FileAccess.Read, SourceFileDefaults.ReadBufferBytes, isAsync: true); }
-        catch { handle.Dispose(); throw; }
+        var handle = Open(
+            file.FullName,
+            GenericRead,
+            Overlapped | SequentialScan,
+            directory: false);
+        try
+        {
+            return new FileStream(
+                handle,
+                FileAccess.Read,
+                SourceFileDefaults.ReadBufferBytes,
+                isAsync: true);
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
     }
 
     private static SafeFileHandle Open(string path, uint access, uint flags, bool directory)
     {
         // Deny write/delete sharing so a validated component cannot become a link or be replaced.
-        var handle = CreateFile(Path.TrimEndingDirectorySeparator(path), access, FileShare.Read,
-            IntPtr.Zero, FileMode.Open, flags | OpenReparsePoint, IntPtr.Zero);
+        var handle = CreateFile(
+            Path.TrimEndingDirectorySeparator(path),
+            access,
+            FileShare.Read,
+            IntPtr.Zero,
+            FileMode.Open,
+            flags | OpenReparsePoint,
+            IntPtr.Zero);
         if (handle.IsInvalid)
         {
             var error = new Win32Exception(Marshal.GetLastPInvokeError());
             handle.Dispose();
             throw new IOException($"Cannot safely open source path '{path}': {error.Message}", error);
         }
+
         try
         {
             var attributes = File.GetAttributes(handle);
@@ -73,19 +117,23 @@ internal sealed class WindowsSourceSession : ISourceSession
                 throw new IOException($"Symbolic link or junction in source path: {path}. The scan is aborted.");
             if (attributes.HasFlag(FileAttributes.Directory) != directory)
                 throw new IOException($"Source path changed type during the scan: {path}");
+
             return handle;
         }
-        catch { handle.Dispose(); throw; }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
     }
 
     public void Dispose()
     {
-        for (var i = directories.Count - 1; i >= 0; i--) directories[i].Dispose();
-        directories.Clear();
+        for (var i = this.directories.Count - 1; i >= 0; i--)
+            this.directories[i].Dispose();
+        this.directories.Clear();
     }
 
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode,
-        ExactSpelling = true, SetLastError = true)]
-    private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, FileShare shareMode,
-        IntPtr securityAttributes, FileMode creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, FileShare shareMode, IntPtr securityAttributes, FileMode creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
 }

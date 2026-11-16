@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using NoTunes.Apple;
 using NUnit.Framework;
 
@@ -9,7 +8,7 @@ public sealed class AtcClientTests
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(2);
 
     [Test]
-    public async Task StartupPingsTheDeviceAnswersPingsAndReadsMusicMetrics()
+    public async Task Startup_Pings_The_Device_Answers_Pings_And_Reads_Music_Metrics()
     {
         await using var peer = new AtcPeer(
             Plist.Dict(("Command", "Ping"), ("Session", 37L)),
@@ -33,10 +32,9 @@ public sealed class AtcClientTests
 
     [TestCase(false)]
     [TestCase(true)]
-    public async Task ReportsBlockedSyncForDisabledMusicOrProtectedData(bool protectedData)
+    public async Task Reports_Blocked_Sync_For_Disabled_Music_Or_Protected_Data(bool protectedData)
     {
-        await using var peer = new AtcPeer(Permissions(Plist.Dict(("ManualSync", true),
-            ("DataProtected", protectedData), ("DisabledAssetTypes", protectedData ? Array.Empty<object>() : new object[] { "Music" }))));
+        await using var peer = new AtcPeer(Permissions(Plist.Dict(("ManualSync", true), ("DataProtected", protectedData), ("DisabledAssetTypes", protectedData ? Array.Empty<object>() : new object[] { "Music" }))));
         await using var client = new AtcClient(peer, RequestTimeout);
         var status = await client.ReadSyncStatusAsync(CancellationToken.None);
         Assert.That(status.SyncAllowed, Is.False);
@@ -46,7 +44,7 @@ public sealed class AtcClientTests
     }
 
     [Test]
-    public async Task RetainsLatestValidMetricsAcrossPartialUpdates()
+    public async Task Retains_Latest_Valid_Metrics_Across_Partial_Updates()
     {
         await using var peer = new AtcPeer(
             MusicMetrics(Plist.Dict(("_Count", 42L), ("_PhysicalSize", 1000L))),
@@ -60,7 +58,7 @@ public sealed class AtcClientTests
     }
 
     [Test]
-    public async Task MissingMetricsAndWronglyTypedOptionalMetricsRemainUnknown()
+    public async Task Missing_Metrics_And_Wrongly_Typed_Optional_Metrics_Remain_Unknown()
     {
         await using var peer = new AtcPeer(
             Plist.Dict(("Command", "AssetMetrics")),
@@ -76,34 +74,31 @@ public sealed class AtcClientTests
 
     [TestCase("SyncFailed")]
     [TestCase("ConnectionInvalid")]
-    public async Task ServiceFailuresStopStartupImmediately(string command)
+    public async Task Service_Failures_Stop_Startup_Immediately(string command)
     {
         await using var peer = new AtcPeer(Plist.Dict(("Command", command)), Permissions());
         await using var client = new AtcClient(peer, RequestTimeout);
-        await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None),
-            Throws.TypeOf<IOException>().With.Message.Contains(command));
+        await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None), Throws.TypeOf<IOException>().With.Message.Contains(command));
         Assert.That(peer.ResponsesRead, Is.EqualTo(1));
     }
 
     [TestCase("UnrelatedStartupMessage")]
     [TestCase("Ping")]
-    public async Task StartupLimitBoundsUnsolicitedMessagesIncludingPings(string command)
+    public async Task Startup_Limit_Bounds_Unsolicited_Messages_Including_Pings(string command)
     {
         var startup = Plist.Dict(("Command", command), ("Session", 37L));
         var messages = Enumerable.Repeat(startup, 24).Append(Permissions()).ToArray();
         await using var peer = new AtcPeer(messages);
         await using var client = new AtcClient(peer, RequestTimeout);
-        await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None),
-            Throws.TypeOf<IOException>().With.Message.Contains("startup message limit"));
+        await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None), Throws.TypeOf<IOException>().With.Message.Contains("startup message limit"));
         Assert.That(peer.ResponsesRead, Is.EqualTo(24));
         Assert.That(peer.SentMessages(), Has.Count.EqualTo(command == "Ping" ? 25 : 1));
     }
 
     [Test]
-    public async Task AcceptsPermissionsOnTheLastAllowedStartupFrame()
+    public async Task Accepts_Permissions_On_The_Last_Allowed_Startup_Frame()
     {
-        var messages = Enumerable.Repeat(Plist.Dict(("Command", "UnrelatedStartupMessage")), 23)
-            .Append(Permissions()).ToArray();
+        var messages = Enumerable.Repeat(Plist.Dict(("Command", "UnrelatedStartupMessage")), 23).Append(Permissions()).ToArray();
         await using var peer = new AtcPeer(messages);
         await using var client = new AtcClient(peer, RequestTimeout);
         Assert.That((await client.ReadSyncStatusAsync(CancellationToken.None)).SyncAllowed, Is.True);
@@ -111,131 +106,77 @@ public sealed class AtcClientTests
     }
 
     [TestCaseSource(nameof(MalformedMessages))]
-    public async Task RejectsMalformedStartupMessages(Dictionary<string, object> message)
+    public async Task Rejects_Malformed_Startup_Messages(Dictionary<string, object> message)
     {
         await using var peer = new AtcPeer(message);
         await using var client = new AtcClient(peer, RequestTimeout);
-        await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None),
-            Throws.TypeOf<InvalidDataException>());
+        await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None), Throws.TypeOf<InvalidDataException>());
     }
 
     private static IEnumerable<TestCaseData> MalformedMessages()
     {
-        yield return new TestCaseData(Plist.Dict()).SetName("RejectsMissingAtcCommand");
-        yield return new TestCaseData(Plist.Dict(("Command", 1L))).SetName("RejectsNonStringAtcCommand");
-        yield return new TestCaseData(Plist.Dict(("Command", "Ping"))).SetName("RejectsPingWithoutSession");
-        yield return new TestCaseData(Plist.Dict(("Command", "Ping"), ("Session", "invalid"))).SetName("RejectsPingWithInvalidSession");
-        yield return new TestCaseData(Plist.Dict(("Command", "SyncAllowed"))).SetName("RejectsMissingSyncPermissions");
-        yield return new TestCaseData(Plist.Dict(("Command", "SyncAllowed"), ("Params", "invalid"))).SetName("RejectsNonDictionarySyncPermissions");
-        yield return new TestCaseData(Permissions(Plist.Dict(("ManualSync", true), ("DataProtected", "true")))).SetName("RejectsInvalidProtectionFlagOnTheWire");
-        yield return new TestCaseData(Permissions(Plist.Dict(("ManualSync", true), ("DisabledAssetTypes", "Music")))).SetName("RejectsInvalidDisabledAssetsOnTheWire");
-        yield return new TestCaseData(Plist.Dict(("Command", "AssetMetrics"), ("Params", "invalid"))).SetName("RejectsNonDictionaryMetrics");
+        yield return new TestCaseData(Plist.Dict()).SetName("Rejects_Missing_Atc_Command");
+        yield return new TestCaseData(Plist.Dict(("Command", 1L))).SetName("Rejects_Non_String_Atc_Command");
+        yield return new TestCaseData(Plist.Dict(("Command", "Ping"))).SetName("Rejects_Ping_Without_Session");
+        yield return new TestCaseData(Plist.Dict(("Command", "Ping"), ("Session", "invalid"))).SetName("Rejects_Ping_With_Invalid_Session");
+        yield return new TestCaseData(Plist.Dict(("Command", "SyncAllowed"))).SetName("Rejects_Missing_Sync_Permissions");
+        yield return new TestCaseData(Plist.Dict(("Command", "SyncAllowed"), ("Params", "invalid"))).SetName("Rejects_Non_Dictionary_Sync_Permissions");
+        yield return new TestCaseData(Permissions(Plist.Dict(("ManualSync", true), ("DataProtected", "true")))).SetName("Rejects_Invalid_Protection_Flag_On_The_Wire");
+        yield return new TestCaseData(Permissions(Plist.Dict(("ManualSync", true), ("DisabledAssetTypes", "Music")))).SetName("Rejects_Invalid_Disabled_Assets_On_The_Wire");
+        yield return new TestCaseData(Plist.Dict(("Command", "AssetMetrics"), ("Params", "invalid"))).SetName("Rejects_Non_Dictionary_Metrics");
     }
 
     [Test]
-    public async Task ReceiveTimeoutIsAnIoErrorAndClosesTheStream()
+    public async Task Receive_Timeout_Is_An_Io_Error_And_Closes_The_Stream()
     {
-        await using var peer = new AtcPeer { StallAtEnd = true };
+        await using var peer = new AtcPeer
+        {
+            StallAtEnd = true
+        };
         await using var client = new AtcClient(peer, TimeSpan.FromMilliseconds(100));
-        await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None),
-            Throws.TypeOf<IOException>().With.Message.Contains("Timed out"));
+        await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None), Throws.TypeOf<IOException>().With.Message.Contains("Timed out"));
         Assert.That(peer.WasDisposed, Is.True);
     }
 
     [Test]
-    public async Task CallerCancellationDuringReceiveIsPreservedAndClosesTheStream()
+    public async Task Caller_Cancellation_During_Receive_Is_Preserved_And_Closes_The_Stream()
     {
         using var cancellation = new CancellationTokenSource();
-        await using var peer = new AtcPeer { StallAtEnd = true, BeforeRead = cancellation.Cancel };
+        await using var peer = new AtcPeer
+        {
+            StallAtEnd = true,
+            BeforeRead = cancellation.Cancel
+        };
         await using var client = new AtcClient(peer, RequestTimeout);
-        await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(cancellation.Token),
-            Throws.InstanceOf<OperationCanceledException>());
+        await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(cancellation.Token), Throws.InstanceOf<OperationCanceledException>());
         Assert.That(cancellation.IsCancellationRequested, Is.True);
         Assert.That(peer.WasDisposed, Is.True);
     }
 
     [TestCase(false)]
     [TestCase(true)]
-    public async Task DisposingTheClientClosesItsStreamAfterSuccessOrFailure(bool fail)
+    public async Task Disposing_The_Client_Closes_Its_Stream_After_Success_Or_Failure(bool fail)
     {
         await using var peer = new AtcPeer(fail ? Plist.Dict(("Command", "SyncFailed")) : Permissions());
         await using (var client = new AtcClient(peer, RequestTimeout))
         {
-            if (fail) await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None), Throws.TypeOf<IOException>());
-            else await client.ReadSyncStatusAsync(CancellationToken.None);
+            if (fail)
+                await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None), Throws.TypeOf<IOException>());
+            else
+                await client.ReadSyncStatusAsync(CancellationToken.None);
             Assert.That(peer.WasDisposed, Is.False);
         }
+
         Assert.That(peer.WasDisposed, Is.True);
     }
 
-    private static Dictionary<string, object> Permissions(Dictionary<string, object>? parameters = null) =>
-        Plist.Dict(("Command", "SyncAllowed"), ("Params", parameters ?? Plist.Dict(("ManualSync", true))));
-
-    private static Dictionary<string, object> MusicMetrics(Dictionary<string, object> values) =>
-        Plist.Dict(("Command", "AssetMetrics"), ("Params", Plist.Dict(("Media", Plist.Dict(("Music", values))))));
-
-    private sealed class AtcPeer : Stream
+    private static Dictionary<string, object> Permissions(Dictionary<string, object>? parameters = null)
     {
-        private readonly MemoryStream incoming = new();
-        private readonly MemoryStream written = new();
-        private readonly List<long> frameEnds = [];
-        public bool StallAtEnd { get; init; }
-        public Action? BeforeRead { get; init; }
-        public bool WasDisposed { get; private set; }
-        public int ResponsesRead => frameEnds.Count(end => end <= incoming.Position);
+        return Plist.Dict(("Command", "SyncAllowed"), ("Params", parameters ?? Plist.Dict(("ManualSync", true))));
+    }
 
-        public AtcPeer(params Dictionary<string, object>[] messages)
-        {
-            foreach (var message in messages)
-            {
-                var payload = BinaryPlist.Write(message);
-                var header = new byte[sizeof(int)];
-                BinaryPrimitives.WriteInt32LittleEndian(header, payload.Length);
-                incoming.Write(header);
-                incoming.Write(payload);
-                frameEnds.Add(incoming.Position);
-            }
-            incoming.Position = 0;
-        }
-
-        public List<Dictionary<string, object>> SentMessages()
-        {
-            var bytes = written.ToArray();
-            var messages = new List<Dictionary<string, object>>();
-            for (var offset = 0; offset < bytes.Length;)
-            {
-                var size = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
-                offset += sizeof(int);
-                Assert.That(size, Is.InRange(1, bytes.Length - offset));
-                messages.Add(BinaryPlist.Read(bytes.AsSpan(offset, size).ToArray()).AsDict());
-                offset += size;
-            }
-            return messages;
-        }
-
-        public override bool CanRead => !WasDisposed;
-        public override bool CanWrite => !WasDisposed;
-        public override bool CanSeek => false;
-        public override long Length => throw new NotSupportedException();
-        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
-        public override void Flush() { }
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override int Read(byte[] buffer, int offset, int count) => incoming.Read(buffer, offset, Math.Min(count, 3));
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            BeforeRead?.Invoke();
-            if (StallAtEnd && incoming.Position == incoming.Length) await Task.Delay(Timeout.Infinite, cancellationToken);
-            return await incoming.ReadAsync(buffer[..Math.Min(buffer.Length, 3)], cancellationToken);
-        }
-        public override void Write(byte[] buffer, int offset, int count) => written.Write(buffer, offset, count);
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
-            written.WriteAsync(buffer, cancellationToken);
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) { WasDisposed = true; incoming.Dispose(); written.Dispose(); }
-            base.Dispose(disposing);
-        }
+    private static Dictionary<string, object> MusicMetrics(Dictionary<string, object> values)
+    {
+        return Plist.Dict(("Command", "AssetMetrics"), ("Params", Plist.Dict(("Media", Plist.Dict(("Music", values))))));
     }
 }

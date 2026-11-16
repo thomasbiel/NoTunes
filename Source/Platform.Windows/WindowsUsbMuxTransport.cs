@@ -17,18 +17,24 @@ public sealed class WindowsUsbMuxTransport : IUsbMuxTransport
 
     public async Task<Stream> ConnectAsync(CancellationToken cancellationToken)
     {
-        var socket = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        var socket = new Socket(this.endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
+        {
+            NoDelay = true
+        };
         try
         {
-            await socket.ConnectAsync(endpoint, cancellationToken);
+            await socket.ConnectAsync(this.endpoint, cancellationToken);
             return new NetworkStream(socket, ownsSocket: true);
         }
         catch (SocketException e)
         {
             socket.Dispose();
-            throw new IOException($"Cannot connect to Apple Mobile Device Service ({endpoint}). " +
-                "Install Apple device support, start its service and reconnect the unlocked iPhone over USB.", e);
+            throw new IOException($"Cannot connect to Apple Mobile Device Service ({this.endpoint}). " + "Install Apple device support, start its service and reconnect the unlocked iPhone over USB.", e);
         }
-        catch { socket.Dispose(); throw; }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 }

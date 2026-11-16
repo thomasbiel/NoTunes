@@ -8,11 +8,10 @@ namespace NoTunes.Tests;
 public sealed class CommandTests
 {
     [Test]
-    public void ParsesSyncFolderAndDeviceOptions()
+    public void Parses_Sync_Folder_And_Device_Options()
     {
         using var parser = new Parser(settings => settings.HelpWriter = null);
-        var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>(
-            ["sync", @"D:\Music collection", "--dry-run", "--device", "00008030-0011223344556677", "--timeout", "30", "--json"]);
+        var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>(["sync", @"D:\Music collection", "--dry-run", "--device", "00008030-0011223344556677", "--timeout", "30", "--json"]);
         Assert.That(result, Is.TypeOf<Parsed<object>>());
         var options = (SyncOptions)((Parsed<object>)result).Value;
         Assert.That(options.Folder, Is.EqualTo(@"D:\Music collection"));
@@ -23,7 +22,7 @@ public sealed class CommandTests
     }
 
     [TestCase("unknown")]
-    public void RejectsAnUnknownCommand(string command)
+    public void Rejects_An_Unknown_Command(string command)
     {
         using var parser = new Parser(settings => settings.HelpWriter = null);
         var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>([command]);
@@ -32,7 +31,7 @@ public sealed class CommandTests
 
     [TestCase("scan")]
     [TestCase("sync")]
-    public void AllowsTheSourceFolderToBeReadFromConfiguration(string command)
+    public void Allows_The_Source_Folder_To_Be_Read_From_Configuration(string command)
     {
         using var parser = new Parser(settings => settings.HelpWriter = null);
         var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>([command]);
@@ -42,7 +41,7 @@ public sealed class CommandTests
     }
 
     [Test]
-    public void RefusesToSelectAnArbitraryDevice()
+    public void Refuses_To_Select_An_Arbitrary_Device()
     {
         UsbDevice[] devices = [new(1, "A", 1), new(2, "B", 1)];
         Assert.Throws<IOException>(() => Commands.SelectDevice(devices, null));
@@ -55,7 +54,7 @@ public sealed class CommandTests
     [TestCase("00008030-00AABBCCDDEEFF00", "0000803000aabbccddeeff00")]
     [TestCase("0000803000AABBCCDDEEFF00", "00008030-00aabbccddeeff00")]
     [TestCase("0123456789abcdef0123456789abcdef01234567", "0123456789ABCDEF0123456789ABCDEF01234567")]
-    public void SelectsDevicesUsingNormalizedUdids(string actual, string requested)
+    public void Selects_Devices_Using_Normalized_Udids(string actual, string requested)
     {
         var device = new UsbDevice(1, actual, 1);
         Assert.That(Commands.SelectDevice([device], requested), Is.SameAs(device));

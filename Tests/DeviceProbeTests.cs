@@ -8,11 +8,16 @@ namespace NoTunes.Tests;
 public sealed class DeviceProbeTests
 {
     [Test]
-    public void ProbeResultPreservesThePublicJsonContract()
+    public void Probe_Result_Preserves_The_Public_Json_Contract()
     {
         var result = new ProbeResult
         {
-            Device = new DeviceInfo("test-udid", "Test phone", "iPhone12,8", "27.2", "24B119"),
+            Device = new DeviceInfo(
+                "test-udid",
+                "Test phone",
+                "iPhone12,8",
+                "27.2",
+                "24B119"),
             Paired = true,
             AfcAvailable = true,
             MusicDatabasePresent = true,

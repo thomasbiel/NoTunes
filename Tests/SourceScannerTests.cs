@@ -14,21 +14,21 @@ public sealed class SourceScannerTests
     [SetUp]
     public void SetUp()
     {
-        root = Path.Combine(Path.GetTempPath(), "NoTunes-tests-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        this.root = Path.Combine(Path.GetTempPath(), "NoTunes-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(this.root);
         ISourceFileSystem fileSystem = OperatingSystem.IsWindows() ? new WindowsSourceFileSystem() : new LinuxSourceFileSystem();
-        scanner = new SourceScanner(fileSystem);
+        this.scanner = new SourceScanner(fileSystem);
     }
 
     [Test]
-    public async Task ScansNestedMixedCaseMp3FilesAndIgnoresOtherExtensions()
+    public async Task Scans_Nested_Mixed_Case_Mp3_Files_And_Ignores_Other_Extensions()
     {
-        Directory.CreateDirectory(Path.Combine(root, "Album"));
-        await File.WriteAllTextAsync(Path.Combine(root, "one.mp3"), "abc");
-        await File.WriteAllBytesAsync(Path.Combine(root, "Album", "two.MP3"), [0, 1, 2]);
-        await File.WriteAllTextAsync(Path.Combine(root, "cover.jpg"), "not music");
-        await File.WriteAllTextAsync(Path.Combine(root, "fake.mp3.txt"), "not music");
-        var library = await scanner.ScanAsync(root, CancellationToken.None);
+        Directory.CreateDirectory(Path.Combine(this.root, "Album"));
+        await File.WriteAllTextAsync(Path.Combine(this.root, "one.mp3"), "abc");
+        await File.WriteAllBytesAsync(Path.Combine(this.root, "Album", "two.MP3"), [0, 1, 2]);
+        await File.WriteAllTextAsync(Path.Combine(this.root, "cover.jpg"), "not music");
+        await File.WriteAllTextAsync(Path.Combine(this.root, "fake.mp3.txt"), "not music");
+        var library = await this.scanner.ScanAsync(this.root, CancellationToken.None);
         Assert.That(library.Tracks, Has.Count.EqualTo(2));
         Assert.That(library.TotalBytes, Is.EqualTo(6));
         var track = library.Tracks.Single(t => t.RelativePath == "one.mp3");
@@ -37,31 +37,32 @@ public sealed class SourceScannerTests
     }
 
     [Test]
-    public async Task HashesContentChangesBetweenScansEvenWhenSizeAndTimestampStayTheSame()
+    public async Task Hashes_Content_Changes_Between_Scans_Even_When_Size_And_Timestamp_Stay_The_Same()
     {
-        var file = Path.Combine(root, "track.mp3");
+        var file = Path.Combine(this.root, "track.mp3");
         await File.WriteAllTextAsync(file, "abc");
-        var before = await scanner.ScanAsync(root, CancellationToken.None);
+        var before = await this.scanner.ScanAsync(this.root, CancellationToken.None);
         await File.WriteAllTextAsync(file, "xyz");
         File.SetLastWriteTimeUtc(file, before.Tracks[0].LastWriteTimeUtc);
-        var after = await scanner.ScanAsync(root, CancellationToken.None);
+        var after = await this.scanner.ScanAsync(this.root, CancellationToken.None);
         Assert.That(before.Tracks[0].Sha256, Is.Not.EqualTo(after.Tracks[0].Sha256));
     }
 
     [TestCase(true)]
     [TestCase(false)]
-    public async Task RejectsFilesChangedDuringHashing(bool changeLength)
+    public async Task Rejects_Files_Changed_During_Hashing(bool changeLength)
     {
-        var file = Path.Combine(root, "track.mp3");
+        var file = Path.Combine(this.root, "track.mp3");
         await File.WriteAllTextAsync(file, "abc");
         var originalWriteTime = File.GetLastWriteTimeUtc(file);
-        var fileSystem = new MutatingFileSystem(file, () =>
+        var fileSystem = new MutatingSourceFileSystem(file, () =>
         {
             if (changeLength)
             {
                 File.AppendAllText(file, "d");
                 File.SetLastWriteTimeUtc(file, originalWriteTime);
             }
+
             else
             {
                 File.WriteAllText(file, "xyz");
@@ -69,72 +70,72 @@ public sealed class SourceScannerTests
             }
         });
         var concurrentScanner = new SourceScanner(fileSystem);
-        await Assert.ThatAsync(async () => await concurrentScanner.ScanAsync(root, CancellationToken.None),
-            Throws.TypeOf<IOException>().With.Message.StartsWith("File changed during the scan:"));
+        await Assert.ThatAsync(async () => await concurrentScanner.ScanAsync(this.root, CancellationToken.None), Throws.TypeOf<IOException>().With.Message.StartsWith("File changed during the scan:"));
         Assert.That(fileSystem.Session.OpenedStream?.MutationPerformed, Is.True);
         Assert.That(fileSystem.Session.Disposed, Is.True);
     }
 
     [Test]
-    public void MissingSourceNeverBecomesAnEmptyInventory() =>
-        Assert.ThrowsAsync<DirectoryNotFoundException>(() =>
-            scanner.ScanAsync(Path.Combine(root, "missing"), CancellationToken.None));
+    public void Missing_Source_Never_Becomes_An_Empty_Inventory()
+    {
+        Assert.ThrowsAsync<DirectoryNotFoundException>(() => this.scanner.ScanAsync(Path.Combine(this.root, "missing"), CancellationToken.None));
+    }
 
     [Test]
-    public void CancellationStopsBeforeReturningAnInventory()
+    public void Cancellation_Stops_Before_Returning_An_Inventory()
     {
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        Assert.That(async () => await scanner.ScanAsync(root, cancellation.Token), Throws.InstanceOf<OperationCanceledException>());
+        Assert.That(async () => await this.scanner.ScanAsync(this.root, cancellation.Token), Throws.InstanceOf<OperationCanceledException>());
     }
 
     [Test]
-    public async Task LockedSourceFileStopsTheScan()
+    public async Task Locked_Source_File_Stops_The_Scan()
     {
-        var file = Path.Combine(root, "track.mp3");
+        var file = Path.Combine(this.root, "track.mp3");
         await File.WriteAllTextAsync(file, "abc");
-        using var exclusive = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        Assert.ThrowsAsync<IOException>(() => scanner.ScanAsync(root, CancellationToken.None));
+        using var exclusive = new FileStream(
+            file,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None);
+        Assert.ThrowsAsync<IOException>(() => this.scanner.ScanAsync(this.root, CancellationToken.None));
+    }
+
+    [Test]
+    public async Task Scans_Wide_Libraries_Within_A_Directory_Handle_Budget()
+    {
+        for (var i = 0; i < 128; i++)
+        {
+            var album = Directory.CreateDirectory(Path.Combine(this.root, $"album-{i}"));
+            await File.WriteAllTextAsync(Path.Combine(album.FullName, "track.mp3"), "abc");
+        }
+
+        var fileSystem = new BudgetSourceFileSystem();
+        var result = await new SourceScanner(fileSystem).ScanAsync(this.root, CancellationToken.None);
+        Assert.That(result.Tracks, Has.Count.EqualTo(128));
+        Assert.That(fileSystem.Session.MaximumDirectories, Is.LessThanOrEqualTo(2));
+        Assert.That(fileSystem.Session.ActiveEnumerations, Is.Zero);
+        Assert.That(fileSystem.Session.Disposed, Is.True);
+    }
+
+    [Test]
+    public async Task Disposes_Active_Directory_Enumerators_After_A_Read_Failure()
+    {
+        var album = Directory.CreateDirectory(Path.Combine(this.root, "album"));
+        await File.WriteAllTextAsync(Path.Combine(album.FullName, "track.mp3"), "abc");
+        var fileSystem = new BudgetSourceFileSystem
+        {
+            FailRead = true
+        };
+        Assert.ThrowsAsync<IOException>(() => new SourceScanner(fileSystem).ScanAsync(this.root, CancellationToken.None));
+        Assert.That(fileSystem.Session.ActiveEnumerations, Is.Zero);
+        Assert.That(fileSystem.Session.Disposed, Is.True);
     }
 
     [TearDown]
-    public void TearDown() => Directory.Delete(root, recursive: true);
-
-    private sealed class MutatingFileSystem(string file, Action mutate) : ISourceFileSystem
+    public void TearDown()
     {
-        public MutatingSession Session { get; } = new(file, mutate);
-        public ISourceSession OpenSource(DirectoryInfo directory, CancellationToken cancellationToken) => Session;
-    }
-
-    private sealed class MutatingSession(string file, Action mutate) : ISourceSession
-    {
-        public MutatingFileStream? OpenedStream { get; private set; }
-        public bool Disposed { get; private set; }
-        public IEnumerable<SourceEntry> EnumerateDirectory(DirectoryInfo directory) =>
-            [new(Path.GetFileName(file), FileAttributes.Normal)];
-        public void AddDirectory(DirectoryInfo directory) => throw new NotSupportedException();
-        public FileStream OpenRead(FileInfo info) => OpenedStream = new MutatingFileStream(file, mutate);
-        public void Dispose() => Disposed = true;
-    }
-
-    private sealed class MutatingFileStream(string file, Action mutate)
-        : FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1, FileOptions.Asynchronous)
-    {
-        public bool MutationPerformed { get; private set; }
-
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            var read = await RandomAccess.ReadAsync(SafeFileHandle, buffer[..Math.Min(buffer.Length, 1)], Position, cancellationToken);
-            Position += read;
-            if (read > 0 && !MutationPerformed)
-            {
-                MutationPerformed = true;
-                mutate();
-            }
-            return read;
-        }
-
-        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
-            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        Directory.Delete(this.root, recursive: true);
     }
 }

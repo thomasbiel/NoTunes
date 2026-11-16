@@ -23,11 +23,11 @@ stay in memory; no Windows key containers or trusted certificates are installed.
 
 ## Source configuration
 
-The application project is `Source/NoTunes.csproj`; the NUnit project is
-`Tests/NoTunes.Tests.csproj`. The application, core, platform projects and tests
+The application project is `Source/NoTunes/NoTunes.csproj`; the NUnit project is
+`Tests/NoTunes.Tests.csproj`. The combined application, platform projects and tests
 are included in `NoTunes.slnx`.
 
-The default source is set in `Source/app.config`:
+The default source is set in `Source/NoTunes/app.config`:
 
 ```xml
 <configuration>
@@ -48,8 +48,7 @@ and use their local mount path. Windows UNC paths are not mapped automatically.
 
 | Project | Responsibility |
 | --- | --- |
-| `Source/NoTunes.csproj` | CLI entry point and DI composition in `ApplicationServices`. |
-| `Source/Core/NoTunes.Core.csproj` | Commands, source inventory and shared Apple protocols. References platform contracts only. |
+| `Source/NoTunes/NoTunes.csproj` | CLI entry point, DI composition, commands, source inventory and shared Apple protocols. |
 | `Source/Platform.Abstractions/NoTunes.Platform.Abstractions.csproj` | `IUsbMuxTransport`, `ISourceFileSystem` and per-scan `ISourceSession` contracts. |
 | `Source/Platform.Windows/NoTunes.Platform.Windows.csproj` | Apple Mobile Device Service TCP transport and Windows file-handle protection. |
 | `Source/Platform.Linux/NoTunes.Platform.Linux.csproj` | usbmuxd Unix-socket transport and Linux descriptor-relative file access. |
@@ -57,9 +56,14 @@ and use their local mount path. Windows UNC paths are not mapped automatically.
 All projects target `net10.0`. The CLI registers the current platform using
 `Microsoft.Extensions.DependencyInjection` and resolves `Commands` and
 `SourceScanner` through constructor injection. Platform providers are singletons;
-each scan owns and disposes its own source session. The core contains no operating
-system checks, native imports or references to either platform implementation.
+each scan owns and disposes its own source session. Commands, source scanning and
+Apple protocols share the application assembly; platform selection stays in
+`ApplicationServices`, and native implementations stay in the platform projects.
 Unsupported operating systems produce a clear error at the composition boundary.
+
+Each project has its own directory; no project directory contains another project.
+The three platform projects are grouped under the `Platform` solution folder.
+The application uses the SDK's default item discovery within `Source/NoTunes`.
 
 Within the core, `DeviceProbe` coordinates pairing, device validation, file-service
 checks and optional catalogue capture. `AtcClient` owns ATC startup, Ping/Pong,
@@ -71,18 +75,18 @@ the message limit, malformed responses, timeout, cancellation and stream disposa
 ## Commands
 
 ```powershell
-dotnet run --project Source/NoTunes.csproj -- --help
-dotnet run --project Source/NoTunes.csproj -- devices
-dotnet run --project Source/NoTunes.csproj -- probe
-dotnet run --project Source/NoTunes.csproj -- probe --read-catalog --json
-dotnet run --project Source/NoTunes.csproj -- probe --device 00008030-0011223344556677 --timeout 30 --json
-dotnet run --project Source/NoTunes.csproj -- scan
-dotnet run --project Source/NoTunes.csproj -- scan "D:\Music"
-dotnet run --project Source/NoTunes.csproj -- scan "D:\Music" --json
+dotnet run --project Source/NoTunes/NoTunes.csproj -- --help
+dotnet run --project Source/NoTunes/NoTunes.csproj -- devices
+dotnet run --project Source/NoTunes/NoTunes.csproj -- probe
+dotnet run --project Source/NoTunes/NoTunes.csproj -- probe --read-catalog --json
+dotnet run --project Source/NoTunes/NoTunes.csproj -- probe --device 00008030-0011223344556677 --timeout 30 --json
+dotnet run --project Source/NoTunes/NoTunes.csproj -- scan
+dotnet run --project Source/NoTunes/NoTunes.csproj -- scan "D:\Music"
+dotnet run --project Source/NoTunes/NoTunes.csproj -- scan "D:\Music" --json
 ```
 
 After building, the equivalent executable is
-`Source\bin\Debug\net10.0\NoTunes.exe`.
+`Source\NoTunes\bin\Debug\net10.0\NoTunes.exe`.
 
 - `devices` lists USB devices through Apple's local USB multiplexer; network
   devices are excluded. It does not require a music library.
@@ -120,7 +124,7 @@ running on Windows. The application connects to the service at
 not used. Installation of device support and the initial trust relationship can
 be handled by Apple's Windows device software.
 
-### Linux (implemented, not tested on real systems)
+### Linux (automated tests passed; physical-device validation pending)
 
 Install and start [usbmuxd](https://github.com/libimobiledevice/usbmuxd) using your
 distribution's packages. NoTunes connects to its Unix socket at
@@ -136,25 +140,31 @@ that supports the requested metadata and advisory file locks. It opens each path
 component without following symbolic links and rejects non-regular MP3 entries.
 Linux file locks are advisory; directory descriptors preserve the selected
 directory identity instead of preventing directory renames.
+The scanner traverses directories depth first and releases completed Linux
+directory descriptors, so descriptor usage grows with nesting depth rather than
+the total number of album folders.
 
 ```bash
-dotnet run --project Source/NoTunes.csproj -- devices
-dotnet run --project Source/NoTunes.csproj -- scan /mnt/music --json
-dotnet run --project Source/NoTunes.csproj -- probe --read-catalog --json
+dotnet run --project Source/NoTunes/NoTunes.csproj -- devices
+dotnet run --project Source/NoTunes/NoTunes.csproj -- scan /mnt/music --json
+dotnet run --project Source/NoTunes/NoTunes.csproj -- probe --read-catalog --json
 ```
 
-**No real tests have been performed on Linux, with a real usbmuxd daemon or with
-an iPhone connected through Linux.** Validation so far consists of Windows tests,
-including a simulated usbmuxd peer over local Unix sockets and DI registration
-tests. Linux-native filesystem regression tests are included but have not been
-run; the Windows test runner skips them. Linux support remains unverified until
-those tests and real-device checks are performed.
+Automated tests have passed on Windows and in an x64 Linux Docker container with
+.NET 10. This includes native Linux filesystem regressions for symlink rejection,
+directory renames and bounded descriptor usage, as well as a simulated usbmuxd
+peer over local Unix sockets and DI registration tests.
+
+**Linux support has not been tested with a real usbmuxd daemon or an iPhone
+connected over USB.** ARM64 execution is also unverified. Container tests do not
+validate physical USB connectivity or replace real-device checks.
 
 ### Pairing and previous device validation
 
 Connect the iPhone over USB, unlock it and trust the computer. The prototype
 uses the existing pairing record; it does not create or replace pairings.
-TLS verifies the device certificate against that record. Pairing certificates
+The lockdown session requires TLS and verifies the device certificate against
+that record before allowing service access. Pairing certificates
 and private keys are never included in diagnostic output or JSON.
 
 The target is iOS 27. Before the platform separation, the Windows read-only probe,
