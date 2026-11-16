@@ -1,5 +1,6 @@
 using System.Text;
 using NoTunes.Apple;
+using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Operators;
@@ -32,6 +33,29 @@ internal sealed class TlsTestCredentials
     public Dictionary<string, object> Record()
     {
         return Plist.Dict(("RootCertificate", Encoding.UTF8.GetBytes(Pem(this.RootCertificate))), ("RootPrivateKey", Encoding.UTF8.GetBytes(Pem(this.RootKeys.Private))), ("DeviceCertificate", Encoding.UTF8.GetBytes(Pem(this.DeviceCertificate))));
+    }
+
+    public Dictionary<string, object> RecordWithEmptyIssuers()
+    {
+        var record = this.Record();
+        record["RootCertificate"] = WithEmptyIssuer(this.RootCertificate, this.RootKeys.Private);
+        record["DeviceCertificate"] = WithEmptyIssuer(this.DeviceCertificate, this.RootKeys.Private);
+        return record;
+    }
+
+    private static byte[] WithEmptyIssuer(X509Certificate certificate, AsymmetricKeyParameter issuerKey)
+    {
+        var original = Asn1Sequence.GetInstance(certificate.GetEncoded());
+        var tbs = Asn1Sequence.GetInstance(original[0]);
+        var fields = new Asn1Encodable[tbs.Count];
+        for (var index = 0; index < fields.Length; index++) fields[index] = tbs[index];
+        var issuerIndex = fields[0] is Asn1TaggedObject ? 3 : 2;
+        fields[issuerIndex] = new DerSequence();
+        var encodedTbs = new DerSequence(fields).GetEncoded();
+        var signer = SignerUtilities.GetSigner("SHA256WITHRSA");
+        signer.Init(true, issuerKey);
+        signer.BlockUpdate(encodedTbs, 0, encodedTbs.Length);
+        return new DerSequence(Asn1Object.FromByteArray(encodedTbs), original[1], new DerBitString(signer.GenerateSignature())).GetEncoded();
     }
 
     private static AsymmetricCipherKeyPair GenerateKey()

@@ -1,9 +1,8 @@
 using Org.BouncyCastle.Tls;
-using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 
 namespace NoTunes.Apple;
 
-internal sealed class PairedTlsClient(PairingIdentity identity) : DefaultTlsClient(new BcTlsCrypto())
+internal sealed class PairedTlsClient(PairingIdentity identity) : DefaultTlsClient(new PairedTlsCrypto(identity))
 {
     protected override ProtocolVersion[] GetSupportedVersions() => [ProtocolVersion.TLSv12];
 

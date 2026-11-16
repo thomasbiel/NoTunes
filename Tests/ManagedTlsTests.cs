@@ -121,6 +121,84 @@ public sealed class ManagedTlsTests
         Assert.That(() => PairingIdentity.FromRecord(record), Throws.TypeOf<InvalidDataException>());
     }
 
+    [TestCase("RootCertificate")]
+    [TestCase("DeviceCertificate")]
+    public void Accepts_Empty_Issuer_Pairing_Certificates_Without_Changing_Their_Bytes(string field)
+    {
+        var record = Keys.Value.Record();
+        var encoded = (byte[])Keys.Value.RecordWithEmptyIssuers()[field];
+        record[field] = encoded;
+        var identity = PairingIdentity.FromRecord(record);
+        var actual = StringComparer.Ordinal.Equals(field, "RootCertificate")
+            ? identity.ClientCertificate : identity.DeviceCertificate;
+        Assert.That(actual, Is.EqualTo(encoded));
+    }
+
+    [Test]
+    public void Preserves_The_Original_Encoding_Of_Known_Empty_Issuer_Tls_Certificates()
+    {
+        var record = Keys.Value.RecordWithEmptyIssuers();
+        var identity = PairingIdentity.FromRecord(record);
+        var crypto = new PairedTlsCrypto(identity);
+        var certificate = crypto.CreateCertificate(identity.DeviceCertificate);
+        Assert.That(certificate.GetEncoded(), Is.EqualTo((byte[])record["DeviceCertificate"]));
+    }
+
+    [Test]
+    public void Rejects_Unknown_Empty_Issuer_Tls_Certificates()
+    {
+        var crypto = new PairedTlsCrypto(Keys.Value.Identity);
+        var encoded = (byte[])Keys.Value.RecordWithEmptyIssuers()["DeviceCertificate"];
+        Assert.That(() => crypto.CreateCertificate(encoded), Throws.InstanceOf<IOException>());
+    }
+
+    [Test]
+    public async Task Authenticates_Empty_Issuer_Pairing_Certificates_Over_Tls()
+    {
+        var credentials = Keys.Value;
+        var record = credentials.RecordWithEmptyIssuers();
+        var identity = PairingIdentity.FromRecord(record);
+        var server = new PairedTlsServer(credentials, record);
+        byte[] payload = [1, 2, 3];
+        await WithPeer(server, payload, async raw =>
+        {
+            await using var tls = await ManagedTlsStream.ConnectAsync(
+                raw,
+                identity,
+                TimeSpan.FromSeconds(5),
+                CancellationToken.None);
+            await tls.WriteAsync(payload);
+            var echoed = new byte[payload.Length];
+            await tls.ReadExactlyAsync(echoed);
+            Assert.That(echoed, Is.EqualTo(payload));
+        });
+        Assert.That(server.AuthenticatedClient, Is.True);
+    }
+
+    [Test]
+    public async Task Rejects_A_Different_Empty_Issuer_Certificate_With_The_Same_Public_Key()
+    {
+        var credentials = Keys.Value;
+        var record = credentials.RecordWithEmptyIssuers();
+        var wrongRecord = new Dictionary<string, object>(record);
+        var changed = ((byte[])record["DeviceCertificate"]).ToArray();
+        changed[^1] ^= 1;
+        wrongRecord["DeviceCertificate"] = changed;
+        var identity = PairingIdentity.FromRecord(wrongRecord);
+        await WithPeer(
+            new PairedTlsServer(credentials, record),
+            [],
+            async raw =>
+            {
+                await Assert.ThatAsync(async () => await ManagedTlsStream.ConnectAsync(
+                    raw,
+                    identity,
+                    TimeSpan.FromSeconds(5),
+                    CancellationToken.None), Throws.InstanceOf<IOException>().Or.InstanceOf<AuthenticationException>());
+            },
+            expectHandshakeFailure: true);
+    }
+
     [TestCase(null)]
     [TestCase(false)]
     [TestCase("true")]

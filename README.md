@@ -167,11 +167,20 @@ The lockdown session requires TLS and verifies the device certificate against
 that record before allowing service access. Pairing certificates
 and private keys are never included in diagnostic output or JSON.
 
-The target is iOS 27. Before the platform separation, the Windows read-only probe,
-pairing, TLS, AFC, ATC startup and
-verified catalogue capture were tested successfully on an iPhone SE (2nd
-generation, `iPhone12,8`) running iOS 27.2 (24B119), with 1,885 tracks in its
-library. This verifies the transport and read path, not music transfers.
+The target is iOS 27. On 16 November 2026, the merged Windows application was
+tested successfully on an iPhone SE (2nd generation, `iPhone12,8`) running
+iOS 27.2.1 (24B156), with 1,885 tracks. USB discovery, pairing, pinned TLS, AFC,
+ATC startup and two matching catalogue captures passed. The database contained
+16,486,400 bytes and its WAL contained 4,115,912 bytes. No music was transferred
+or deleted; this validates the transport and read path.
+
+Apple pairing certificates may have an empty issuer name. BouncyCastle 2.7
+[rejects that form during ordinary X.509 parsing](https://github.com/bcgit/bc-csharp/blob/release-2.7.0/crypto/src/asn1/x509/TBSCertificateStructure.cs).
+NoTunes uses a compatibility
+view only for certificates already present in the saved pairing record; TLS
+transmission and exact certificate pinning retain the original DER bytes.
+ASN.1 depth limits remain enabled. Regression tests cover empty issuers, TLS
+authentication, unchanged certificate bytes and rejection of mismatched pins.
 
 ## Remaining work
 
