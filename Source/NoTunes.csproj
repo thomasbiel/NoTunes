@@ -8,12 +8,16 @@
         <Version>0.1.0</Version>
         <Description>Native CLI for mirroring MP3 files to an iPhone music library.</Description>
         <AppConfig>app.config</AppConfig>
+        <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="CommandLineParser" Version="2.9.1" />
-        <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
-        <PackageReference Include="System.Configuration.ConfigurationManager" Version="10.0.13" />
+        <Compile Include="Program.cs" />
+        <Compile Include="ApplicationServices.cs" />
+        <ProjectReference Include="Core/NoTunes.Core.csproj" />
+        <ProjectReference Include="Platform.Windows/NoTunes.Platform.Windows.csproj" />
+        <ProjectReference Include="Platform.Linux/NoTunes.Platform.Linux.csproj" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
     </ItemGroup>
 
 </Project>

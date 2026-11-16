@@ -7,16 +7,34 @@ namespace NoTunes.Apple;
 // Read-only AFC primitives. In particular, this class cannot overwrite the phone's database.
 public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposable
 {
+    private const ulong ReadOnlyOpenMode = 1;
+    private const int HeaderBytes = 5 * sizeof(ulong);
+    private const int TotalLengthOffset = sizeof(ulong);
+    private const int ThisLengthOffset = 2 * sizeof(ulong);
+    private const int SequenceOffset = 3 * sizeof(ulong);
+    private const int OperationOffset = 4 * sizeof(ulong);
+    private const int MaxReadChunkBytes = 1024 * 1024;
+    private const string RegularFileType = "S_IFREG";
+    private static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(3);
+    private static ReadOnlySpan<byte> Magic => "CFA6LPAA"u8;
+
+    private static class Keys
+    {
+        public const string FileType = "st_ifmt";
+        public const string FileSize = "st_size";
+        public const string AccessTime = "st_atime";
+    }
+
     private ulong sequence;
     private bool broken;
 
     public async Task<IReadOnlyDictionary<string, string>> GetDeviceInfoAsync(CancellationToken cancellationToken) =>
-        ParseFields(await RequestAsync(11, [], cancellationToken));
+        ParseFields(await RequestAsync(AfcOperation.GetDeviceInfo, [], cancellationToken));
 
     public async Task<IReadOnlyDictionary<string, string>?> GetFileInfoAsync(string path, CancellationToken cancellationToken)
     {
-        try { return ParseFields(await RequestAsync(10, Encoding.UTF8.GetBytes(path + '\0'), cancellationToken)); }
-        catch (AfcException e) when (e.Code == 8) { return null; }
+        try { return ParseFields(await RequestAsync(AfcOperation.GetFileInfo, Encoding.UTF8.GetBytes(path + '\0'), cancellationToken)); }
+        catch (AfcException e) when (e.Code == (ulong)AfcStatusCode.ObjectNotFound) { return null; }
     }
 
     public async Task<byte[]> ReadFileAsync(string path, int maxBytes, CancellationToken cancellationToken)
@@ -24,15 +42,15 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         if (maxBytes < 0) throw new ArgumentOutOfRangeException(nameof(maxBytes));
         var before = await GetFileInfoAsync(path, cancellationToken)
             ?? throw new FileNotFoundException($"iPhone file not found: {path}");
-        if (before.GetValueOrDefault("st_ifmt") != "S_IFREG"
-            || !long.TryParse(before.GetValueOrDefault("st_size"), NumberStyles.None,
+        if (before.GetValueOrDefault(Keys.FileType) != RegularFileType
+            || !long.TryParse(before.GetValueOrDefault(Keys.FileSize), NumberStyles.None,
                 CultureInfo.InvariantCulture, out var size) || size < 0 || size > maxBytes)
             throw new IOException($"iPhone file is not a regular file within the {maxBytes}-byte read limit: {path}");
-        var open = new byte[8 + Encoding.UTF8.GetByteCount(path) + 1];
-        BinaryPrimitives.WriteUInt64LittleEndian(open, 1); // AFC_FOPEN_RDONLY
-        Encoding.UTF8.GetBytes(path).CopyTo(open, 8);
-        var opened = await RequestAsync(13, open, cancellationToken, expectedOperation: 14);
-        if (opened.Length != 8) throw new InvalidDataException("Invalid AFC file handle.");
+        var open = new byte[sizeof(ulong) + Encoding.UTF8.GetByteCount(path) + 1];
+        BinaryPrimitives.WriteUInt64LittleEndian(open, ReadOnlyOpenMode);
+        Encoding.UTF8.GetBytes(path).CopyTo(open, sizeof(ulong));
+        var opened = await RequestAsync(AfcOperation.FileOpen, open, cancellationToken, expectedOperation: AfcOperation.FileOpenResult);
+        if (opened.Length != sizeof(ulong)) throw new InvalidDataException("Invalid AFC file handle.");
         var handle = BinaryPrimitives.ReadUInt64LittleEndian(opened);
         var success = false;
         byte[] data;
@@ -42,11 +60,11 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
             var offset = 0;
             while (offset < data.Length)
             {
-                var count = Math.Min(1024 * 1024, data.Length - offset);
-                var read = new byte[16];
+                var count = Math.Min(MaxReadChunkBytes, data.Length - offset);
+                var read = new byte[2 * sizeof(ulong)];
                 BinaryPrimitives.WriteUInt64LittleEndian(read, handle);
-                BinaryPrimitives.WriteUInt64LittleEndian(read.AsSpan(8), (ulong)count);
-                var chunk = await RequestAsync(15, read, cancellationToken);
+                BinaryPrimitives.WriteUInt64LittleEndian(read.AsSpan(sizeof(ulong)), (ulong)count);
+                var chunk = await RequestAsync(AfcOperation.FileRead, read, cancellationToken);
                 if (chunk.Length == 0 || chunk.Length > count)
                     throw new InvalidDataException($"Unexpected AFC file read length: {path}");
                 chunk.CopyTo(data, offset);
@@ -59,10 +77,15 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
             // Even a locally cancelled read must not leave a file handle open on a usable connection.
             if (!broken)
             {
-                using var closeDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var close = new byte[8];
+                using var closeDeadline = new CancellationTokenSource(CloseTimeout);
+                var close = new byte[sizeof(ulong)];
                 BinaryPrimitives.WriteUInt64LittleEndian(close, handle);
-                try { await RequestAsync(20, close, closeDeadline.Token, expectedOperation: 1); }
+                try { await RequestAsync(AfcOperation.FileClose, close, closeDeadline.Token, expectedOperation: AfcOperation.Status); }
+                catch (OperationCanceledException e) when (success && closeDeadline.IsCancellationRequested
+                    && !cancellationToken.IsCancellationRequested)
+                {
+                    throw new IOException("Timed out closing the iPhone file.", e);
+                }
                 catch when (!success) { /* Keep the original failure; the close path discards a broken socket. */ }
             }
         }
@@ -75,12 +98,12 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
     {
         if (left is null || right is null) return left is null && right is null;
         // Access times can change because of our own read; all other attributes must remain stable.
-        return left.Where(p => p.Key != "st_atime").OrderBy(p => p.Key, StringComparer.Ordinal)
-            .SequenceEqual(right.Where(p => p.Key != "st_atime").OrderBy(p => p.Key, StringComparer.Ordinal));
+        return left.Where(p => p.Key != Keys.AccessTime).OrderBy(p => p.Key, StringComparer.Ordinal)
+            .SequenceEqual(right.Where(p => p.Key != Keys.AccessTime).OrderBy(p => p.Key, StringComparer.Ordinal));
     }
 
-    private async Task<byte[]> RequestAsync(ulong operation, byte[] body, CancellationToken cancellationToken,
-        ulong expectedOperation = 2)
+    private async Task<byte[]> RequestAsync(AfcOperation operation, byte[] body, CancellationToken cancellationToken,
+        AfcOperation expectedOperation = AfcOperation.Data)
     {
         if (broken) throw new IOException("The AFC connection is closed.");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -88,31 +111,31 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         var id = ++sequence;
         try
         {
-            var packet = new byte[40 + body.Length];
-            "CFA6LPAA"u8.CopyTo(packet);
-            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(8), (ulong)packet.Length);
-            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(16), (ulong)packet.Length);
-            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(24), id);
-            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(32), operation);
-            body.CopyTo(packet, 40);
+            var packet = new byte[HeaderBytes + body.Length];
+            Magic.CopyTo(packet);
+            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(TotalLengthOffset), (ulong)packet.Length);
+            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(ThisLengthOffset), (ulong)packet.Length);
+            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(SequenceOffset), id);
+            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(OperationOffset), (ulong)operation);
+            body.CopyTo(packet, HeaderBytes);
             await stream.WriteAsync(packet, deadline.Token);
-            var header = new byte[40];
+            var header = new byte[HeaderBytes];
             await stream.ReadExactlyAsync(header, deadline.Token);
-            var size = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(8));
-            var thisSize = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(16));
-            var responseId = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(24));
-            var responseOperation = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(32));
-            if (!header.AsSpan(0, 8).SequenceEqual("CFA6LPAA"u8) || size < 40 || size > Plist.MaxBytes
-                || thisSize < 40 || thisSize > size || responseId != id)
+            var size = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(TotalLengthOffset));
+            var thisSize = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(ThisLengthOffset));
+            var responseId = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(SequenceOffset));
+            var responseOperation = (AfcOperation)BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(OperationOffset));
+            if (!header.AsSpan(0, Magic.Length).SequenceEqual(Magic) || size < HeaderBytes || size > Plist.MaxBytes
+                || thisSize < HeaderBytes || thisSize > size || responseId != id)
                 throw new InvalidDataException("Invalid AFC response header.");
-            var response = new byte[checked((int)size - 40)];
+            var response = new byte[checked((int)size - HeaderBytes)];
             await stream.ReadExactlyAsync(response, deadline.Token);
-            if (responseOperation == 1)
+            if (responseOperation == AfcOperation.Status)
             {
-                if (response.Length != 8) throw new InvalidDataException("Invalid AFC status response.");
+                if (response.Length != sizeof(ulong)) throw new InvalidDataException("Invalid AFC status response.");
                 var code = BinaryPrimitives.ReadUInt64LittleEndian(response);
-                if (code != 0) throw new AfcException(code);
-                if (expectedOperation != 1) throw new InvalidDataException("Unexpected AFC success status without response data.");
+                if (code != (ulong)AfcStatusCode.Success) throw new AfcException(code);
+                if (expectedOperation != AfcOperation.Status) throw new InvalidDataException("Unexpected AFC success status without response data.");
                 return [];
             }
             if (responseOperation != expectedOperation) throw new InvalidDataException("Unexpected AFC response operation.");

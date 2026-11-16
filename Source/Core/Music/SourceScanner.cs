@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using NoTunes.Platform;
 
 namespace NoTunes.Music;
 
@@ -8,9 +9,10 @@ public sealed record SourceLibrary(string Root, IReadOnlyList<SourceTrack> Track
     public long TotalBytes => Tracks.Sum(t => t.Size);
 }
 
-public static class SourceScanner
+public sealed class SourceScanner(ISourceFileSystem fileSystem)
 {
-    public static async Task<SourceLibrary> ScanAsync(string folder, CancellationToken cancellationToken)
+    private const string Mp3Extension = ".mp3";
+    public async Task<SourceLibrary> ScanAsync(string folder, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         var root = new DirectoryInfo(Path.GetFullPath(folder));
@@ -25,43 +27,37 @@ public static class SourceScanner
         if (rootAttributes.HasFlag(FileAttributes.ReparsePoint))
             throw new IOException("The source folder must not be a symbolic link or directory junction.");
 
+        using var paths = fileSystem.OpenSource(root, cancellationToken);
         var tracks = new List<SourceTrack>();
         var directories = new Stack<DirectoryInfo>();
         directories.Push(root);
-        var enumeration = new EnumerationOptions
-        {
-            RecurseSubdirectories = false,
-            IgnoreInaccessible = false,
-            AttributesToSkip = 0,
-            ReturnSpecialDirectories = false
-        };
         while (directories.TryPop(out var directory))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            foreach (var entry in directory.EnumerateFileSystemInfos("*", enumeration))
+            foreach (var entry in paths.EnumerateDirectory(directory))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                    throw new IOException($"Symbolic link or junction in source folder: {entry.FullName}. " +
+                    throw new IOException($"Symbolic link or junction in source folder: {Path.Combine(directory.FullName, entry.Name)}. " +
                         "The scan is aborted to prevent an incomplete inventory from causing deletions.");
-                if (entry is DirectoryInfo child)
+                var fullName = Path.Combine(directory.FullName, entry.Name);
+                if (entry.Attributes.HasFlag(FileAttributes.Directory))
                 {
+                    var child = new DirectoryInfo(fullName);
+                    paths.AddDirectory(child);
                     directories.Push(child);
                     continue;
                 }
-                if (entry is not FileInfo file || !file.Extension.Equals(".mp3", StringComparison.OrdinalIgnoreCase))
+                if (!StringComparer.OrdinalIgnoreCase.Equals(Path.GetExtension(entry.Name), Mp3Extension))
                     continue;
 
-                file.Refresh();
-                var size = file.Length;
-                var modified = file.LastWriteTimeUtc;
-                await using var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read,
-                    FileShare.Read, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await using var stream = paths.OpenRead(new FileInfo(fullName));
+                var size = stream.Length;
+                var modified = File.GetLastWriteTimeUtc(stream.SafeFileHandle);
                 var hash = await SHA256.HashDataAsync(stream, cancellationToken);
-                file.Refresh();
-                if (!file.Exists || file.Length != size || stream.Length != size || file.LastWriteTimeUtc != modified)
-                    throw new IOException($"File changed during the scan: {file.FullName}");
-                tracks.Add(new SourceTrack(Path.GetRelativePath(root.FullName, file.FullName), size,
+                if (stream.Length != size || File.GetLastWriteTimeUtc(stream.SafeFileHandle) != modified)
+                    throw new IOException($"File changed during the scan: {fullName}");
+                tracks.Add(new SourceTrack(Path.GetRelativePath(root.FullName, fullName), size,
                     modified, Convert.ToHexString(hash)));
             }
         }

@@ -5,6 +5,8 @@ namespace NoTunes.Apple;
 // Lockdown uses big-endian XML frames. ATC uses little-endian binary frames.
 public sealed class PlistConnection(Stream stream, TimeSpan timeout, bool atc = false) : IAsyncDisposable
 {
+    private const int HeaderBytes = sizeof(int);
+    private const string ConnectionClosedMessage = "The device connection is closed.";
     private Stream stream = stream;
     private bool broken;
 
@@ -12,22 +14,22 @@ public sealed class PlistConnection(Stream stream, TimeSpan timeout, bool atc = 
 
     public void UpgradeStream(Stream encryptedStream)
     {
-        if (broken) throw new IOException("The device connection is closed.");
+        if (broken) throw new IOException(ConnectionClosedMessage);
         stream = encryptedStream;
     }
 
     public async Task SendAsync(Dictionary<string, object> message, CancellationToken cancellationToken)
     {
-        if (broken) throw new IOException("The device connection is closed.");
+        if (broken) throw new IOException(ConnectionClosedMessage);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
         try
         {
             var payload = atc ? BinaryPlist.Write(message) : Plist.ToXml(message);
-            var packet = new byte[4 + payload.Length];
+            var packet = new byte[HeaderBytes + payload.Length];
             if (atc) BinaryPrimitives.WriteInt32LittleEndian(packet, payload.Length);
             else BinaryPrimitives.WriteInt32BigEndian(packet, payload.Length);
-            payload.CopyTo(packet, 4);
+            payload.CopyTo(packet, HeaderBytes);
             await stream.WriteAsync(packet, deadline.Token);
         }
         catch (OperationCanceledException e) when (!cancellationToken.IsCancellationRequested)
@@ -40,12 +42,12 @@ public sealed class PlistConnection(Stream stream, TimeSpan timeout, bool atc = 
 
     public async Task<Dictionary<string, object>> ReceiveAsync(CancellationToken cancellationToken)
     {
-        if (broken) throw new IOException("The device connection is closed.");
+        if (broken) throw new IOException(ConnectionClosedMessage);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
         try
         {
-            var header = new byte[4];
+            var header = new byte[HeaderBytes];
             await stream.ReadExactlyAsync(header, deadline.Token);
             var length = atc ? BinaryPrimitives.ReadInt32LittleEndian(header)
                 : BinaryPrimitives.ReadInt32BigEndian(header);

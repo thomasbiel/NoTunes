@@ -2,9 +2,13 @@ namespace NoTunes.Apple;
 
 public sealed record CatalogueSnapshot(byte[] Database, byte[]? Wal)
 {
-    private const string DatabasePath = "iTunes_Control/iTunes/MediaLibrary.sqlitedb";
+    internal const string DatabasePath = "iTunes_Control/iTunes/MediaLibrary.sqlitedb";
+    private const string WalPath = DatabasePath + "-wal";
+    private const string SharedMemoryPath = DatabasePath + "-shm";
+    private const int MinimumSqliteHeaderBytes = 100;
     private const int MaxFileBytes = 64 * 1024 * 1024;
-    private static readonly string[] Paths = [DatabasePath, DatabasePath + "-wal", DatabasePath + "-shm"];
+    private static readonly string[] Paths = [DatabasePath, WalPath, SharedMemoryPath];
+    private static ReadOnlySpan<byte> SqliteSignature => "SQLite format 3\0"u8;
 
     public static async Task<CatalogueSnapshot> CaptureAsync(AfcClient afc, CancellationToken cancellationToken)
     {
@@ -24,12 +28,12 @@ public sealed record CatalogueSnapshot(byte[] Database, byte[]? Wal)
         if (before[DatabasePath] is null)
             throw new IOException("The iPhone music catalogue is not initialized.");
         var database = await afc.ReadFileAsync(DatabasePath, MaxFileBytes, cancellationToken);
-        var wal = before[DatabasePath + "-wal"] is null ? null
-            : await afc.ReadFileAsync(DatabasePath + "-wal", MaxFileBytes, cancellationToken);
+        var wal = before[WalPath] is null ? null
+            : await afc.ReadFileAsync(WalPath, MaxFileBytes, cancellationToken);
         var after = await StatAll(afc, cancellationToken);
         if (!Paths.All(path => AfcClient.SameAttributes(before[path], after[path])))
             throw new IOException("The iPhone music catalogue changed during capture. Try again after it settles.");
-        if (database.Length < 100 || !database.AsSpan().StartsWith("SQLite format 3\0"u8))
+        if (database.Length < MinimumSqliteHeaderBytes || !database.AsSpan().StartsWith(SqliteSignature))
             throw new InvalidDataException("The iPhone music catalogue is not a valid SQLite database.");
         return new Capture(new CatalogueSnapshot(database, wal), after);
     }

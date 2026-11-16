@@ -9,6 +9,13 @@ namespace NoTunes.Apple;
 
 public sealed class PairingIdentity
 {
+    private static class Keys
+    {
+        public const string RootCertificate = "RootCertificate";
+        public const string DeviceCertificate = "DeviceCertificate";
+        public const string RootPrivateKey = "RootPrivateKey";
+    }
+
     internal AsymmetricKeyParameter PrivateKey { get; }
     internal byte[] ClientCertificate { get; }
     internal byte[] DeviceCertificate { get; }
@@ -27,9 +34,11 @@ public sealed class PairingIdentity
             // Apple's pairing root is also the client identity used by libimobiledevice's TLS transport.
             // Decode directly in managed memory: do not import private keys into Windows key containers.
             var parser = new X509CertificateParser();
-            var client = parser.ReadCertificate(Bytes(record, "RootCertificate"));
-            var device = parser.ReadCertificate(Bytes(record, "DeviceCertificate"));
-            using var reader = new StringReader(Encoding.UTF8.GetString(Bytes(record, "RootPrivateKey")));
+            var client = parser.ReadCertificate(Bytes(record, Keys.RootCertificate))
+                ?? throw new InvalidDataException("The saved pairing record does not contain a valid RootCertificate.");
+            var device = parser.ReadCertificate(Bytes(record, Keys.DeviceCertificate))
+                ?? throw new InvalidDataException("The saved pairing record does not contain a valid DeviceCertificate.");
+            using var reader = new StringReader(Encoding.UTF8.GetString(Bytes(record, Keys.RootPrivateKey)));
             var pem = new PemReader(reader).ReadObject();
             var key = pem is AsymmetricCipherKeyPair pair ? pair.Private : pem as AsymmetricKeyParameter;
             if (key is not RsaPrivateCrtKeyParameters rsa || client.GetPublicKey() is not RsaKeyParameters publicKey

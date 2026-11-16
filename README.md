@@ -1,6 +1,7 @@
 # NoTunes
 
-A .NET 10 command-line application for Windows. The intended behavior is to mirror
+A .NET 10 command-line application with Windows and Linux platform providers.
+The intended behavior is to mirror
 all MP3 files in a source folder and its subfolders to the iPhone's built-in Music
 app over USB. No GUI, playlists, transcoding, WSL or external sync executable.
 
@@ -23,7 +24,8 @@ stay in memory; no Windows key containers or trusted certificates are installed.
 ## Source configuration
 
 The application project is `Source/NoTunes.csproj`; the NUnit project is
-`Tests/NoTunes.Tests.csproj`. Both are included directly in `NoTunes.slnx`.
+`Tests/NoTunes.Tests.csproj`. The application, core, platform projects and tests
+are included in `NoTunes.slnx`.
 
 The default source is set in `Source/app.config`:
 
@@ -37,8 +39,34 @@ The default source is set in `Source/app.config`:
 
 The build copies this file to `NoTunes.dll.config` beside the executable. `scan`
 and `sync` use this default when no folder argument is supplied. A positional
-folder overrides it. Network shares must be readable by the Windows account
-and execution environment running NoTunes. An access failure aborts the scan.
+folder overrides it. Network shares must be readable by the account and execution
+environment running NoTunes. An access failure aborts the scan. On Linux, supply
+a Linux path or update the configuration accordingly; mount network shares first
+and use their local mount path. Windows UNC paths are not mapped automatically.
+
+## Architecture and dependency injection
+
+| Project | Responsibility |
+| --- | --- |
+| `Source/NoTunes.csproj` | CLI entry point and DI composition in `ApplicationServices`. |
+| `Source/Core/NoTunes.Core.csproj` | Commands, source inventory and shared Apple protocols. References platform contracts only. |
+| `Source/Platform.Abstractions/NoTunes.Platform.Abstractions.csproj` | `IUsbMuxTransport`, `ISourceFileSystem` and per-scan `ISourceSession` contracts. |
+| `Source/Platform.Windows/NoTunes.Platform.Windows.csproj` | Apple Mobile Device Service TCP transport and Windows file-handle protection. |
+| `Source/Platform.Linux/NoTunes.Platform.Linux.csproj` | usbmuxd Unix-socket transport and Linux descriptor-relative file access. |
+
+All projects target `net10.0`. The CLI registers the current platform using
+`Microsoft.Extensions.DependencyInjection` and resolves `Commands` and
+`SourceScanner` through constructor injection. Platform providers are singletons;
+each scan owns and disposes its own source session. The core contains no operating
+system checks, native imports or references to either platform implementation.
+Unsupported operating systems produce a clear error at the composition boundary.
+
+Within the core, `DeviceProbe` coordinates pairing, device validation, file-service
+checks and optional catalogue capture. `AtcClient` owns ATC startup, Ping/Pong,
+music metrics and strict sync-permission parsing, and returns an `AtcSyncStatus`.
+Its startup sequence is covered by simulated binary-plist frames, including
+the message limit, malformed responses, timeout, cancellation and stream disposal.
+`ProbeResult` preserves the CLI's existing flat JSON output.
 
 ## Commands
 
@@ -68,6 +96,12 @@ After building, the equivalent executable is
   complete bytes using SHA-256. This is an inventory, not MP3 audio validation.
   An inaccessible folder, locked file, detected file change, symlink or junction
   aborts the scan. It does not silently treat unreadable data as a deleted track.
+  Safe scanning requires read access to the source's parent folders.
+  Paths through symlinks or junctions in parent folders are rejected too.
+  Windows blocks directory renames and junction changes during a scan. Linux
+  enumerates held directory descriptors and opens files relative to them with
+  `openat` and `O_NOFOLLOW`, so replacing a pathname cannot redirect file reads.
+  Size and modification time are checked on the opened file handle on both platforms.
 - `sync [folder] [--dry-run] [--device <UDID>]` is reserved for the upcoming native
   synchronization engine. It currently validates the source and exits with a
   clear unsupported-operation message.
@@ -78,18 +112,53 @@ arbitrarily. Errors go to stderr. JSON results go to stdout.
 
 ## Device prerequisites
 
+### Windows
+
 Apple device support and Apple Mobile Device Service must be installed and
 running on Windows. The application connects to the service at
 `127.0.0.1:27015`; it does not bundle Apple's drivers or DLLs. The iTunes UI is
 not used. Installation of device support and the initial trust relationship can
 be handled by Apple's Windows device software.
 
+### Linux (implemented, not tested on real systems)
+
+Install and start [usbmuxd](https://github.com/libimobiledevice/usbmuxd) using your
+distribution's packages. NoTunes connects to its Unix socket at
+`/var/run/usbmuxd`; the user running NoTunes must have access to this socket.
+Use your distribution's libimobiledevice pairing tools to establish trust first,
+for example [`idevicepair pair`](https://github.com/libimobiledevice/libimobiledevice/blob/master/docs/idevicepair.1).
+NoTunes reads pairing records through usbmuxd instead of opening its private
+pairing files directly.
+
+The Linux source provider supports x64 and ARM64. It requires readable procfs at
+`/proc/self/fd`, libc support for `openat`, `statx` and `flock`, and a filesystem
+that supports the requested metadata and advisory file locks. It opens each path
+component without following symbolic links and rejects non-regular MP3 entries.
+Linux file locks are advisory; directory descriptors preserve the selected
+directory identity instead of preventing directory renames.
+
+```bash
+dotnet run --project Source/NoTunes.csproj -- devices
+dotnet run --project Source/NoTunes.csproj -- scan /mnt/music --json
+dotnet run --project Source/NoTunes.csproj -- probe --read-catalog --json
+```
+
+**No real tests have been performed on Linux, with a real usbmuxd daemon or with
+an iPhone connected through Linux.** Validation so far consists of Windows tests,
+including a simulated usbmuxd peer over local Unix sockets and DI registration
+tests. Linux-native filesystem regression tests are included but have not been
+run; the Windows test runner skips them. Linux support remains unverified until
+those tests and real-device checks are performed.
+
+### Pairing and previous device validation
+
 Connect the iPhone over USB, unlock it and trust the computer. The prototype
 uses the existing pairing record; it does not create or replace pairings.
 TLS verifies the device certificate against that record. Pairing certificates
 and private keys are never included in diagnostic output or JSON.
 
-The target is iOS 27. The read-only probe, pairing, TLS, AFC, ATC startup and
+The target is iOS 27. Before the platform separation, the Windows read-only probe,
+pairing, TLS, AFC, ATC startup and
 verified catalogue capture were tested successfully on an iPhone SE (2nd
 generation, `iPhone12,8`) running iOS 27.2 (24B119), with 1,885 tracks in its
 library. This verifies the transport and read path, not music transfers.
@@ -107,6 +176,9 @@ The iPhone catalogue must be updated through its sync service, never by editing
 `MediaLibrary.sqlitedb` directly. Documentation used for the protocol boundary:
 
 - [libusbmuxd](https://github.com/libimobiledevice/libusbmuxd)
+- [usbmuxd daemon and Unix-socket interface](https://github.com/libimobiledevice/usbmuxd)
+- [Linux descriptor-relative file access](https://man7.org/linux/man-pages/man2/open.2.html)
+- [Linux statx metadata](https://man7.org/linux/man-pages/man2/statx.2.html)
 - [libimobiledevice lockdown and AFC](https://github.com/libimobiledevice/libimobiledevice)
 - [ATC protocol observations](https://github.com/fbiba/rustunes/blob/master/docs/02-atc-sync-protocol.md)
 - [USB transport observations](https://github.com/fbiba/rustunes/blob/master/docs/03-transport-usb-and-wifi.md)

@@ -10,11 +10,13 @@ namespace NoTunes.Apple;
 // A connection serializes its operations, matching the request/reply protocols using this stream.
 public sealed class ManagedTlsStream : Stream
 {
+    private const int EncryptedRecordBufferBytes = 18 * 1024;
+    private const int MaxPlaintextRecordBytes = 16 * 1024;
     private readonly Stream raw;
     private readonly TlsClientProtocol protocol;
     private readonly SemaphoreSlim operation = new(1, 1);
-    private readonly byte[] incoming = new byte[18 * 1024];
-    private readonly byte[] outgoing = new byte[18 * 1024];
+    private readonly byte[] incoming = new byte[EncryptedRecordBufferBytes];
+    private readonly byte[] outgoing = new byte[EncryptedRecordBufferBytes];
     private int disposed;
 
     private ManagedTlsStream(Stream raw, TlsClientProtocol protocol)
@@ -73,7 +75,7 @@ public sealed class ManagedTlsStream : Stream
                 await ReceiveRecordsAsync(cancellationToken);
                 await FlushRecordsAsync(cancellationToken);
             }
-            var cleartext = new byte[Math.Min(buffer.Length, 16 * 1024)];
+            var cleartext = new byte[Math.Min(buffer.Length, MaxPlaintextRecordBytes)];
             try
             {
                 var count = protocol.ReadInput(cleartext, 0, cleartext.Length);
@@ -95,7 +97,7 @@ public sealed class ManagedTlsStream : Stream
             while (!buffer.IsEmpty)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var count = Math.Min(buffer.Length, 16 * 1024);
+                var count = Math.Min(buffer.Length, MaxPlaintextRecordBytes);
                 var cleartext = buffer[..count].ToArray();
                 try { protocol.WriteApplicationData(cleartext, 0, cleartext.Length); }
                 finally { CryptographicOperations.ZeroMemory(cleartext); }

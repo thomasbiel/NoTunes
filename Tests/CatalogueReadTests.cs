@@ -55,6 +55,43 @@ public sealed class CatalogueReadTests
     }
 
     [Test]
+    public async Task CloseTimeoutIsAnIoErrorAndClosesTheConnection()
+    {
+        await using var peer = new AfcPeer { StallClose = true };
+        peer.Files["track"] = [1];
+        await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(30));
+        await Assert.ThatAsync(async () => await afc.ReadFileAsync("track", 1, CancellationToken.None),
+            Throws.TypeOf<IOException>().With.Message.Contains("closing"));
+        Assert.That(peer.WasDisposed, Is.True);
+        await Assert.ThatAsync(async () => await afc.GetFileInfoAsync("track", CancellationToken.None),
+            Throws.TypeOf<IOException>().With.Message.Contains("closed"));
+    }
+
+    [Test]
+    public async Task CallerCancellationDuringCloseIsPreserved()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await using var peer = new AfcPeer { StallClose = true, OnClose = cancellation.Cancel };
+        peer.Files["track"] = [1];
+        await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(30));
+        await Assert.ThatAsync(async () => await afc.ReadFileAsync("track", 1, cancellation.Token),
+            Throws.InstanceOf<OperationCanceledException>());
+        Assert.That(cancellation.IsCancellationRequested, Is.True);
+        Assert.That(peer.WasDisposed, Is.True);
+    }
+
+    [Test]
+    public async Task CloseTimeoutDoesNotReplaceAnEarlierReadFailure()
+    {
+        await using var peer = new AfcPeer { EarlyEof = true, StallClose = true };
+        peer.Files["track"] = [1];
+        await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(30));
+        await Assert.ThatAsync(async () => await afc.ReadFileAsync("track", 1, CancellationToken.None),
+            Throws.TypeOf<InvalidDataException>().With.Message.Contains("read length"));
+        Assert.That(peer.WasDisposed, Is.True);
+    }
+
+    [Test]
     public async Task CapturesDatabaseAndWalTwice()
     {
         await using var peer = new AfcPeer();
@@ -122,9 +159,12 @@ public sealed class CatalogueReadTests
         public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
         private readonly Dictionary<ulong, (string Path, int Offset)> handles = [];
         private MemoryStream input = new();
+        private bool closePending;
         public int ChunkLimit { get; init; } = 1024 * 1024;
         public bool EarlyEof { get; init; }
         public bool FailClose { get; init; }
+        public bool StallClose { get; init; }
+        public bool WasDisposed { get; private set; }
         public Action? OnClose { get; set; }
         public int Opens { get; private set; }
         public int Closes { get; private set; }
@@ -139,8 +179,11 @@ public sealed class CatalogueReadTests
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
         public override int Read(byte[] buffer, int offset, int count) => input.Read(buffer, offset, Math.Min(count, 5));
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
-            input.ReadAsync(buffer[..Math.Min(buffer.Length, 5)], cancellationToken);
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (closePending) await Task.Delay(Timeout.Infinite, cancellationToken);
+            return await input.ReadAsync(buffer[..Math.Min(buffer.Length, 5)], cancellationToken);
+        }
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -185,6 +228,7 @@ public sealed class CatalogueReadTests
                     Closes++;
                     Assert.That(handles.Remove(BinaryPrimitives.ReadUInt64LittleEndian(body)), Is.True);
                     OnClose?.Invoke();
+                    if (StallClose) { closePending = true; return; }
                     Status(id, FailClose ? 10UL : 0UL);
                     return;
                 default: Assert.Fail($"Unexpected AFC operation {operation}; the reader must not modify any files."); return;
@@ -213,7 +257,7 @@ public sealed class CatalogueReadTests
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) input.Dispose();
+            if (disposing) { WasDisposed = true; input.Dispose(); }
             base.Dispose(disposing);
         }
     }

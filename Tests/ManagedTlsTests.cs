@@ -85,6 +85,17 @@ public sealed class ManagedTlsTests
         Assert.Throws<InvalidDataException>(() => PairingIdentity.FromRecord(record));
     }
 
+    [TestCase("RootCertificate", "")]
+    [TestCase("DeviceCertificate", "")]
+    [TestCase("RootCertificate", "not a certificate")]
+    [TestCase("DeviceCertificate", "not a certificate")]
+    public void RejectsEmptyOrUnparseablePairingCertificates(string field, string content)
+    {
+        var record = Keys.Value.Record();
+        record[field] = Encoding.UTF8.GetBytes(content);
+        Assert.That(() => PairingIdentity.FromRecord(record), Throws.TypeOf<InvalidDataException>());
+    }
+
     private static async Task WithPeer(PairedServer peer, byte[] payload, Func<Stream, Task> client,
         bool expectHandshakeFailure = false)
     {

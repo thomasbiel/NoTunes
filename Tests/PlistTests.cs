@@ -89,4 +89,86 @@ public sealed class PlistTests
         BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(bytes.Length - 8), ulong.MaxValue);
         Assert.Throws<InvalidDataException>(() => BinaryPlist.Read(bytes));
     }
+
+    [Test]
+    public void ReusesSharedBinaryDataInsteadOfCopyingItForEveryReference()
+    {
+        var parsed = (object[])BinaryPlist.Read(RepeatedBinaryData(64, distinctObjects: false));
+        Assert.That(parsed, Has.Length.EqualTo(64));
+        Assert.That((byte[])parsed[0], Has.Length.EqualTo(1024 * 1024));
+        Assert.That(parsed.All(item => ReferenceEquals(item, parsed[0])), Is.True);
+    }
+
+    [Test]
+    public void RejectsDecodedDataThatExceedsTheMemoryBudget()
+    {
+        var fixture = RepeatedBinaryData(80, distinctObjects: true);
+        Assert.That(fixture.Length, Is.LessThan(Plist.MaxBytes));
+        Assert.That(() => BinaryPlist.Read(fixture),
+            Throws.TypeOf<InvalidDataException>().With.Message.Contains("Decoded"));
+    }
+
+    private static byte[] RepeatedBinaryData(int references, bool distinctObjects)
+    {
+        // Independent fixture: references share one blob, optionally through different object IDs.
+        const int length = 1024 * 1024;
+        using var stream = new MemoryStream();
+        stream.Write("bplist00"u8);
+        stream.WriteByte(0xaf);
+        stream.WriteByte(0x10);
+        stream.WriteByte((byte)references);
+        for (var i = 0; i < references; i++) stream.WriteByte(distinctObjects ? (byte)(i + 1) : (byte)1);
+        var blobOffset = (uint)stream.Position;
+        stream.WriteByte(0x4f);
+        stream.WriteByte(0x12);
+        var number = new byte[8];
+        BinaryPrimitives.WriteUInt32BigEndian(number, length);
+        stream.Write(number, 0, 4);
+        stream.Write(new byte[length]);
+        var table = (ulong)stream.Position;
+        BinaryPrimitives.WriteUInt32BigEndian(number, 8);
+        stream.Write(number, 0, 4);
+        var blobCount = distinctObjects ? references : 1;
+        BinaryPrimitives.WriteUInt32BigEndian(number, blobOffset);
+        for (var i = 0; i < blobCount; i++) stream.Write(number, 0, 4);
+        stream.Write(new byte[6]);
+        stream.WriteByte(4);
+        stream.WriteByte(1);
+        BinaryPrimitives.WriteUInt64BigEndian(number, (ulong)blobCount + 1);
+        stream.Write(number);
+        BinaryPrimitives.WriteUInt64BigEndian(number, 0);
+        stream.Write(number);
+        BinaryPrimitives.WriteUInt64BigEndian(number, table);
+        stream.Write(number);
+        return stream.ToArray();
+    }
+
+    [Test]
+    public void SharedArraysCannotBypassTheNestingLimit()
+    {
+        using var stream = new MemoryStream();
+        stream.Write("bplist00"u8);
+        stream.Write([0xa2, 1, 2, 0xa1, 65]);
+        var offsets = new List<byte> { 8, 11 };
+        for (var index = 2; index <= 64; index++)
+        {
+            offsets.Add((byte)stream.Position);
+            stream.WriteByte(0xa1);
+            stream.WriteByte(index == 64 ? (byte)1 : (byte)(index + 1));
+        }
+        offsets.Add((byte)stream.Position);
+        stream.WriteByte(0x54);
+        stream.Write("leaf"u8);
+        var table = (ulong)stream.Position;
+        stream.Write(offsets.ToArray());
+        stream.Write(new byte[32]);
+        var fixture = stream.ToArray();
+        var trailer = fixture.Length - 32;
+        fixture[trailer + 6] = 1;
+        fixture[trailer + 7] = 1;
+        BinaryPrimitives.WriteUInt64BigEndian(fixture.AsSpan(trailer + 8), (ulong)offsets.Count);
+        BinaryPrimitives.WriteUInt64BigEndian(fixture.AsSpan(trailer + 24), table);
+        Assert.That(() => BinaryPlist.Read(fixture),
+            Throws.TypeOf<InvalidDataException>().With.Message.Contains("complex"));
+    }
 }

@@ -1,14 +1,15 @@
 using System.Text.Json;
 using NoTunes.Apple;
 using NoTunes.Music;
+using NoTunes.Platform;
 
 namespace NoTunes.Cli;
 
-public static class Commands
+public sealed class Commands(SourceScanner sourceScanner, IUsbMuxTransport transport)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    public static async Task<int> DevicesAsync(DevicesOptions options, CancellationToken cancellationToken)
+    public async Task<int> DevicesAsync(DevicesOptions options, CancellationToken cancellationToken)
     {
         var mux = CreateMux(options);
         var devices = await mux.ListUsbDevicesAsync(cancellationToken);
@@ -16,10 +17,10 @@ public static class Commands
         if (options.Json) WriteJson(devices);
         else if (devices.Count == 0) Console.WriteLine("No USB Apple devices found. Connect and unlock the iPhone.");
         else foreach (var device in devices) Console.WriteLine($"{device.Udid}  USB  product=0x{device.ProductId:X4}");
-        return 0;
+        return ExitCodes.Success;
     }
 
-    public static async Task<int> ProbeAsync(ProbeOptions options, CancellationToken cancellationToken)
+    public async Task<int> ProbeAsync(ProbeOptions options, CancellationToken cancellationToken)
     {
         var result = await GetProbeResultAsync(options, cancellationToken);
         if (options.Json) WriteJson(result);
@@ -39,12 +40,12 @@ public static class Commands
                 Console.WriteLine($"Catalogue read:  verified ({result.CatalogueBytes} database bytes, {result.CatalogueWalBytes ?? 0} WAL bytes)");
             Console.WriteLine("No music was changed.");
         }
-        return result.SyncAllowed ? 0 : 3;
+        return result.SyncAllowed ? ExitCodes.Success : ExitCodes.SyncBlocked;
     }
 
-    public static async Task<int> ScanAsync(ScanOptions options, CancellationToken cancellationToken)
+    public async Task<int> ScanAsync(ScanOptions options, CancellationToken cancellationToken)
     {
-        var library = await SourceScanner.ScanAsync(SourceSettings.ResolveFolder(options.Folder), cancellationToken);
+        var library = await sourceScanner.ScanAsync(SourceSettings.ResolveFolder(options.Folder), cancellationToken);
         if (options.Json) WriteJson(library);
         else
         {
@@ -52,28 +53,27 @@ public static class Commands
             foreach (var track in library.Tracks) Console.WriteLine($"{track.Size,12}  {track.RelativePath}");
             Console.WriteLine($"{library.Tracks.Count} MP3 file(s), {library.TotalBytes} byte(s).");
         }
-        return 0;
+        return ExitCodes.Success;
     }
 
-    public static async Task<int> SyncAsync(SyncOptions options, CancellationToken cancellationToken)
+    public async Task<int> SyncAsync(SyncOptions options, CancellationToken cancellationToken)
     {
         // Validate the source before even connecting to the phone.
         ValidateTimeout(options);
-        _ = await SourceScanner.ScanAsync(SourceSettings.ResolveFolder(options.Folder), cancellationToken);
+        _ = await sourceScanner.ScanAsync(SourceSettings.ResolveFolder(options.Folder), cancellationToken);
         // Do not label a local file listing as a dry-run of changes to a phone we cannot inventory yet.
         Console.Error.WriteLine("Music synchronization is not implemented yet. " +
             "The native USB transport is available; signed ATC write sessions and verified library reconciliation are still missing. " +
             "No music was transferred or deleted. Use 'scan' and 'probe' to check the source and USB connection.");
-        return 4;
+        return ExitCodes.SyncNotImplemented;
     }
 
     public static UsbDevice SelectDevice(IReadOnlyList<UsbDevice> devices, string? udid)
     {
         if (udid is not null)
         {
-            var normalized = udid.Replace("-", "", StringComparison.Ordinal);
-            return devices.SingleOrDefault(d => d.Udid.Replace("-", "", StringComparison.Ordinal)
-                .Equals(normalized, StringComparison.OrdinalIgnoreCase))
+            var normalized = DeviceUdid.Normalize(udid);
+            return devices.SingleOrDefault(d => StringComparer.OrdinalIgnoreCase.Equals(DeviceUdid.Normalize(d.Udid), normalized))
                 ?? throw new IOException($"No USB device matches UDID '{udid}'.");
         }
         return devices.Count switch
@@ -84,7 +84,7 @@ public static class Commands
         };
     }
 
-    private static async Task<ProbeResult> GetProbeResultAsync(ProbeOptions options, CancellationToken cancellationToken)
+    private async Task<ProbeResult> GetProbeResultAsync(ProbeOptions options, CancellationToken cancellationToken)
     {
         var mux = CreateMux(options);
         var device = SelectDevice(await mux.ListUsbDevicesAsync(cancellationToken), options.Device);
@@ -92,16 +92,16 @@ public static class Commands
             options.ReadCatalogue);
     }
 
-    private static UsbMuxClient CreateMux(DeviceOptions options)
+    private UsbMuxClient CreateMux(DeviceOptions options)
     {
         ValidateTimeout(options);
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Native USB support currently requires Windows.");
-        return new UsbMuxClient(TimeSpan.FromSeconds(options.Timeout));
+        return new UsbMuxClient(transport, TimeSpan.FromSeconds(options.Timeout));
     }
 
     private static void ValidateTimeout(DeviceOptions options)
     {
-        if (options.Timeout is < 1 or > 300) throw new ArgumentException("--timeout must be between 1 and 300 seconds.");
+        if (options.Timeout is < DeviceOptions.MinimumTimeoutSeconds or > DeviceOptions.MaximumTimeoutSeconds)
+            throw new ArgumentException($"--{CliSyntax.Timeout} must be between {DeviceOptions.MinimumTimeoutSeconds} and {DeviceOptions.MaximumTimeoutSeconds} seconds.");
     }
 
     private static void WriteJson<T>(T value) => Console.WriteLine(JsonSerializer.Serialize(value, JsonOptions));

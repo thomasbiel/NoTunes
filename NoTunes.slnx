@@ -1,4 +1,8 @@
 <Solution>
   <Project Path="Source/NoTunes.csproj" />
+  <Project Path="Source/Core/NoTunes.Core.csproj" />
+  <Project Path="Source/Platform.Abstractions/NoTunes.Platform.Abstractions.csproj" />
+  <Project Path="Source/Platform.Windows/NoTunes.Platform.Windows.csproj" />
+  <Project Path="Source/Platform.Linux/NoTunes.Platform.Linux.csproj" />
   <Project Path="Tests/NoTunes.Tests.csproj" />
 </Solution>

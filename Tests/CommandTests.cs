@@ -51,10 +51,13 @@ public sealed class CommandTests
         Assert.Throws<IOException>(() => Commands.SelectDevice([], null));
     }
 
-    [Test]
-    public void SelectsTheSameModernUdidWithOrWithoutTheHyphen()
+    [TestCase("00008030-0011223344556677", "000080300011223344556677")]
+    [TestCase("00008030-00AABBCCDDEEFF00", "0000803000aabbccddeeff00")]
+    [TestCase("0000803000AABBCCDDEEFF00", "00008030-00aabbccddeeff00")]
+    [TestCase("0123456789abcdef0123456789abcdef01234567", "0123456789ABCDEF0123456789ABCDEF01234567")]
+    public void SelectsDevicesUsingNormalizedUdids(string actual, string requested)
     {
-        var device = new UsbDevice(1, "00008030-0011223344556677", 1);
-        Assert.That(Commands.SelectDevice([device], "000080300011223344556677"), Is.SameAs(device));
+        var device = new UsbDevice(1, actual, 1);
+        Assert.That(Commands.SelectDevice([device], requested), Is.SameAs(device));
     }
 }

@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using NoTunes.Apple;
+using NoTunes.Platform.Windows;
 using NUnit.Framework;
 
 namespace NoTunes.Tests;
@@ -24,7 +25,7 @@ public sealed class ProtocolTests
             })));
         }, async endpoint =>
         {
-            var devices = await new UsbMuxClient(TimeSpan.FromSeconds(3), endpoint).ListUsbDevicesAsync(CancellationToken.None);
+            var devices = await new UsbMuxClient(new WindowsUsbMuxTransport(endpoint), TimeSpan.FromSeconds(3)).ListUsbDevicesAsync(CancellationToken.None);
             Assert.That(devices, Has.Count.EqualTo(1));
             Assert.That(devices[0].DeviceId, Is.EqualTo(7));
             Assert.That(devices[0].Udid, Is.EqualTo("00008030-0011223344556677"));
@@ -47,7 +48,7 @@ public sealed class ProtocolTests
             Assert.That(payload, Is.EqualTo(new byte[] { 1, 2, 3 }));
         }, async endpoint =>
         {
-            var mux = new UsbMuxClient(TimeSpan.FromSeconds(3), endpoint);
+            var mux = new UsbMuxClient(new WindowsUsbMuxTransport(endpoint), TimeSpan.FromSeconds(3));
             await using var stream = await mux.ConnectDeviceAsync(new UsbDevice(7, "test", 1), 62078, CancellationToken.None);
             await stream.WriteAsync(new byte[] { 1, 2, 3 });
         });
@@ -62,7 +63,7 @@ public sealed class ProtocolTests
             await Reply(stream, tag + 1, Plist.Dict(("DeviceList", Array.Empty<object>())));
         }, async endpoint =>
         {
-            var mux = new UsbMuxClient(TimeSpan.FromSeconds(3), endpoint);
+            var mux = new UsbMuxClient(new WindowsUsbMuxTransport(endpoint), TimeSpan.FromSeconds(3));
             await Assert.ThatAsync(async () => await mux.ListUsbDevicesAsync(CancellationToken.None),
                 Throws.TypeOf<InvalidDataException>());
         });
@@ -77,7 +78,7 @@ public sealed class ProtocolTests
             await Reply(stream, tag, Plist.Dict(("Number", 3L)));
         }, async endpoint =>
         {
-            var mux = new UsbMuxClient(TimeSpan.FromSeconds(3), endpoint);
+            var mux = new UsbMuxClient(new WindowsUsbMuxTransport(endpoint), TimeSpan.FromSeconds(3));
             await Assert.ThatAsync(async () => await mux.ListUsbDevicesAsync(CancellationToken.None),
                 Throws.TypeOf<IOException>().With.Message.Contains("error 3"));
         });
