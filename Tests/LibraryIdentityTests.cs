@@ -38,7 +38,7 @@ public sealed class LibraryIdentityTests
         peer.Files[SyncPaths.Preferences] = Preferences(1, 2);
         peer.Files[SyncPaths.PreferencesPlist] = Plist.ToXml(Plist.Dict(("iPodPrefs", Preferences(2, 3))));
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(1));
-        Assert.ThrowsAsync<InvalidDataException>(() => LibraryIdentity.ReadAsync(afc, CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidDataException>(() => LibraryIdentity.ReadAsync(afc, CancellationToken.None));
     }
 
     private static byte[] Preferences(ulong catalogue, ulong user)

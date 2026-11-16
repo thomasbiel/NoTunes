@@ -18,10 +18,22 @@ dotnet build NoTunes.slnx
 dotnet test Tests/NoTunes.Tests.csproj
 ```
 
-CLI parsing uses `CommandLineParser` 2.9.1. Tests use NUnit 4.4.0 and the NUnit
-Visual Studio test adapter. All application output and help text are in English.
+CLI parsing uses `CommandLineParser` 2.9.1. Tests use NUnit 5.0.0,
+`NUnit3TestAdapter` 6.3.1 and `Microsoft.NET.Test.Sdk` 18.12.0 with `dotnet test`
+and Visual Studio Test Explorer. NUnit's `ThrowsAsync`, `CatchAsync` and
+`DoesNotThrowAsync` assertions must be awaited in `async Task` tests.
+All application output and help text are in English.
 TLS uses the managed `BouncyCastle.Cryptography` library. Pairing private keys
 stay in memory; no Windows key containers or trusted certificates are installed.
+
+The Microsoft runtime packages `Microsoft.Extensions.DependencyInjection`,
+`Microsoft.Extensions.DependencyInjection.Abstractions` and
+`System.Configuration.ConfigurationManager` use version 10.0.15, as do the
+transitive `System.Diagnostics.EventLog` and
+`System.Security.Cryptography.ProtectedData` packages. These are the latest
+stable 10.x versions checked on 16 November 2026; the NUnit framework, adapter
+and Microsoft test SDK versions above are the latest stable releases checked
+on that date. Runtime packages remain on the .NET 10 release line.
 
 MP3 metadata is read with **TagLibSharp 2.3.0**, licensed under **LGPL-2.1-only**.
 The repository includes its [copyright notice](Licenses/TagLibSharp-NOTICE.txt),

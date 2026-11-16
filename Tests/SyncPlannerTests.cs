@@ -7,12 +7,12 @@ public sealed class SyncPlannerTests
 {
     [TestCase(false)]
     [TestCase(true)]
-    public void Rejects_An_Already_Cancelled_Plan_With_An_Empty_Device_Catalogue(bool hasSource)
+    public async Task Rejects_An_Already_Cancelled_Plan_With_An_Empty_Device_Catalogue(bool hasSource)
     {
         var source = new SourceLibrary("source", hasSource ? [Track("new.mp3", "A")] : []);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        Assert.ThrowsAsync<OperationCanceledException>(() => SyncPlanner.CreateAsync(
+        await Assert.ThrowsAsync<OperationCanceledException>(() => SyncPlanner.CreateAsync(
             "phone",
             source,
             Catalogue([]),
@@ -21,10 +21,10 @@ public sealed class SyncPlannerTests
     }
 
     [Test]
-    public void Stops_When_Cancelled_After_The_Last_Device_Hash()
+    public async Task Stops_When_Cancelled_After_The_Last_Device_Hash()
     {
         using var cancellation = new CancellationTokenSource();
-        Assert.ThrowsAsync<OperationCanceledException>(() => SyncPlanner.CreateAsync(
+        await Assert.ThrowsAsync<OperationCanceledException>(() => SyncPlanner.CreateAsync(
             "phone",
             new SourceLibrary("source", [Track("new.mp3", "A")]),
             Catalogue([new(
@@ -83,9 +83,9 @@ public sealed class SyncPlannerTests
     }
 
     [Test]
-    public void An_Unreadable_Device_Asset_Aborts_The_Plan()
+    public async Task An_Unreadable_Device_Asset_Aborts_The_Plan()
     {
-        Assert.ThrowsAsync<IOException>(() => SyncPlanner.CreateAsync(
+        await Assert.ThrowsAsync<IOException>(() => SyncPlanner.CreateAsync(
             "phone",
             new SourceLibrary("source", [Track("new.mp3", "B")]),
             Catalogue([new(

@@ -15,7 +15,7 @@ public sealed class AfcWriteTests
         var peer = new AfcPeer { AllowWrites = true, StallClose = true };
         await using var afc = new AfcClient(peer, RequestTimeout);
         using var input = new MemoryStream(new byte[] { 1 });
-        var exception = Assert.ThrowsAsync<IOException>(() => afc.WriteNewFileAsync(
+        var exception = await Assert.ThrowsAsync<IOException>(() => afc.WriteNewFileAsync(
             Target,
             input,
             input.Length,
@@ -30,10 +30,10 @@ public sealed class AfcWriteTests
         var peer = new AfcPeer { AllowWrites = true, StallClose = true };
         await using var afc = new AfcClient(peer, RequestTimeout);
         var lease = await afc.AcquireSyncLockAsync(CancellationToken.None);
-        var exception = Assert.ThrowsAsync<IOException>(async () => await lease.DisposeAsync());
+        var exception = await Assert.ThrowsAsync<IOException>(async () => await lease.DisposeAsync());
         Assert.That(exception!.InnerException, Is.InstanceOf<OperationCanceledException>());
         Assert.That(peer.WasDisposed, Is.True);
-        Assert.DoesNotThrowAsync(async () => await lease.DisposeAsync());
+        await Assert.DoesNotThrowAsync(async () => await lease.DisposeAsync());
     }
 
     [Test]
@@ -48,7 +48,7 @@ public sealed class AfcWriteTests
         };
         await using var afc = new AfcClient(peer, RequestTimeout);
         var lease = await afc.AcquireSyncLockAsync(cancellation.Token);
-        Assert.CatchAsync<OperationCanceledException>(async () => await lease.DisposeAsync());
+        await Assert.CatchAsync<OperationCanceledException>(async () => await lease.DisposeAsync());
         Assert.That(cancellation.IsCancellationRequested, Is.True);
         Assert.That(peer.WasDisposed, Is.True);
     }
@@ -60,7 +60,7 @@ public sealed class AfcWriteTests
         var peer = new AfcPeer { AllowWrites = true, StallClose = true };
         await using var afc = new AfcClient(peer, RequestTimeout);
         using var input = new MemoryStream(new byte[] { 1 });
-        var exception = Assert.CatchAsync<OperationCanceledException>(() => afc.WriteNewFileAsync(
+        var exception = await Assert.CatchAsync<OperationCanceledException>(() => afc.WriteNewFileAsync(
             Target,
             input,
             input.Length,
@@ -86,7 +86,7 @@ public sealed class AfcWriteTests
         };
         await using var afc = new AfcClient(peer, RequestTimeout);
         using var input = new MemoryStream(new byte[] { 1 });
-        Assert.CatchAsync<OperationCanceledException>(() => afc.WriteNewFileAsync(
+        await Assert.CatchAsync<OperationCanceledException>(() => afc.WriteNewFileAsync(
             Target,
             input,
             input.Length,
@@ -102,10 +102,10 @@ public sealed class AfcWriteTests
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(1));
         var lease = await afc.AcquireSyncLockAsync(CancellationToken.None);
         await lease.DisposeAsync();
-        Assert.DoesNotThrowAsync(async () => await lease.DisposeAsync());
+        await Assert.DoesNotThrowAsync(async () => await lease.DisposeAsync());
         var closedLease = await afc.AcquireSyncLockAsync(CancellationToken.None);
         await afc.DisposeAsync();
-        Assert.DoesNotThrowAsync(async () => await closedLease.DisposeAsync());
+        await Assert.DoesNotThrowAsync(async () => await closedLease.DisposeAsync());
     }
 
     [Test]
@@ -132,13 +132,13 @@ public sealed class AfcWriteTests
     }
 
     [Test]
-    public void Refuses_To_Overwrite_Existing_Files_Before_Opening()
+    public async Task Refuses_To_Overwrite_Existing_Files_Before_Opening()
     {
         var peer = new AfcPeer { AllowWrites = true };
         peer.Files[Target] = [7];
         using var input = new MemoryStream(new byte[] { 1 });
         var afc = new AfcClient(peer, TimeSpan.FromSeconds(1));
-        Assert.ThrowsAsync<IOException>(() => afc.WriteNewFileAsync(
+        await Assert.ThrowsAsync<IOException>(() => afc.WriteNewFileAsync(
             Target,
             input,
             1,
@@ -154,7 +154,7 @@ public sealed class AfcWriteTests
         var peer = new AfcPeer { AllowWrites = true };
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(1));
         using var input = new MemoryStream(new byte[] { 1 });
-        Assert.ThrowsAsync<IOException>(() => afc.WriteNewFileAsync(
+        await Assert.ThrowsAsync<IOException>(() => afc.WriteNewFileAsync(
             Target,
             input,
             size,
@@ -170,7 +170,7 @@ public sealed class AfcWriteTests
         {
             await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(1));
             using var input = new MemoryStream(new byte[] { 1 });
-            Assert.ThrowsAsync<AfcException>(() => afc.WriteNewFileAsync(
+            await Assert.ThrowsAsync<AfcException>(() => afc.WriteNewFileAsync(
                 Target,
                 input,
                 1,
@@ -190,19 +190,19 @@ public sealed class AfcWriteTests
         Assert.That(peer.Files[destination], Is.EqualTo(new byte[] { 7 }));
         Assert.That(peer.Files.ContainsKey(Target), Is.False);
         peer.Files[Target] = [8];
-        Assert.ThrowsAsync<IOException>(() => afc.RenameNewFileAsync(Target, destination, CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => afc.RenameNewFileAsync(Target, destination, CancellationToken.None));
     }
 
     [TestCase("../escape")]
     [TestCase("/absolute")]
     [TestCase("Airlock/./file")]
     [TestCase("Airlock/file\0other")]
-    public void Rejects_Unsafe_Write_Paths_Before_Any_Request(string path)
+    public async Task Rejects_Unsafe_Write_Paths_Before_Any_Request(string path)
     {
         using var input = new MemoryStream();
         var peer = new AfcPeer { AllowWrites = true };
         var afc = new AfcClient(peer, TimeSpan.FromSeconds(1));
-        Assert.ThrowsAsync<InvalidDataException>(() => afc.WriteNewFileAsync(
+        await Assert.ThrowsAsync<InvalidDataException>(() => afc.WriteNewFileAsync(
             path,
             input,
             0,

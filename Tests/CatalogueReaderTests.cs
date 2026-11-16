@@ -38,11 +38,11 @@ public sealed class CatalogueReaderTests
     [TestCase("UPDATE item SET base_location_id=999 WHERE item_pid=1")]
     [TestCase("UPDATE item_extra SET location='',file_size=0 WHERE item_pid=1")]
     [TestCase("UPDATE item SET base_location_id=0 WHERE item_pid=1")]
-    public void Rejects_Broken_Locations_That_Do_Not_Describe_An_Unfinished_Transfer(string mutation)
+    public async Task Rejects_Broken_Locations_That_Do_Not_Describe_An_Unfinished_Transfer(string mutation)
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(mutation);
-        Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(
+        await Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(
             fixture.Snapshot(), CancellationToken.None));
     }
 
@@ -101,10 +101,10 @@ public sealed class CatalogueReaderTests
     [TestCase("UPDATE _MLDatabaseProperties SET value='-1'")]
     [TestCase("UPDATE item_extra SET location='../escape.mp3' WHERE item_pid=1")]
     [TestCase("PRAGMA user_version=1")]
-    public void Rejects_Ambiguous_Or_Unsupported_Catalogues(string mutation)
+    public async Task Rejects_Ambiguous_Or_Unsupported_Catalogues(string mutation)
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(mutation);
-        Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None));
     }
 }

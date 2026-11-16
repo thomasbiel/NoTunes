@@ -36,7 +36,7 @@ public sealed class AtcSyncSessionTests
         var session = new AtcSyncSession(client, TextWriter.Null);
         using var signer = await session.BeginAsync(Identity, 7, CancellationToken.None);
         await session.FinishMetadataAsync(7, CancellationToken.None);
-        var exception = Assert.CatchAsync<OperationCanceledException>(() => session.TransferAsync(
+        var exception = await Assert.CatchAsync<OperationCanceledException>(() => session.TransferAsync(
             afc,
             [track],
             new HashSet<long>(),
@@ -63,7 +63,7 @@ public sealed class AtcSyncSessionTests
         var session = new AtcSyncSession(client, TextWriter.Null);
         using var signer = await session.BeginAsync(Identity, 7, CancellationToken.None);
         await session.FinishMetadataAsync(7, CancellationToken.None);
-        var exception = Assert.ThrowsAsync<IOException>(() => session.TransferAsync(
+        var exception = await Assert.ThrowsAsync<IOException>(() => session.TransferAsync(
             afc,
             [track],
             new HashSet<long>(),
@@ -108,7 +108,7 @@ public sealed class AtcSyncSessionTests
         var session = new AtcSyncSession(client, TextWriter.Null);
         using var signer = await session.BeginAsync(Identity, 7, CancellationToken.None);
         await session.FinishMetadataAsync(7, CancellationToken.None);
-        var exception = Assert.ThrowsAsync<IOException>(() => session.TransferAsync(
+        var exception = await Assert.ThrowsAsync<IOException>(() => session.TransferAsync(
             afc,
             [track],
             new HashSet<long>(),
@@ -176,7 +176,7 @@ public sealed class AtcSyncSessionTests
         var session = new AtcSyncSession(client, TextWriter.Null);
         using var signer = await session.BeginAsync(Identity, 7, CancellationToken.None);
         await session.FinishMetadataAsync(7, CancellationToken.None);
-        var exception = Assert.ThrowsAsync<IOException>(() => session.TransferAsync(
+        var exception = await Assert.ThrowsAsync<IOException>(() => session.TransferAsync(
             afc,
             [track],
             new HashSet<long>(),
@@ -206,7 +206,7 @@ public sealed class AtcSyncSessionTests
         var session = new AtcSyncSession(client, TextWriter.Null);
         using var signer = await session.BeginAsync(Identity, 7, CancellationToken.None);
         await session.FinishMetadataAsync(7, CancellationToken.None);
-        Assert.ThrowsAsync<IOException>(() => session.TransferAsync(
+        await Assert.ThrowsAsync<IOException>(() => session.TransferAsync(
             afc,
             [first, second],
             new HashSet<long>(),
@@ -265,7 +265,7 @@ public sealed class AtcSyncSessionTests
         await using var client = new AtcClient(peer, Timeout);
         await client.ReadSyncStatusAsync(CancellationToken.None);
         var session = new AtcSyncSession(client, TextWriter.Null);
-        Assert.ThrowsAsync<IOException>(() => session.BeginAsync(Identity, 7, CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => session.BeginAsync(Identity, 7, CancellationToken.None));
         Assert.That(peer.SentMessages().Select(message => message.Text(AtcKeys.Command)),
             Is.EqualTo([AtcCommands.Ping, AtcCommands.RequestingSync]));
     }
@@ -288,7 +288,7 @@ public sealed class AtcSyncSessionTests
         var session = new AtcSyncSession(client, TextWriter.Null);
         using var signer = await session.BeginAsync(Identity, 7, CancellationToken.None);
         await session.FinishMetadataAsync(7, CancellationToken.None);
-        Assert.ThrowsAsync<IOException>(() => session.TransferAsync(
+        await Assert.ThrowsAsync<IOException>(() => session.TransferAsync(
             afc,
             [track],
             new HashSet<long>(),
@@ -335,7 +335,7 @@ public sealed class AtcSyncSessionTests
         var session = new AtcSyncSession(client, TextWriter.Null);
         using var signer = await session.BeginAsync(Identity, 7, CancellationToken.None);
         await session.FinishMetadataAsync(7, CancellationToken.None);
-        Assert.ThrowsAsync<InvalidDataException>(() => session.TransferAsync(
+        await Assert.ThrowsAsync<InvalidDataException>(() => session.TransferAsync(
             afc,
             [track],
             new HashSet<long>(),

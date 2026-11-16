@@ -54,7 +54,7 @@ public sealed class SourcePreparationTests
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider();
         var scanned = await services.GetRequiredService<SourceScanner>().ScanAsync(source.Root, CancellationToken.None);
         var track = scanned.Tracks[0] with { RelativePath = Path.Combine("..", "outside.mp3") };
-        Assert.ThrowsAsync<IOException>(() => SourcePreparation.PrepareAsync(
+        await Assert.ThrowsAsync<IOException>(() => SourcePreparation.PrepareAsync(
             scanned,
             new SyncPlan(
                 "phone",
@@ -226,7 +226,7 @@ public sealed class SourcePreparationTests
         bytes[^1] ^= 1;
         await File.WriteAllBytesAsync(path, bytes);
         File.SetLastWriteTimeUtc(path, library.Tracks[0].LastWriteTimeUtc);
-        Assert.ThrowsAsync<IOException>(() => SourcePreparation.PrepareAsync(
+        await Assert.ThrowsAsync<IOException>(() => SourcePreparation.PrepareAsync(
             library,
             new SyncPlan(
                 "phone",

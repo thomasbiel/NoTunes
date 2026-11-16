@@ -28,7 +28,7 @@ public sealed class WriterTests
         await using var error = new StringWriter();
         await using var services = new ServiceCollection().AddNoTunes(output, error).BuildServiceProvider();
         var missing = Path.Combine(workspace.Root, "missing");
-        Assert.ThrowsAsync<DirectoryNotFoundException>(() => services.GetRequiredService<SyncEngine>().RunAsync(
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(() => services.GetRequiredService<SyncEngine>().RunAsync(
             new SyncOptions { Folder = missing }, CancellationToken.None));
         Assert.That(error.ToString(), Does.Contain("Scanning and hashing source music"));
         Assert.That(output.ToString(), Is.Empty);

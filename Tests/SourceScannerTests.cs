@@ -76,9 +76,9 @@ public sealed class SourceScannerTests
     }
 
     [Test]
-    public void Missing_Source_Never_Becomes_An_Empty_Inventory()
+    public async Task Missing_Source_Never_Becomes_An_Empty_Inventory()
     {
-        Assert.ThrowsAsync<DirectoryNotFoundException>(() => this.scanner.ScanAsync(Path.Combine(this.root, "missing"), CancellationToken.None));
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(() => this.scanner.ScanAsync(Path.Combine(this.root, "missing"), CancellationToken.None));
     }
 
     [Test]
@@ -99,7 +99,7 @@ public sealed class SourceScannerTests
             FileMode.Open,
             FileAccess.ReadWrite,
             FileShare.None);
-        Assert.ThrowsAsync<IOException>(() => this.scanner.ScanAsync(this.root, CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => this.scanner.ScanAsync(this.root, CancellationToken.None));
     }
 
     [Test]
@@ -128,7 +128,7 @@ public sealed class SourceScannerTests
         {
             FailRead = true
         };
-        Assert.ThrowsAsync<IOException>(() => new SourceScanner(fileSystem).ScanAsync(this.root, CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => new SourceScanner(fileSystem).ScanAsync(this.root, CancellationToken.None));
         Assert.That(fileSystem.Session.ActiveEnumerations, Is.Zero);
         Assert.That(fileSystem.Session.Disposed, Is.True);
     }

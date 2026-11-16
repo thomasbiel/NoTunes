@@ -54,30 +54,30 @@ unchanged from the NuGet package's `License.md`.
 Corresponding source:
 [commandlineparser, version 2.9.1](https://github.com/commandlineparser/commandline).
 
-## Microsoft .NET packages, version 10.0.13
+## Microsoft .NET packages, version 10.0.15
 
 The following direct and transitive runtime packages share the same upstream
 source revision and accompanying notices:
 
-- Microsoft.Extensions.DependencyInjection/10.0.13
-- Microsoft.Extensions.DependencyInjection.Abstractions/10.0.13
-- System.Configuration.ConfigurationManager/10.0.13
-- System.Diagnostics.EventLog/10.0.13
-- System.Security.Cryptography.ProtectedData/10.0.13
+- Microsoft.Extensions.DependencyInjection/10.0.15
+- Microsoft.Extensions.DependencyInjection.Abstractions/10.0.15
+- System.Configuration.ConfigurationManager/10.0.15
+- System.Diagnostics.EventLog/10.0.15
+- System.Security.Cryptography.ProtectedData/10.0.15
 
 Copyright (c) .NET Foundation and Contributors. All rights reserved.
 The package metadata also states: © Microsoft Corporation. All rights reserved.
 
 The complete MIT license is included in
 [Microsoft-LICENSE.txt](Licenses/Microsoft-LICENSE.txt). It is copied unchanged
-from `Microsoft.NETCore.App.Runtime.win-x64` 10.0.13, which identifies the same
-source revision as the packages above. Their identical, complete upstream
+from `src/runtime/LICENSE.TXT` at the source revision identified below.
+Their identical, complete upstream
 third-party notices are retained once in
 [Microsoft-THIRD-PARTY-NOTICES.txt](Licenses/Microsoft-THIRD-PARTY-NOTICES.txt),
-copied unchanged from `Microsoft.Extensions.DependencyInjection` 10.0.13.
+copied unchanged from `Microsoft.Extensions.DependencyInjection` 10.0.15.
 
 Corresponding source:
-[dotnet/dotnet, commit 4099f83977f4d29604a9aeb971fb0a7bc1d5f699](https://github.com/dotnet/dotnet/tree/4099f83977f4d29604a9aeb971fb0a7bc1d5f699/src/runtime).
+[dotnet/dotnet, commit 8e0f8ed2312954727f8919d7d1c2f78b483b4ee7](https://github.com/dotnet/dotnet/tree/8e0f8ed2312954727f8919d7d1c2f78b483b4ee7/src/runtime).
 
 ## System.Data.SQLite/2.0.4 and SQLite/3.53.4
 
@@ -107,3 +107,80 @@ The unmodified library is used as a separate, replaceable `TaglibSharp.dll`.
 Corresponding source for this version is available in the
 [TaglibSharp-2.3.0.0 release](https://github.com/mono/taglib-sharp/tree/TaglibSharp-2.3.0.0).
 These notices and license texts accompany the build and publish output.
+
+# Test dependencies
+
+The following packages are used unmodified by the test project. They are not
+application runtime dependencies. Their license texts and notices are retained
+under `Licenses/`, which is copied to build and publish output.
+
+## NUnit/5.0.0
+
+Copyright (c) 2009-2019 Charlie Poole, 2014-2025 Rob Prouse, 2026 Terje
+Sandstrom and Contributors. MIT License.
+
+The complete license and original notices are copied unchanged from the
+NuGet package into [NUnit-LICENSE.txt](Licenses/NUnit-LICENSE.txt),
+[NUnit-NOTICES.md](Licenses/NUnit-NOTICES.md) and
+[NUnit-THIRD-PARTY-NOTICES.md](Licenses/NUnit-THIRD-PARTY-NOTICES.md).
+
+Corresponding source:
+[nunit, version 5.0.0](https://github.com/nunit/nunit/tree/v5.0.0).
+
+## NUnit3TestAdapter/6.3.1
+
+Copyright (c) 2011-2021 Charlie Poole, 2014-2026 Terje Sandstrom, as stated
+in the package metadata. The upstream MIT license carries Copyright (c)
+2011-2020 Charlie Poole, 2014-2026 Terje Sandstrom and is retained unchanged in
+[NUnit3TestAdapter-LICENSE.txt](Licenses/NUnit3TestAdapter-LICENSE.txt).
+
+Corresponding source:
+[nunit3-vs-adapter, version 6.3.1](https://github.com/nunit/nunit3-vs-adapter/tree/V6.3.1).
+
+## Microsoft test SDK and test platform, version 18.12.0
+
+- Microsoft.NET.Test.Sdk/18.12.0
+- Microsoft.CodeCoverage/18.12.0
+- Microsoft.TestPlatform.TestHost/18.12.0
+- Microsoft.TestPlatform.ObjectModel/18.12.0
+
+Copyright (c) Microsoft Corporation. All rights reserved. These packages use
+the MIT license, retained in
+[Microsoft-TestPlatform-LICENSE.txt](Licenses/Microsoft-TestPlatform-LICENSE.txt)
+from the upstream VSTest repository. Original package notices are copied
+unchanged from `Microsoft.TestPlatform.TestHost` and `Microsoft.CodeCoverage`
+18.12.0 into
+[Microsoft-TestPlatform-THIRD-PARTY-NOTICES.txt](Licenses/Microsoft-TestPlatform-THIRD-PARTY-NOTICES.txt)
+and [Microsoft-CodeCoverage-THIRD-PARTY-NOTICES.txt](Licenses/Microsoft-CodeCoverage-THIRD-PARTY-NOTICES.txt).
+
+Corresponding source: [microsoft/vstest](https://github.com/microsoft/vstest),
+version 18.12.0. The package metadata identifies source commit
+`8c03f23cd7df6ab28c3f1e3d112dea978eae8b0c` on branch `18.12`.
+
+## Transitive adapter dependencies
+
+The adapter also resolves the following unmodified, MIT-licensed Microsoft
+packages for the test project. Their package metadata states:
+© Microsoft Corporation. All rights reserved. The complete Microsoft MIT
+license is retained in
+[Microsoft-TestPlatform-LICENSE.txt](Licenses/Microsoft-TestPlatform-LICENSE.txt).
+
+- Microsoft.TestPlatform.AdapterUtilities/18.10.1, from
+  [microsoft/vstest](https://github.com/microsoft/vstest), source commit
+  `87dfd4b2d2bacd91ad69e009ade6f4715b3b46ec`.
+- Microsoft.Testing.Extensions.Telemetry/2.4.1,
+  Microsoft.Testing.Extensions.TrxReport.Abstractions/2.4.1,
+  Microsoft.Testing.Extensions.VSTestBridge/2.4.1,
+  Microsoft.Testing.Platform/2.4.1 and
+  Microsoft.Testing.Platform.MSBuild/2.4.1, from
+  [microsoft/testfx](https://github.com/microsoft/testfx), source commit
+  `9a14d19cb8ef1ec6a2aae81d4223a09190f96593`.
+- Microsoft.ApplicationInsights/2.23.0, from
+  [ApplicationInsights-dotnet](https://github.com/microsoft/ApplicationInsights-dotnet),
+  source commit `2faa7e8b157a431daa2e71785d68abd5fa817b53`.
+- Microsoft.Extensions.DependencyModel/8.0.2, from
+  [dotnet/runtime](https://github.com/dotnet/runtime), source commit
+  `81cabf2857a01351e5ab578947c7403a5b128ad1`. Its original .NET Foundation MIT
+  license is retained in [Microsoft-LICENSE.txt](Licenses/Microsoft-LICENSE.txt),
+  and its complete package notices are copied unchanged into
+  [Microsoft-DependencyModel-THIRD-PARTY-NOTICES.txt](Licenses/Microsoft-DependencyModel-THIRD-PARTY-NOTICES.txt).
