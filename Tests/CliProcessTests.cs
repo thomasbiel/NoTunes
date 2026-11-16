@@ -53,6 +53,51 @@ public sealed class CliProcessTests
     {
         var result = await RunAsync(command, "--help");
         Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        Assert.That(result.Output, Does.Contain("--help"));
+        Assert.That(result.Error, Is.Empty);
+    }
+
+    [TestCase("scan", "--unknown")]
+    [TestCase("sync", "--unknown")]
+    [TestCase("devices", "--unknown")]
+    [TestCase("probe", "--unknown")]
+    [TestCase("sync", "--timeout=invalid")]
+    [TestCase("probe", "--timeout=invalid")]
+    public async Task Parser_Errors_Use_Standard_Error_Without_Contaminating_Json(string command, string option)
+    {
+        var result = await RunAsync(command, "--json", option);
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.InvalidArguments), result.Error);
+        Assert.That(result.Error, Is.Not.Empty);
+        Assert.That(result.Output, Is.Empty);
+    }
+
+    [Test]
+    public async Task Version_Uses_Standard_Output()
+    {
+        var result = await RunAsync("--version");
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        Assert.That(result.Output, Is.Not.Empty);
+        Assert.That(result.Error, Is.Empty);
+    }
+
+    [TestCase("--timeout", false)]
+    [TestCase("--timeout", true)]
+    [TestCase("--device", false)]
+    [TestCase("--device", true)]
+    [TestCase("--state-folder", false)]
+    [TestCase("--state-folder", true)]
+    [TestCase("--device=", false)]
+    [TestCase("--state-folder=", false)]
+    [TestCase("--timeout=", false)]
+    public async Task Rejects_Options_Without_A_Value_Before_Scanning(string option, bool beforeJson)
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "NoTunes-missing-" + Guid.NewGuid().ToString("N"));
+        string[] arguments = beforeJson ? ["sync", missing, option, "--json"] : ["sync", missing, "--json", option];
+        var result = await RunAsync(arguments);
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.InvalidArguments), result.Error);
+        Assert.That(result.Error, Does.Contain(option.TrimEnd('=')));
+        Assert.That(result.Error, Does.Not.Contain("Scanning"));
+        Assert.That(result.Output, Is.Empty);
     }
 
     private static async Task<(int ExitCode, string Output, string Error)> RunAsync(params string[] arguments)

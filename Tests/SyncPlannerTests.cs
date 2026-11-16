@@ -5,6 +5,41 @@ namespace NoTunes.Tests;
 
 public sealed class SyncPlannerTests
 {
+    [TestCase(false)]
+    [TestCase(true)]
+    public void Rejects_An_Already_Cancelled_Plan_With_An_Empty_Device_Catalogue(bool hasSource)
+    {
+        var source = new SourceLibrary("source", hasSource ? [Track("new.mp3", "A")] : []);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        Assert.ThrowsAsync<OperationCanceledException>(() => SyncPlanner.CreateAsync(
+            "phone",
+            source,
+            Catalogue([]),
+            (_, _) => throw new AssertionException("No device read was expected."),
+            cancellation.Token));
+    }
+
+    [Test]
+    public void Stops_When_Cancelled_After_The_Last_Device_Hash()
+    {
+        using var cancellation = new CancellationTokenSource();
+        Assert.ThrowsAsync<OperationCanceledException>(() => SyncPlanner.CreateAsync(
+            "phone",
+            new SourceLibrary("source", [Track("new.mp3", "A")]),
+            Catalogue([new(
+                101,
+                "old",
+                "F01/old.mp3",
+                5)]),
+            (_, _) =>
+            {
+                cancellation.Cancel();
+                return Task.FromResult<string?>("A");
+            },
+            cancellation.Token));
+    }
+
     [Test]
     public async Task Preserves_Renamed_Tracks_And_Matches_Duplicate_Content_One_To_One()
     {

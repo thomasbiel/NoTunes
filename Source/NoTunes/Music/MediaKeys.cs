@@ -26,6 +26,7 @@ internal static class MediaKeys
     public const string SortAlbumArtist = "sort_album_artist";
     public const string Genre = "genre";
     public const string IsSong = "is_song";
+    public const string IsCompilation = "is_compilation";
     public const string RememberBookmark = "remember_bookmark";
     public const string TotalMilliseconds = "total_time_ms";
     public const string ArtworkChecksum = "artwork_checksum";

@@ -17,13 +17,19 @@ internal static class SourcePreparation
         using var session = fileSystem.OpenSource(new DirectoryInfo(library.Root), cancellationToken);
         var result = new List<PreparedTrack>();
         var ids = catalogue.OccupiedIds.ToHashSet();
-        var albums = new Dictionary<string, long>(catalogue.Albums, StringComparer.Ordinal);
-        var artists = new Dictionary<string, long>(catalogue.Artists, StringComparer.Ordinal);
+        var albums = new Dictionary<string, long>(catalogue.Albums, GroupNameComparer.Instance);
+        var artists = new Dictionary<string, long>(catalogue.Artists, GroupNameComparer.Instance);
+        var albumSorts = new Dictionary<string, string?>(catalogue.SortNames.Albums, GroupNameComparer.Instance);
+        var albumArtistSorts = new Dictionary<string, string?>(catalogue.SortNames.AlbumArtists, GroupNameComparer.Instance);
+        var artistSorts = new Dictionary<string, string?>(catalogue.SortNames.Artists, GroupNameComparer.Instance);
+        var composerSorts = new Dictionary<string, string?>(catalogue.SortNames.Composers, GroupNameComparer.Instance);
+        var rootPrefix = Path.EndsInDirectorySeparator(library.Root)
+            ? library.Root : library.Root + Path.DirectorySeparatorChar;
         foreach (var track in plan.Add)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var fullPath = Path.GetFullPath(Path.Combine(library.Root, track.RelativePath));
-            if (!fullPath.StartsWith(Path.TrimEndingDirectorySeparator(library.Root) + Path.DirectorySeparatorChar,
+            if (!fullPath.StartsWith(rootPrefix,
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                 throw new IOException("Source track escapes the library root.");
 
@@ -66,6 +72,30 @@ internal static class SourcePreparation
                 var metadata = Mp3Metadata.Read(localPath, track.RelativePath);
                 var artistId = GroupId(artists, metadata.AlbumArtist, ids);
                 var albumId = GroupId(albums, CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist), ids);
+                PreserveSortName(
+                    albumSorts,
+                    CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist),
+                    metadata.Item,
+                    MediaKeys.SortAlbum);
+                PreserveSortName(
+                    albumArtistSorts,
+                    metadata.AlbumArtist,
+                    metadata.Item,
+                    MediaKeys.SortAlbumArtist);
+                PreserveSortName(
+                    artistSorts,
+                    (string)metadata.Item[MediaKeys.Artist],
+                    metadata.Item,
+                    MediaKeys.SortArtist);
+                if (metadata.Item.TryGetValue(MediaKeys.Composer, out var composer))
+                {
+                    PreserveSortName(
+                        composerSorts,
+                        (string)composer,
+                        metadata.Item,
+                        MediaKeys.SortComposer);
+                }
+
                 result.Add(new PreparedTrack(
                     track,
                     localPath,
@@ -88,9 +118,30 @@ internal static class SourcePreparation
 
     private static long GroupId(Dictionary<string, long> groups, string name, HashSet<long> ids)
     {
-        if (!groups.TryGetValue(name, out var id) || id == 0)
+        if (groups.TryGetValue(name, out var id) && id == 0)
+            throw new InvalidDataException("Ambiguous music group identity: " + name.Replace('\0', '/'));
+
+        if (!groups.ContainsKey(name))
             groups[name] = id = NewId(ids);
+
         return id;
+    }
+
+    private static void PreserveSortName(
+        Dictionary<string, string?> groups,
+        string name,
+        Dictionary<string, object> item,
+        string key)
+    {
+        if (!groups.TryGetValue(name, out var sort))
+        {
+            sort = (string)item[key];
+            groups.Add(name, sort);
+        }
+
+        if (sort is null) throw new InvalidDataException("Ambiguous music group sort name.");
+
+        item[key] = sort;
     }
 
     private static long NewId(HashSet<long> ids)

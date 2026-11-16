@@ -7,4 +7,7 @@ public sealed record DeviceCatalogue(
     IReadOnlyList<DeviceTrack> Tracks,
     IReadOnlyDictionary<string, long> Albums,
     IReadOnlyDictionary<string, long> Artists,
-    IReadOnlySet<long> OccupiedIds);
+    IReadOnlySet<long> OccupiedIds)
+{
+    internal GroupSortNames SortNames { get; init; } = GroupSortNames.Empty;
+}

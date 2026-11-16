@@ -8,7 +8,15 @@ internal sealed class SyncWorkspace : IDisposable
 
     public SyncWorkspace()
     {
-        Directory.CreateDirectory(this.Root);
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(this.Root);
+        }
+
+        else
+        {
+            Directory.CreateDirectory(this.Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
     }
 
     public void Dispose()

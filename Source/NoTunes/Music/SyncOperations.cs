@@ -6,6 +6,22 @@ internal static class SyncOperations
 {
     public static byte[] Serialize(DeviceCatalogue catalogue, IReadOnlyList<PreparedTrack> additions, IReadOnlyList<DeviceTrack> deletions)
     {
+        return BinaryPlist.Write(CreateDocument(catalogue, additions, deletions));
+    }
+
+    internal static byte[]? SerializeWithinLimit(
+        DeviceCatalogue catalogue,
+        IReadOnlyList<PreparedTrack> additions,
+        IReadOnlyList<DeviceTrack> deletions)
+    {
+        return BinaryPlist.WriteWithinLimit(CreateDocument(catalogue, additions, deletions), SyncProtocol.MaxOperationBytes);
+    }
+
+    private static Dictionary<string, object> CreateDocument(
+        DeviceCatalogue catalogue,
+        IReadOnlyList<PreparedTrack> additions,
+        IReadOnlyList<DeviceTrack> deletions)
+    {
         if (additions.Count + deletions.Count is < 1 or > SyncProtocol.MaxTrackChanges)
             throw new InvalidDataException("A sync batch must contain between 1 and 499 track changes.");
 
@@ -40,9 +56,9 @@ internal static class SyncOperations
             operations.Add(Plist.Dict((MediaKeys.Operation, MediaOperations.DeleteTrack), (MediaKeys.PersistentId, track.Id)));
         }
 
-        return BinaryPlist.Write(Plist.Dict(
+        return Plist.Dict(
             (MediaKeys.Revision, (long)checked(catalogue.Anchor + 1)),
             (MediaKeys.Timestamp, DateTime.UtcNow),
-            (MediaKeys.Operations, operations.ToArray())));
+            (MediaKeys.Operations, operations.ToArray()));
     }
 }

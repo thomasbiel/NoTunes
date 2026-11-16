@@ -7,6 +7,93 @@ namespace NoTunes.Tests;
 public sealed class AfcWriteTests
 {
     private const string Target = "Airlock/Media/123.mp3";
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+
+    [Test]
+    public async Task Reports_An_Internal_Write_Close_Timeout_As_An_Io_Error()
+    {
+        var peer = new AfcPeer { AllowWrites = true, StallClose = true };
+        await using var afc = new AfcClient(peer, RequestTimeout);
+        using var input = new MemoryStream(new byte[] { 1 });
+        var exception = Assert.ThrowsAsync<IOException>(() => afc.WriteNewFileAsync(
+            Target,
+            input,
+            input.Length,
+            CancellationToken.None));
+        Assert.That(exception!.InnerException, Is.InstanceOf<OperationCanceledException>());
+        Assert.That(peer.WasDisposed, Is.True);
+    }
+
+    [Test]
+    public async Task Reports_An_Internal_Sync_Lock_Release_Timeout_As_An_Io_Error()
+    {
+        var peer = new AfcPeer { AllowWrites = true, StallClose = true };
+        await using var afc = new AfcClient(peer, RequestTimeout);
+        var lease = await afc.AcquireSyncLockAsync(CancellationToken.None);
+        var exception = Assert.ThrowsAsync<IOException>(async () => await lease.DisposeAsync());
+        Assert.That(exception!.InnerException, Is.InstanceOf<OperationCanceledException>());
+        Assert.That(peer.WasDisposed, Is.True);
+        Assert.DoesNotThrowAsync(async () => await lease.DisposeAsync());
+    }
+
+    [Test]
+    public async Task Preserves_User_Cancellation_When_Sync_Lock_Release_Times_Out()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var peer = new AfcPeer
+        {
+            AllowWrites = true,
+            StallClose = true,
+            OnClose = cancellation.Cancel
+        };
+        await using var afc = new AfcClient(peer, RequestTimeout);
+        var lease = await afc.AcquireSyncLockAsync(cancellation.Token);
+        Assert.CatchAsync<OperationCanceledException>(async () => await lease.DisposeAsync());
+        Assert.That(cancellation.IsCancellationRequested, Is.True);
+        Assert.That(peer.WasDisposed, Is.True);
+    }
+
+    [Test]
+    public async Task Preserves_User_Cancellation_When_Write_Cleanup_Times_Out()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var peer = new AfcPeer { AllowWrites = true, StallClose = true };
+        await using var afc = new AfcClient(peer, RequestTimeout);
+        using var input = new MemoryStream(new byte[] { 1 });
+        var exception = Assert.CatchAsync<OperationCanceledException>(() => afc.WriteNewFileAsync(
+            Target,
+            input,
+            input.Length,
+            cancellation.Token,
+            (_, _) =>
+            {
+                cancellation.Cancel();
+                return Task.CompletedTask;
+            }));
+        Assert.That(exception!.CancellationToken, Is.EqualTo(cancellation.Token));
+        Assert.That(peer.WasDisposed, Is.True);
+    }
+
+    [Test]
+    public async Task Preserves_User_Cancellation_During_Write_Close()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var peer = new AfcPeer
+        {
+            AllowWrites = true,
+            StallClose = true,
+            OnClose = cancellation.Cancel
+        };
+        await using var afc = new AfcClient(peer, RequestTimeout);
+        using var input = new MemoryStream(new byte[] { 1 });
+        Assert.CatchAsync<OperationCanceledException>(() => afc.WriteNewFileAsync(
+            Target,
+            input,
+            input.Length,
+            cancellation.Token));
+        Assert.That(cancellation.IsCancellationRequested, Is.True);
+        Assert.That(peer.WasDisposed, Is.True);
+    }
 
     [Test]
     public async Task Disposing_The_Sync_Lock_Is_Idempotent_And_Does_Not_Use_A_Closed_Connection()

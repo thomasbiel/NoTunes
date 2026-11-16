@@ -61,8 +61,10 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
         
         var batches = 0;
         // Finish and verify additions first; removals are separate batches and never fund the required free-space estimate.
-        foreach (var batch in prepared.Chunk(SyncProtocol.MaxTrackChanges))
+        var added = 0;
+        while (added < prepared.Count)
         {
+            var batch = SyncBatch.Create(catalogue, prepared.Skip(added).Take(SyncProtocol.MaxTrackChanges).ToArray(), []);
             catalogue = await this.ExecuteBatchAsync(
                 mux,
                 device,
@@ -70,26 +72,28 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
                 identity,
                 catalogue,
                 batch,
-                [],
                 journal,
                 cancellationToken);
             
+            added += batch.Additions.Count;
             batches++;
         }
 
-        foreach (var batch in plan.Delete.Chunk(SyncProtocol.MaxTrackChanges))
+        var deleted = 0;
+        while (deleted < plan.Delete.Count)
         {
+            var batch = SyncBatch.Create(catalogue, [], plan.Delete.Skip(deleted).Take(SyncProtocol.MaxTrackChanges).ToArray());
             catalogue = await this.ExecuteBatchAsync(
                 mux,
                 device,
                 timeout,
                 identity,
                 catalogue,
-                [],
                 batch,
                 journal,
                 cancellationToken);
             
+            deleted += batch.Deletions.Count;
             batches++;
         }
 
@@ -102,11 +106,12 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
         TimeSpan timeout,
         LibraryIdentity identity,
         DeviceCatalogue expected,
-        IReadOnlyList<PreparedTrack> additions,
-        IReadOnlyList<DeviceTrack> deletions,
+        SyncBatch batch,
         SyncJournal journal,
         CancellationToken cancellationToken)
     {
+        var additions = batch.Additions;
+        var deletions = batch.Deletions;
         await using var phone = await DeviceSyncConnection.OpenAsync(
             mux,
             device,
@@ -126,7 +131,7 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
         using var signer = await session.BeginAsync(identity, before.Anchor, cancellationToken);
         await phone.Afc.EnsureDirectoryAsync(SyncPaths.MetadataDirectory, cancellationToken);
         await RequireEmptyStagingAsync(phone.Afc, cancellationToken);
-        var operation = SyncOperations.Serialize(before, additions, deletions);
+        var operation = batch.Operation;
         var signature = signer.Sign(operation);
         
         var batchPlan = new SyncPlan(
@@ -211,7 +216,8 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
         }
 
         var actual = after.Tracks.ToDictionary(track => track.Id);
-        if (before.Tracks.Where(track => !deletedIds.Contains(track.Id)).Any(track => actual[track.Id] != track)
+        if (!after.SortNames.Preserves(before.SortNames)
+            || before.Tracks.Where(track => !deletedIds.Contains(track.Id)).Any(track => actual[track.Id] != track)
             || additions.Any(track => actual[track.Id].Path != track.DevicePath || actual[track.Id].Size != track.Source.Size
                 || actual[track.Id].Title != (string)track.Metadata.Item[MediaKeys.Title]))
         {
@@ -223,7 +229,8 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
     {
         if (expected.DatabaseId != actual.DatabaseId || expected.ContainerId != actual.ContainerId
             || expected.Anchor != actual.Anchor || !expected.Tracks.SequenceEqual(actual.Tracks)
-            || !expected.OccupiedIds.SetEquals(actual.OccupiedIds))
+            || !expected.OccupiedIds.SetEquals(actual.OccupiedIds)
+            || !actual.SortNames.Preserves(expected.SortNames) || !expected.SortNames.Preserves(actual.SortNames))
             throw new IOException("The iPhone catalogue changed after planning. Run the sync again.");
     }
 

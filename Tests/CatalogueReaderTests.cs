@@ -6,6 +6,18 @@ namespace NoTunes.Tests;
 public sealed class CatalogueReaderTests
 {
     [Test]
+    public async Task Keeps_Unrelated_Ambiguous_Groups_Readable()
+    {
+        using var fixture = new CatalogueFixture();
+        fixture.Execute("INSERT INTO album VALUES(13,1013,'Album',11,'Other sort')");
+        var result = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var key = CatalogueReader.GroupKey("Album", "Artist");
+        Assert.That(result.Albums[key], Is.Zero);
+        Assert.That(result.SortNames.Albums[key], Is.Null);
+        Assert.That(result.Tracks, Has.Count.EqualTo(1));
+    }
+
+    [Test]
     public async Task Uses_The_Initial_Anchor_For_A_Legacy_Library_Without_An_Atc_Anchor()
     {
         using var fixture = new CatalogueFixture();

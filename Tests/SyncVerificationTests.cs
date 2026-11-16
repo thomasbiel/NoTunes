@@ -6,6 +6,31 @@ namespace NoTunes.Tests;
 public sealed class SyncVerificationTests
 {
     [Test]
+    public void Rejects_Changes_To_Existing_Group_Sort_Names()
+    {
+        var before = SyncPlannerTests.Catalogue([]) with
+        {
+            SortNames = GroupSortNames.Empty with
+            {
+                Artists = new Dictionary<string, string?> { ["Artist"] = "Artist, The" }
+            }
+        };
+        var after = before with
+        {
+            Anchor = before.Anchor + 1,
+            SortNames = before.SortNames with
+            {
+                Artists = new Dictionary<string, string?> { ["Artist"] = "Artist" }
+            }
+        };
+        Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
+            before,
+            after,
+            [],
+            []));
+    }
+
+    [Test]
     public void Accepts_Only_The_Expected_Track_Transition_And_Next_Anchor()
     {
         var before = SyncPlannerTests.Catalogue([new(

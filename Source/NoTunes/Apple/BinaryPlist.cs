@@ -11,6 +11,13 @@ public static class BinaryPlist
 
     public static byte[] Write(object value)
     {
+        return WriteWithinLimit(value, Plist.MaxBytes) ?? throw new InvalidDataException("Property list is too large.");
+    }
+
+    internal static byte[]? WriteWithinLimit(object value, int maxBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
+
         var objects = new List<object>();
         var top = Add(value, 0);
         var refWidth = Width((ulong)objects.Count);
@@ -57,7 +64,7 @@ public static class BinaryPlist
                     throw new InvalidDataException("Unsupported binary property list object.");
             }
 
-            if (stream.Length > Plist.MaxBytes) throw new InvalidDataException("Property list is too large.");
+            if (stream.Length > maxBytes) return null;
         }
 
         var table = (ulong)stream.Position;
@@ -73,7 +80,7 @@ public static class BinaryPlist
         WriteNumber(stream, (ulong)objects.Count, sizeof(ulong));
         WriteNumber(stream, (ulong)top, sizeof(ulong));
         WriteNumber(stream, table, sizeof(ulong));
-        if (stream.Length > Plist.MaxBytes) throw new InvalidDataException("Property list is too large.");
+        if (stream.Length > maxBytes) return null;
 
         return stream.ToArray();
         int Add(object item, int depth)

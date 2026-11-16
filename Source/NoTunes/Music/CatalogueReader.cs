@@ -28,6 +28,14 @@ internal static class CatalogueReader
         """;
     private const string AlbumsSql = "SELECT a.sync_id,a.album,ar.album_artist FROM album a LEFT JOIN album_artist ar USING(album_artist_pid)";
     private const string ArtistsSql = "SELECT sync_id,album_artist FROM album_artist";
+    private const string AlbumSortsSql = """
+        SELECT a.album,ar.album_artist,COALESCE(a.sort_album,a.album,'')
+        FROM album a LEFT JOIN album_artist ar USING(album_artist_pid)
+        """;
+    private const string AlbumArtistSortsSql =
+        "SELECT album_artist,COALESCE(sort_album_artist,album_artist,'') FROM album_artist";
+    private const string ArtistSortsSql = "SELECT item_artist,COALESCE(sort_item_artist,item_artist,'') FROM item_artist";
+    private const string ComposerSortsSql = "SELECT composer,COALESCE(sort_composer,composer,'') FROM composer";
     private const string TracksSql = """
         SELECT s.sync_id, e.title, b.path, e.location, e.file_size, i.media_type, i.remote_location_id
         FROM item i JOIN item_store s USING(item_pid)
@@ -135,7 +143,14 @@ internal static class CatalogueReader
                 tracks,
                 albums,
                 artists,
-                occupied);
+                occupied)
+            {
+                SortNames = new GroupSortNames(
+                    ReadSortNames(connection, AlbumSortsSql, true),
+                    ReadSortNames(connection, AlbumArtistSortsSql),
+                    ReadSortNames(connection, ArtistSortsSql),
+                    ReadSortNames(connection, ComposerSortsSql))
+            };
         }
         catch (Exception e) when (e is SQLiteException or InvalidCastException or FormatException)
         {
@@ -152,7 +167,7 @@ internal static class CatalogueReader
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         using var rows = command.ExecuteReader();
-        var result = new Dictionary<string, long>(StringComparer.Ordinal);
+        var result = new Dictionary<string, long>(GroupNameComparer.Instance);
         while (rows.Read())
         {
             var id = rows.GetInt64(0);
@@ -168,7 +183,30 @@ internal static class CatalogueReader
         return result;
     }
 
-    internal static string GroupKey(string album, string artist) => album + "\0" + artist;
+    internal static string GroupKey(string album, string artist)
+    {
+        var albumKey = album.All(char.IsAscii) ? album.ToUpperInvariant() : album;
+        var artistKey = artist.All(char.IsAscii) ? artist.ToUpperInvariant() : artist;
+        return albumKey + "\0" + artistKey;
+    }
+
+    private static Dictionary<string, string?> ReadSortNames(SQLiteConnection connection, string sql, bool album = false)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        using var rows = command.ExecuteReader();
+        var result = new Dictionary<string, string?>(GroupNameComparer.Instance);
+        while (rows.Read())
+        {
+            var name = rows.IsDBNull(0) ? string.Empty : rows.GetString(0);
+            var key = album ? GroupKey(name, rows.IsDBNull(1) ? string.Empty : rows.GetString(1)) : name;
+            var sort = rows.GetString(album ? 2 : 1);
+            if (!result.TryAdd(key, sort) && !StringComparer.Ordinal.Equals(result[key], sort))
+                result[key] = null;
+        }
+
+        return result;
+    }
 
     private static string Scalar(SQLiteConnection connection, string sql, string? missing = null)
     {

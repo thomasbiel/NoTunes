@@ -33,24 +33,36 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
                 _ => throw new InvalidDataException($"Unsupported MPEG version: {relativePath}")
             };
             var tag = file.Tag;
+            var compilation = file.GetTag(TagLib.TagTypes.Id3v2, false) is TagLib.Id3v2.Tag { IsCompilation: true };
             var title = Text(tag.Title, Path.GetFileNameWithoutExtension(relativePath));
             var artist = Text(tag.FirstPerformer, UnknownArtist);
+            var artistSort = Text(tag.FirstPerformerSort, artist);
             var album = Text(tag.Album, UnknownAlbum);
+            var explicitAlbumArtist = !string.IsNullOrWhiteSpace(tag.FirstAlbumArtist);
+            if (compilation && !explicitAlbumArtist)
+                throw new InvalidDataException($"Compilation requires an explicit album artist before sync: {relativePath}");
+
             var albumArtist = Text(tag.FirstAlbumArtist, artist);
+            var albumArtistSort = Text(tag.FirstAlbumArtistSort, explicitAlbumArtist ? albumArtist : artistSort);
             var item = Plist.Dict(
                 (MediaKeys.Title, title),
                 (MediaKeys.Artist, artist),
                 (MediaKeys.Album, album),
                 (MediaKeys.AlbumArtist, albumArtist),
                 (MediaKeys.SortTitle, Text(tag.TitleSort, title)),
-                (MediaKeys.SortArtist, Text(tag.FirstPerformerSort, artist)),
+                (MediaKeys.SortArtist, artistSort),
                 (MediaKeys.SortAlbum, Text(tag.AlbumSort, album)),
-                (MediaKeys.SortAlbumArtist, Text(tag.FirstAlbumArtistSort, albumArtist)),
+                (MediaKeys.SortAlbumArtist, albumArtistSort),
                 (MediaKeys.Genre, Text(tag.FirstGenre, string.Empty)),
                 (MediaKeys.IsSong, true),
                 (MediaKeys.RememberBookmark, false),
                 (MediaKeys.TotalMilliseconds, (long)file.Properties.Duration.TotalMilliseconds),
                 (MediaKeys.ArtworkChecksum, 0L));
+            if (compilation)
+            {
+                item[MediaKeys.IsCompilation] = true;
+            }
+
             AddNumber(item, MediaKeys.TrackNumber, tag.Track);
             AddNumber(item, MediaKeys.TrackCount, tag.TrackCount);
             AddNumber(item, MediaKeys.DiscNumber, tag.Disc);

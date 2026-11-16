@@ -153,7 +153,8 @@ space for the additions. Invalid or changed source files abort before metadata
 is staged. The iPhone must have room for all additions plus a metadata reserve;
 pending deletions are not counted as available space.
 
-Each batch uses at most 499 track changes, an exclusive AFC sync lock and a fresh
+Each batch uses at most 499 track changes and 4 MiB of serialized operation
+metadata, an exclusive AFC sync lock and a fresh
 paired ATC connection. The saved library identity and current catalogue must
 still match the plan. The live `ReadyForSync` anchor must match too. A signed
 binary operation file and its `.cig` sidecar are staged and read back before
@@ -187,6 +188,13 @@ It supports the observed saved iTunesCDB formats 115 and 117 with VoiceMemo anch
 library initialization, artwork/playlist transfer and reconstruction of MP3
 gapless timing are not implemented. Embedded artwork remains in the transferred
 MP3 bytes but is not separately registered in the Music artwork catalogue.
+
+Compilation flags and explicit album artists are retained. A compilation without
+an album artist is rejected during source preparation, before device writes;
+set the album artist in its MP3 tags first. Existing album, artist and composer
+sort names are preserved when new tracks join their groups. ASCII case variants
+reuse group identities; names containing non-ASCII characters require an exact
+match in each album or artist name.
 
 ## Device prerequisites
 

@@ -1,6 +1,6 @@
 namespace NoTunes.Apple;
 
-internal sealed class AfcFileLease(AfcClient client, ulong handle) : IAsyncDisposable
+internal sealed class AfcFileLease(AfcClient client, ulong handle, CancellationToken cancellationToken) : IAsyncDisposable
 {
     private int disposed;
 
@@ -10,6 +10,14 @@ internal sealed class AfcFileLease(AfcClient client, ulong handle) : IAsyncDispo
             return;
 
         using var deadline = new CancellationTokenSource(AfcClient.CloseTimeout);
-        await client.CloseFileAsync(handle, deadline.Token);
+        try
+        {
+            await client.CloseFileAsync(handle, deadline.Token);
+        }
+        catch (OperationCanceledException e) when (
+            deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new IOException("Timed out releasing the iPhone sync lock.", e);
+        }
     }
 }

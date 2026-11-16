@@ -9,6 +9,7 @@ internal static class SyncPlanner
         Func<DeviceTrack, CancellationToken, Task<string?>> readHash,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var sourceSizes = source.Tracks.Select(track => track.Size).ToHashSet();
         var byHash = new Dictionary<string, Queue<DeviceTrack>>(StringComparer.Ordinal);
         foreach (var track in catalogue.Tracks)
@@ -28,6 +29,7 @@ internal static class SyncPlanner
         var additions = new List<SourceTrack>();
         foreach (var track in source.Tracks)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (byHash.TryGetValue(track.Sha256, out var matches) && matches.TryDequeue(out var match))
                 retained.Add(match.Id);
             else

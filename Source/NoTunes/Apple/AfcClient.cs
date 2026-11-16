@@ -189,6 +189,11 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
                 {
                     await this.CloseFileAsync(handle, deadline.Token);
                 }
+                catch (OperationCanceledException e) when (
+                    success && deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    throw new IOException("Timed out closing the iPhone file.", e);
+                }
                 catch when (!success)
                 {
                     // Preserve the transfer failure; a broken socket cannot be reused.
@@ -224,7 +229,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
                 body,
                 cancellationToken,
                 AfcOperation.Status);
-            return new AfcFileLease(this, handle);
+            return new AfcFileLease(this, handle, cancellationToken);
         }
         catch
         {
@@ -368,8 +373,11 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
 
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < fields.Length; i += 2)
+        {
             if (!result.TryAdd(fields[i], fields[i + 1]))
                 throw new InvalidDataException("Duplicate AFC information key.");
+        }
+
         return result;
     }
 

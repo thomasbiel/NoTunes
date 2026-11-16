@@ -8,6 +8,13 @@ using Microsoft.Extensions.DependencyInjection;
 internal static class Program
 {
     private const string DefaultUiCultureName = "en-US";
+    private const string LongOptionPrefix = "--";
+    private static readonly HashSet<string> ValueOptions = new(StringComparer.Ordinal)
+    {
+        LongOptionPrefix + CliSyntax.Device,
+        LongOptionPrefix + CliSyntax.Timeout,
+        LongOptionPrefix + CliSyntax.StateFolder
+    };
 
     public static async Task<int> Main(string[] args)
     {
@@ -31,17 +38,23 @@ internal static class Program
             var serviceProviderOptions = new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true };
             await using var services = new ServiceCollection().AddNoTunes(output, error).BuildServiceProvider(serviceProviderOptions);
             var commands = services.GetRequiredService<Commands>();
-            using var parser = new Parser(settings => settings.HelpWriter = output);
-            return await parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>(args).MapResult(
+            using var parserOutput = new StringWriter(CultureInfo.InvariantCulture);
+            using var parser = new Parser(settings => settings.HelpWriter = parserOutput);
+            var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>(args);
+            if (result is Parsed<object>) ValidateOptionValues(args);
+
+            return await result.MapResult(
                 (DevicesOptions options) => commands.DevicesAsync(options, cancellation.Token),
                 (ProbeOptions options) => commands.ProbeAsync(options, cancellation.Token),
                 (ScanOptions options) => commands.ScanAsync(options, cancellation.Token),
                 (SyncOptions options) => commands.SyncAsync(options, cancellation.Token),
-                errors =>
+                async errors =>
                 {
-                    return Task.FromResult(errors.All(e => e is HelpRequestedError or HelpVerbRequestedError or VersionRequestedError)
+                    var exitCode = errors.All(e => e is HelpRequestedError or HelpVerbRequestedError or VersionRequestedError)
                         ? ExitCodes.Success
-                        : ExitCodes.InvalidArguments);
+                        : ExitCodes.InvalidArguments;
+                    await (exitCode == ExitCodes.Success ? output : error).WriteAsync(parserOutput.ToString());
+                    return exitCode;
                 });
         }
         catch (InvalidArgumentsException e)
@@ -62,6 +75,33 @@ internal static class Program
         finally
         {
             Console.CancelKeyPress -= onCancel;
+        }
+    }
+
+    private static void ValidateOptionValues(IReadOnlyList<string> arguments)
+    {
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            var argument = arguments[index];
+            if (StringComparer.Ordinal.Equals(argument, LongOptionPrefix)) return;
+
+            var separator = argument.IndexOf('=');
+            var option = separator < 0 ? argument : argument[..separator];
+            if (!ValueOptions.Contains(option)) continue;
+
+            if (separator >= 0)
+            {
+                if (string.IsNullOrWhiteSpace(argument[(separator + 1)..]))
+                    throw new InvalidArgumentsException($"{option} requires a value.");
+
+                continue;
+            }
+
+            if (index + 1 >= arguments.Count || string.IsNullOrWhiteSpace(arguments[index + 1])
+                || arguments[index + 1].StartsWith(LongOptionPrefix, StringComparison.Ordinal))
+                throw new InvalidArgumentsException($"{option} requires a value.");
+
+            index++;
         }
     }
 }
