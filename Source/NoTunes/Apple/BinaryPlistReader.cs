@@ -29,7 +29,7 @@ internal sealed class BinaryPlistReader(byte[] data)
         this.count = Int(this.Number(trailer + ObjectCountOffset, sizeof(ulong)));
         var top = Int(this.Number(trailer + TopObjectOffset, sizeof(ulong)));
         this.table = Int(this.Number(trailer + OffsetTableOffset, sizeof(ulong)));
-        if (this.offsetWidth is not (1 or 2 or 4 or 8) || this.refWidth is not (1 or 2 or 4 or 8) || this.count < 1 || this.count > Plist.MaxObjectCount || top >= this.count || this.table < Signature.Length || (long)this.table + (long)this.count * this.offsetWidth > trailer)
+        if (this.offsetWidth is not (1 or 2 or 4 or 8) || this.refWidth is not (1 or 2 or 4 or 8) || this.count < 1 || this.count > Plist.MaxObjectCount || top >= this.count || this.table < Signature.Length || this.table + (long)this.count * this.offsetWidth > trailer)
             throw new InvalidDataException("Invalid binary property list trailer.");
 
         return this.Object(top, 0);
@@ -82,7 +82,7 @@ internal sealed class BinaryPlistReader(byte[] data)
                 return unchecked((long)this.Number(position, 1 << info));
             case BinaryPlistObjectType.Real when info is SingleWidthExponent or DoubleWidthExponent:
                 this.Slice(position, 1 << info);
-                return info == SingleWidthExponent ? (double)BitConverter.Int32BitsToSingle(unchecked((int)this.Number(position, sizeof(float)))) : BitConverter.Int64BitsToDouble(unchecked((long)this.Number(position, sizeof(double))));
+                return info == SingleWidthExponent ? BitConverter.Int32BitsToSingle(unchecked((int)this.Number(position, sizeof(float)))) : BitConverter.Int64BitsToDouble(unchecked((long)this.Number(position, sizeof(double))));
             case BinaryPlistObjectType.Date when info == DoubleWidthExponent:
                 this.Slice(position, sizeof(ulong));
                 try
@@ -115,7 +115,10 @@ internal sealed class BinaryPlistReader(byte[] data)
                 {
                     var array = new object[entries];
                     for (var i = 0; i < entries; i++)
+                    {
                         array[i] = this.Object(this.Reference(position + i * this.refWidth), depth + 1);
+                    }
+
                     return array;
                 }
 
@@ -174,7 +177,10 @@ internal sealed class BinaryPlistReader(byte[] data)
 
         ulong value = 0;
         for (var i = 0; i < width; i++)
+        {
             value = (value << BitsPerByte) | data[position + i];
+        }
+
         return value;
     }
 

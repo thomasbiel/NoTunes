@@ -88,7 +88,10 @@ public sealed class PlistTests
         var count = start == "<array>" ? Plist.MaxObjectCount : Plist.MaxObjectCount / 2;
         var xml = new StringBuilder("<plist>" + start);
         for (var i = 0; i < count; i++)
+        {
             xml.AppendFormat(entry, i);
+        }
+
         xml.Append(end).Append("</plist>");
         Assert.That(() => Plist.Parse(Encoding.UTF8.GetBytes(xml.ToString())), Throws.TypeOf<InvalidDataException>().With.Message.Contains("complex"));
     }
@@ -182,7 +185,10 @@ public sealed class PlistTests
         stream.WriteByte(0x10);
         stream.WriteByte((byte)references);
         for (var i = 0; i < references; i++)
+        {
             stream.WriteByte(distinctObjects ? (byte)(i + 1) : (byte)1);
+        }
+
         var blobOffset = (uint)stream.Position;
         stream.WriteByte(0x4f);
         stream.WriteByte(0x12);
@@ -196,7 +202,10 @@ public sealed class PlistTests
         var blobCount = distinctObjects ? references : 1;
         BinaryPrimitives.WriteUInt32BigEndian(number, blobOffset);
         for (var i = 0; i < blobCount; i++)
+        {
             stream.Write(number, 0, 4);
+        }
+
         stream.Write(new byte[6]);
         stream.WriteByte(4);
         stream.WriteByte(1);
@@ -231,7 +240,7 @@ public sealed class PlistTests
         stream.WriteByte(0x54);
         stream.Write("leaf"u8);
         var table = (ulong)stream.Position;
-        stream.Write(offsets.ToArray());
+        stream.Write([.. offsets]);
         stream.Write(new byte[32]);
         var fixture = stream.ToArray();
         var trailer = fixture.Length - 32;

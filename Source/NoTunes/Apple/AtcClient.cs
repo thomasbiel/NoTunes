@@ -6,6 +6,10 @@ public sealed class AtcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
     private const long ProbeSession = 1;
     private readonly PlistConnection connection = new(stream, timeout, atc: true);
 
+    internal PlistConnection Connection => this.connection;
+
+    internal bool SupportsGrappa { get; private set; }
+
     public async Task<AtcSyncStatus> ReadSyncStatusAsync(CancellationToken cancellationToken)
     {
         await this.connection.SendAsync(Plist.Dict((AtcKeys.Command, AtcCommands.Ping), (AtcKeys.Session, ProbeSession)), cancellationToken);
@@ -16,6 +20,14 @@ public sealed class AtcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         {
             var message = await this.connection.ReceiveAsync(cancellationToken);
             var command = message.Text(AtcKeys.Command);
+            if (command == AtcCommands.Capabilities && message.TryGetValue(AtcKeys.Parameters, out var capabilities)
+                && capabilities.AsDict().TryGetValue(AtcKeys.Capabilities, out var grappa))
+            {
+                var values = grappa.AsDict();
+                this.SupportsGrappa = values.Number(AtcKeys.CapabilityVersion) == SyncProtocol.CapabilityVersion
+                    && values.Number(AtcKeys.ProtocolVersion) == SyncProtocol.CapabilityVersion;
+            }
+
             if (command == AtcCommands.Ping)
             {
                 await this.connection.SendAsync(Plist.Dict((AtcKeys.Command, AtcCommands.Pong), (AtcKeys.Session, message.Number(AtcKeys.Session))), cancellationToken);

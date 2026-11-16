@@ -7,16 +7,15 @@ public sealed class PlistConnection(Stream stream, TimeSpan timeout, bool atc = 
 {
     private const int HeaderBytes = sizeof(int);
     private const string ConnectionClosedMessage = "The device connection is closed.";
-    private Stream stream = stream;
     private bool broken;
 
-    public Stream Stream => this.stream;
+    public Stream Stream { get; private set; } = stream;
 
     public void UpgradeStream(Stream encryptedStream)
     {
         if (this.broken) throw new IOException(ConnectionClosedMessage);
 
-        this.stream = encryptedStream;
+        this.Stream = encryptedStream;
     }
 
     public async Task SendAsync(Dictionary<string, object> message, CancellationToken cancellationToken)
@@ -33,8 +32,9 @@ public sealed class PlistConnection(Stream stream, TimeSpan timeout, bool atc = 
                 BinaryPrimitives.WriteInt32LittleEndian(packet, payload.Length);
             else
                 BinaryPrimitives.WriteInt32BigEndian(packet, payload.Length);
+            
             payload.CopyTo(packet, HeaderBytes);
-            await this.stream.WriteAsync(packet, deadline.Token);
+            await this.Stream.WriteAsync(packet, deadline.Token);
         }
         catch (OperationCanceledException e) when (!cancellationToken.IsCancellationRequested)
         {
@@ -57,12 +57,12 @@ public sealed class PlistConnection(Stream stream, TimeSpan timeout, bool atc = 
         try
         {
             var header = new byte[HeaderBytes];
-            await this.stream.ReadExactlyAsync(header, deadline.Token);
+            await this.Stream.ReadExactlyAsync(header, deadline.Token);
             var length = atc ? BinaryPrimitives.ReadInt32LittleEndian(header) : BinaryPrimitives.ReadInt32BigEndian(header);
-            if (length < 1 || length > Plist.MaxBytes) throw new InvalidDataException("Invalid device message length.");
+            if (length is < 1 or > Plist.MaxBytes) throw new InvalidDataException("Invalid device message length.");
 
             var payload = new byte[length];
-            await this.stream.ReadExactlyAsync(payload, deadline.Token);
+            await this.Stream.ReadExactlyAsync(payload, deadline.Token);
             return Plist.Parse(payload).AsDict();
         }
         catch (OperationCanceledException e) when (!cancellationToken.IsCancellationRequested)
@@ -85,9 +85,8 @@ public sealed class PlistConnection(Stream stream, TimeSpan timeout, bool atc = 
 
     public async ValueTask DisposeAsync()
     {
-        if (this.broken)
-            return;
+        if (this.broken) return;
         this.broken = true;
-        await this.stream.DisposeAsync();
+        await this.Stream.DisposeAsync();
     }
 }

@@ -8,7 +8,7 @@ namespace NoTunes;
 
 public static class ApplicationServices
 {
-    public static IServiceCollection AddNoTunes(this IServiceCollection services)
+    public static IServiceCollection AddNoTunes(this IServiceCollection services, TextWriter output, TextWriter error)
     {
         if (OperatingSystem.IsWindows())
             services.AddWindowsPlatform();
@@ -16,8 +16,24 @@ public static class ApplicationServices
             services.AddLinuxPlatform();
         else
             throw new PlatformNotSupportedException("NoTunes currently provides platform services for Windows and Linux.");
+        return services.AddApplication(output, error);
+    }
+
+    internal static IServiceCollection AddApplication(this IServiceCollection services, TextWriter output, TextWriter error)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(error);
         services.AddTransient<SourceScanner>();
-        services.AddTransient<Commands>();
+        services.AddTransient(provider => new SyncEngine(
+            provider.GetRequiredService<SourceScanner>(),
+            provider.GetRequiredService<NoTunes.Platform.ISourceFileSystem>(),
+            provider.GetRequiredService<NoTunes.Platform.IUsbMuxTransport>(),
+            error));
+        services.AddTransient(provider => new Commands(
+            provider.GetRequiredService<SourceScanner>(),
+            provider.GetRequiredService<NoTunes.Platform.IUsbMuxTransport>(),
+            provider.GetRequiredService<SyncEngine>(),
+            output));
         return services;
     }
 }

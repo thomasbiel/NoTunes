@@ -44,7 +44,7 @@ public sealed class UsbMuxClient
             if (properties.Text(UsbMuxKeys.ConnectionType) != UsbConnectionType)
                 continue;
             var id = record.Number(UsbMuxKeys.DeviceId);
-            if (id < 1 || id > uint.MaxValue) throw new InvalidDataException("Invalid USB device ID.");
+            if (id is < 1 or > uint.MaxValue) throw new InvalidDataException("Invalid USB device ID.");
 
             var udid = properties.Text(UsbMuxKeys.SerialNumber);
             if (udid.Length == DeviceUdid.ModernCompactLength)
@@ -52,7 +52,7 @@ public sealed class UsbMuxClient
             result.Add(new UsbDevice((uint)id, udid, properties.Number(UsbMuxKeys.ProductId)));
         }
 
-        return result.OrderBy(d => d.Udid, StringComparer.Ordinal).ToArray();
+        return [.. result.OrderBy(d => d.Udid, StringComparer.Ordinal)];
     }
 
     public async Task<Dictionary<string, object>> ReadPairRecordAsync(string udid, CancellationToken cancellationToken)
@@ -89,7 +89,7 @@ public sealed class UsbMuxClient
         }
         catch
         {
-            stream.Dispose();
+            await stream.DisposeAsync();
             throw;
         }
     }

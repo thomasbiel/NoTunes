@@ -11,6 +11,11 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        return await RunAsync(args, Console.Out, Console.Error);
+    }
+
+    private static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error)
+    {
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
         CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.GetCultureInfo(DefaultUiCultureName);
         using var cancellation = new CancellationTokenSource();
@@ -19,31 +24,39 @@ internal static class Program
             e.Cancel = true;
             cancellation.Cancel();
         };
+
         Console.CancelKeyPress += onCancel;
         try
         {
-            using var services = new ServiceCollection().AddNoTunes().BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+            var serviceProviderOptions = new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true };
+            await using var services = new ServiceCollection().AddNoTunes(output, error).BuildServiceProvider(serviceProviderOptions);
             var commands = services.GetRequiredService<Commands>();
-            return await Parser.Default.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>(args).MapResult(
+            using var parser = new Parser(settings => settings.HelpWriter = output);
+            return await parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>(args).MapResult(
                 (DevicesOptions options) => commands.DevicesAsync(options, cancellation.Token),
                 (ProbeOptions options) => commands.ProbeAsync(options, cancellation.Token),
                 (ScanOptions options) => commands.ScanAsync(options, cancellation.Token),
                 (SyncOptions options) => commands.SyncAsync(options, cancellation.Token),
-                errors => Task.FromResult(errors.All(e => e is HelpRequestedError or HelpVerbRequestedError or VersionRequestedError) ? ExitCodes.Success : ExitCodes.InvalidArguments));
+                errors =>
+                {
+                    return Task.FromResult(errors.All(e => e is HelpRequestedError or HelpVerbRequestedError or VersionRequestedError)
+                        ? ExitCodes.Success
+                        : ExitCodes.InvalidArguments);
+                });
         }
         catch (InvalidArgumentsException e)
         {
-            Console.Error.WriteLine($"Error: {e.Message}");
+            await error.WriteLineAsync($"Error: {e.Message}");
             return ExitCodes.InvalidArguments;
         }
         catch (OperationCanceledException)
         {
-            Console.Error.WriteLine("Cancelled.");
+            await error.WriteLineAsync("Cancelled.");
             return ExitCodes.Cancelled;
         }
-        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or System.Net.Sockets.SocketException or System.Security.Authentication.AuthenticationException or ArgumentException or NotSupportedException)
+        catch (Exception e)
         {
-            Console.Error.WriteLine($"Error: {e.Message}");
+            await error.WriteLineAsync($"Error: {e.Message}");
             return ExitCodes.Error;
         }
         finally

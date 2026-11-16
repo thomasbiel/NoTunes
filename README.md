@@ -5,9 +5,11 @@ The intended behavior is to mirror
 all MP3 files in a source folder and its subfolders to the iPhone's built-in Music
 app over USB. No GUI, playlists, transcoding, WSL or external sync executable.
 
-**Current status: native USB transport prototype. Music transfer and deletion are
-not implemented yet. `sync`, including `--dry-run`, returns exit code 4 and does
-not claim to have synchronized anything.**
+`sync` mirrors MP3 files to an existing, initialized iPhone Music library over
+USB. It preserves byte-identical tracks, transfers additions through AFC and
+removes obsolete computer-synced music through signed ATC delta sessions.
+`sync --dry-run` reads the source and device and prints the actual change plan
+without starting a write session.
 
 ## Build and test
 
@@ -20,6 +22,12 @@ CLI parsing uses `CommandLineParser` 2.9.1. Tests use NUnit 4.4.0 and the NUnit
 Visual Studio test adapter. All application output and help text are in English.
 TLS uses the managed `BouncyCastle.Cryptography` library. Pairing private keys
 stay in memory; no Windows key containers or trusted certificates are installed.
+
+MP3 metadata is read with **TagLibSharp 2.3.0**, licensed under **LGPL-2.1-only**.
+The repository includes its [copyright notice](Licenses/TagLibSharp-NOTICE.txt),
+the [full LGPL 2.1 license](Licenses/LGPL-2.1.txt), and
+[third-party notices](THIRD-PARTY-NOTICES.md). These files also accompany build
+and publish output. TagLibSharp is used unmodified as a separate assembly.
 
 ## Source configuration
 
@@ -65,6 +73,18 @@ Each project has its own directory; no project directory contains another projec
 The three platform projects are grouped under the `Platform` solution folder.
 The application uses the SDK's default item discovery within `Source/NoTunes`.
 
+Output is supplied through `TextWriter` instances: the entry point passes
+`Console.Out` and `Console.Error` to `AddNoTunes`. Composition passes them to
+commands and sync services; those services do not access the global console.
+The command-line parser uses the same supplied output writer for help.
+Tests can provide `StringWriter` or `TextWriter.Null` without redirecting global
+process output.
+
+The copied catalogue is read with `System.Data.SQLite` 2.0.4 and the separate
+native `SQLite` 3.53.4 package. This avoids the SQLitePCLRaw dependency chain.
+The native package includes Windows and Linux binaries; both provider paths
+have been exercised by the automated tests.
+
 Within the core, `DeviceProbe` coordinates pairing, device validation, file-service
 checks and optional catalogue capture. `AtcClient` owns ATC startup, Ping/Pong,
 music metrics and strict sync-permission parsing, and returns an `AtcSyncStatus`.
@@ -83,6 +103,8 @@ dotnet run --project Source/NoTunes/NoTunes.csproj -- probe --device 00008030-00
 dotnet run --project Source/NoTunes/NoTunes.csproj -- scan
 dotnet run --project Source/NoTunes/NoTunes.csproj -- scan "D:\Music"
 dotnet run --project Source/NoTunes/NoTunes.csproj -- scan "D:\Music" --json
+dotnet run --project Source/NoTunes/NoTunes.csproj -- sync "D:\Music" --dry-run --json
+dotnet run --project Source/NoTunes/NoTunes.csproj -- sync "D:\Music"
 ```
 
 After building, the equivalent executable is
@@ -106,13 +128,65 @@ After building, the equivalent executable is
   enumerates held directory descriptors and opens files relative to them with
   `openat` and `O_NOFOLLOW`, so replacing a pathname cannot redirect file reads.
   Size and modification time are checked on the opened file handle on both platforms.
-- `sync [folder] [--dry-run] [--device <UDID>]` is reserved for the upcoming native
-  synchronization engine. It currently validates the source and exits with a
-  clear unsupported-operation message.
+- `sync [folder] [--dry-run] [--device <UDID>]` mirrors local MP3 files to
+  computer-synced, local Music tracks. Cloud purchases, remote items, videos and
+  other media types are preserved. Tracks are matched by their complete SHA-256
+  hashes, including duplicate counts; a renamed file does not trigger a transfer.
+  Replacing changed bytes uses an insertion followed by removal of the old track;
+  it creates a new track identity. Unchanged tracks retain their identities.
 
 Device commands take `--timeout` (1–300 seconds per request) and `--json`.
 With multiple USB devices, `probe` requires `--device`; it never chooses one
 arbitrarily. Errors go to stderr. JSON results go to stdout.
+
+### Synchronization and recovery
+
+The first comparison can take time: candidate device files are read over USB and
+hashed on the host. Only files whose size occurs in the source need hashing.
+No device-side file-hash operation is used. Diagnostics go to stderr; `--json`
+prints the plan, dry-run flag and verified batch count to stdout.
+
+Before writes, all new source files are copied to a private temporary directory,
+checked against the scan hashes and read with TagLibSharp. Source access continues
+to use the platform's directory and file guards. This requires temporary disk
+space for the additions. Invalid or changed source files abort before metadata
+is staged. The iPhone must have room for all additions plus a metadata reserve;
+pending deletions are not counted as available space.
+
+Each batch uses at most 499 track changes, an exclusive AFC sync lock and a fresh
+paired ATC connection. The saved library identity and current catalogue must
+still match the plan. The live `ReadyForSync` anchor must match too. A signed
+binary operation file and its `.cig` sidecar are staged and read back before
+metadata completion is announced. Audio is streamed in bounded chunks, read
+back, renamed in the Airlock and completed through ATC. Only expected audio and
+known ancillary-only asset requests are accepted. The host never edits the
+phone's SQLite database or directly deletes its audio files.
+
+Success requires the current session's `SyncFinished`, the next catalogue
+revision, exactly the expected track inventory and byte-identical read-back of
+new permanent audio files. Additions finish and are verified before any removal
+batch begins. Apple's receiver may reset recent play/skip counters during a
+normal sync; byte matching preserves existing track identities, not those
+receiver-maintained recent counters.
+
+Operation journals are stored under the user's local application data in
+`NoTunes`, or under `--state-folder <path>`. The exact operation and signature
+are flushed before staging. A failure leaves `pending.json` and prevents another
+write run from blindly replaying an uncertain operation. `--dry-run` remains
+available to inspect the current state. Automatic recovery of interrupted
+sessions is not implemented: retain the journal and reconcile its operations
+with the phone before clearing it. Completed batches remain recorded even if a
+later batch fails; a multi-batch mirror is not atomic.
+
+An empty source requires `--allow-empty-source` for a write run. A source access
+error aborts the scan and cannot be interpreted as an empty source.
+
+The current implementation requires an existing library identity and `db_info`.
+It supports the observed saved iTunesCDB formats 115 and 117 with VoiceMemo anchor
+1, and initial Media anchor 0 when a legacy library has no ATC anchor yet. New
+library initialization, artwork/playlist transfer and reconstruction of MP3
+gapless timing are not implemented. Embedded artwork remains in the transferred
+MP3 bytes but is not separately registered in the Music artwork catalogue.
 
 ## Device prerequisites
 
@@ -159,9 +233,9 @@ peer over local Unix sockets and DI registration tests.
 connected over USB.** ARM64 execution is also unverified. Container tests do not
 validate physical USB connectivity or replace real-device checks.
 
-### Pairing and previous device validation
+### Pairing and device validation
 
-Connect the iPhone over USB, unlock it and trust the computer. The prototype
+Connect the iPhone over USB, unlock it and trust the computer. The application
 uses the existing pairing record; it does not create or replace pairings.
 The lockdown session requires TLS and verifies the device certificate against
 that record before allowing service access. Pairing certificates
@@ -174,6 +248,14 @@ ATC startup and two matching catalogue captures passed. The database contained
 16,486,400 bytes and its WAL contained 4,115,912 bytes. No music was transferred
 or deleted; this validates the transport and read path.
 
+The write path was subsequently tested on the same phone: one generated MP3
+test title was inserted, verified against the original SHA-256 bytes at its
+permanent path, and removed through a second signed delta session. The catalogue
+advanced from Media anchor 0 to 1 and then 2, and returned from 1,886 to the same
+1,885 original track entries. No existing track was deleted. A full mirror of
+the configured network share has not been run. Regression tests cover the
+phone's missing initial ATC anchor and its older iTunesCDB format 115.
+
 Apple pairing certificates may have an empty issuer name. BouncyCastle 2.7
 [rejects that form during ordinary X.509 parsing](https://github.com/bcgit/bc-csharp/blob/release-2.7.0/crypto/src/asn1/x509/TBSCertificateStructure.cs).
 NoTunes uses a compatibility
@@ -184,12 +266,10 @@ authentication, unchanged certificate bytes and rejection of mismatched pins.
 
 ## Remaining work
 
-1. Parse the verified catalogue snapshots and implement library identity, live
-   anchors and source-to-device matching.
-2. Implement signed ATC sessions, ID3/audio metadata and AFC asset transfers.
-3. Add a persistent operation journal and read-back verification before treating
-   additions, replacements or removals as complete.
-4. Enable `sync --dry-run` with a real device change plan and then enable writes.
+New-library initialization, automatic interrupted-session recovery, separate
+artwork registration, playlist synchronization and detailed MP3 gapless timing
+are not implemented. The existing-library MP3 mirror and read-only change plan
+are available.
 
 The iPhone catalogue must be updated through its sync service, never by editing
 `MediaLibrary.sqlitedb` directly. Documentation used for the protocol boundary:
@@ -210,5 +290,4 @@ The iPhone catalogue must be updated through its sync service, never by editing
 | 1 | Source, device, transport or protocol error |
 | 2 | Invalid command-line syntax |
 | 3 | Probe completed, but the iPhone blocks music synchronization |
-| 4 | Music synchronization is not implemented |
 | 130 | Cancelled with Ctrl+C |

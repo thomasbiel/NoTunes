@@ -51,7 +51,10 @@ public sealed record CatalogueSnapshot(byte[] Database, byte[]? Wal)
     {
         var attributes = new Dictionary<string, IReadOnlyDictionary<string, string>?>(StringComparer.Ordinal);
         foreach (var path in Paths)
+        {
             attributes[path] = await afc.GetFileInfoAsync(path, cancellationToken);
+        }
+
         return attributes;
     }
 }

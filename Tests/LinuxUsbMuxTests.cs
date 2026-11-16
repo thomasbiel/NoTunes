@@ -101,7 +101,7 @@ public sealed class LinuxUsbMuxTests
     public async Task Caller_Cancellation_Is_Preserved()
     {
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
         var mux = new UsbMuxClient(new SilentUsbMuxTransport(), TimeSpan.FromSeconds(1));
         await Assert.ThatAsync(async () => await mux.ListUsbDevicesAsync(cancellation.Token), Throws.InstanceOf<OperationCanceledException>());
     }

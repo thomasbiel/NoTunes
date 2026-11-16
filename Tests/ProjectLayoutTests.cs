@@ -35,12 +35,11 @@ public sealed class ProjectLayoutTests
         var projects = folder!.Elements("Project")
             .Select(project => Path.GetFileNameWithoutExtension((string)project.Attribute("Path")!))
             .ToArray();
-        Assert.That(projects, Is.EquivalentTo(new[]
-        {
+        Assert.That(projects, Is.EquivalentTo([
             "NoTunes.Platform.Abstractions",
             "NoTunes.Platform.Windows",
             "NoTunes.Platform.Linux"
-        }));
+        ]));
     }
 
     private static string GetRepositoryRoot()

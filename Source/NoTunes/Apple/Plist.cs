@@ -30,7 +30,7 @@ public static class Plist
 
     public static object Parse(byte[] data)
     {
-        if (data.Length == 0 || data.Length > MaxBytes) throw new InvalidDataException("Invalid property list size.");
+        if (data.Length is 0 or > MaxBytes) throw new InvalidDataException("Invalid property list size.");
 
         if (data.AsSpan().StartsWith(BinaryPlistFormat.Signature))
             return BinaryPlist.Read(data);
@@ -46,11 +46,15 @@ public static class Plist
             var objects = 0;
             var result = ReadValue(reader, 0, ref objects);
             if (reader.MoveToContent() != XmlNodeType.EndElement)
+            {
                 throw new InvalidDataException("Expected exactly one property list value.");
+            }
 
             reader.ReadEndElement();
             if (reader.MoveToContent() != XmlNodeType.None)
+            {
                 throw new InvalidDataException("Unexpected content after the property list.");
+            }
 
             return result;
         }
@@ -63,6 +67,11 @@ public static class Plist
     public static Dictionary<string, object> AsDict(this object value)
     {
         return value as Dictionary<string, object> ?? throw new InvalidDataException("Expected a property list dictionary.");
+    }
+
+    internal static Dictionary<string, object> Dictionary(this Dictionary<string, object> value, string key)
+    {
+        return value.TryGetValue(key, out var item) ? item.AsDict() : throw new InvalidDataException($"Missing property list dictionary: {key}");
     }
 
     public static string Text(this Dictionary<string, object> value, string key)
@@ -103,13 +112,14 @@ public static class Plist
 
         CountObject(ref objects);
         if (reader.MoveToContent() != XmlNodeType.Element || reader.NamespaceURI.Length != 0)
+        {
             throw new InvalidDataException("Expected a property list value.");
+        }
 
         var type = reader.LocalName;
-        if (type == PlistXmlNames.Dictionary)
-            return ReadDictionary(reader, depth, ref objects);
-        if (type == PlistXmlNames.Array)
-            return ReadArray(reader, depth, ref objects);
+        if (type == PlistXmlNames.Dictionary) return ReadDictionary(reader, depth, ref objects);
+        if (type == PlistXmlNames.Array) return ReadArray(reader, depth, ref objects);
+        
         var text = reader.ReadElementContentAsString();
         return type switch
         {
@@ -130,17 +140,21 @@ public static class Plist
         var result = new Dictionary<string, object>(StringComparer.Ordinal);
         var empty = reader.IsEmptyElement;
         reader.ReadStartElement();
-        if (empty)
-            return result;
+        if (empty) return result;
+        
         while (reader.MoveToContent() != XmlNodeType.EndElement)
         {
             if (!reader.IsStartElement(PlistXmlNames.Key, string.Empty))
+            {
                 throw new InvalidDataException("Expected a property list key.");
+            }
 
             CountObject(ref objects);
             var key = reader.ReadElementContentAsString();
             if (!result.TryAdd(key, ReadValue(reader, depth + 1, ref objects)))
+            {
                 throw new InvalidDataException("Duplicate property list key.");
+            }
         }
 
         reader.ReadEndElement();
@@ -152,12 +166,14 @@ public static class Plist
         var result = new List<object>();
         var empty = reader.IsEmptyElement;
         reader.ReadStartElement();
-        if (empty)
-            return [];
+        if (empty) return [];
         while (reader.MoveToContent() != XmlNodeType.EndElement)
+        {
             result.Add(ReadValue(reader, depth + 1, ref objects));
+        }
+        
         reader.ReadEndElement();
-        return result.ToArray();
+        return [.. result];
     }
 
     private static void CountObject(ref int objects)

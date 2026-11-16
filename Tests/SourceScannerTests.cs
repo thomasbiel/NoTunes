@@ -94,7 +94,7 @@ public sealed class SourceScannerTests
     {
         var file = Path.Combine(this.root, "track.mp3");
         await File.WriteAllTextAsync(file, "abc");
-        using var exclusive = new FileStream(
+        await using var exclusive = new FileStream(
             file,
             FileMode.Open,
             FileAccess.ReadWrite,

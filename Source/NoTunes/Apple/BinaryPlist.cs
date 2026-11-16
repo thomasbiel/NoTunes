@@ -48,7 +48,10 @@ public static class BinaryPlist
                 case BinaryPlistReferences references:
                     WriteLength(stream, (int)(references.Dictionary ? BinaryPlistObjectType.Dictionary : BinaryPlistObjectType.Array) << TypeShift, references.Dictionary ? references.Indices.Length / 2 : references.Indices.Length);
                     foreach (var index in references.Indices)
+                    {
                         WriteNumber(stream, (ulong)index, refWidth);
+                    }
+
                     break;
                 default:
                     throw new InvalidDataException("Unsupported binary property list object.");
@@ -60,7 +63,10 @@ public static class BinaryPlist
         var table = (ulong)stream.Position;
         var offsetWidth = Width(table);
         foreach (var offset in offsets)
+        {
             WriteNumber(stream, offset, offsetWidth);
+        }
+
         stream.Write(new byte[TrailerReservedBytes]);
         stream.WriteByte((byte)offsetWidth);
         stream.WriteByte((byte)refWidth);
@@ -79,13 +85,15 @@ public static class BinaryPlist
             objects.Add(false);
             objects[index] = item switch
             {
-                Dictionary<string, object> dictionary => new BinaryPlistReferences(true, dictionary.Keys.Select(k => Add(k, depth + 1)).Concat(dictionary.Values.Select(v => Add(v, depth + 1))).ToArray()),
+                Dictionary<string, object> dictionary => new BinaryPlistReferences(true,
+                    [.. dictionary.Keys.Select(k => Add(k, depth + 1)), .. dictionary.Values.Select(v => Add(v, depth + 1))]),
                 byte[] bytes => bytes,
-                IEnumerable<object> array => new BinaryPlistReferences(false, array.Select(v => Add(v, depth + 1)).ToArray()),
+                IEnumerable<object> array => new BinaryPlistReferences(false, [.. array.Select(v => Add(v, depth + 1))]),
                 int number => (long)number,
                 long or double or bool or string or DateTime => item,
                 _ => throw new InvalidDataException("Unsupported property list type.")
             };
+
             return index;
         }
     }

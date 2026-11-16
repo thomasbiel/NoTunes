@@ -131,7 +131,7 @@ internal sealed class LinuxSourceSession : ISourceSession
 
     private static SafeFileHandle CheckedHandle(int descriptor, string path)
     {
-        return descriptor >= 0 ? new SafeFileHandle((IntPtr)descriptor, ownsHandle: true) : throw NativeError(path);
+        return descriptor >= 0 ? new SafeFileHandle(descriptor, ownsHandle: true) : throw NativeError(path);
     }
 
     private static IOException NativeError(string path)
@@ -142,7 +142,10 @@ internal sealed class LinuxSourceSession : ISourceSession
     public void Dispose()
     {
         foreach (var handle in this.directories.Values)
+        {
             handle.Dispose();
+        }
+
         this.directories.Clear();
     }
 

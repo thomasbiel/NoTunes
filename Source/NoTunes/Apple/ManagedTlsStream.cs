@@ -45,12 +45,12 @@ public sealed class ManagedTlsStream : Stream
         }
         catch (OperationCanceledException e) when (!cancellationToken.IsCancellationRequested)
         {
-            stream.Dispose();
+            await stream.DisposeAsync();
             throw new IOException("Timed out establishing the encrypted iPhone connection.", e);
         }
         catch
         {
-            stream.Dispose();
+            await stream.DisposeAsync();
             throw;
         }
     }
@@ -74,12 +74,11 @@ public sealed class ManagedTlsStream : Stream
         try
         {
             ObjectDisposedException.ThrowIf(this.disposed != 0, this);
-            if (buffer.IsEmpty)
-                return 0;
+            if (buffer.IsEmpty) return 0;
+            
             while (this.protocol.GetAvailableInputBytes() == 0)
             {
-                if (this.protocol.IsClosed)
-                    return 0;
+                if (this.protocol.IsClosed) return 0;
                 await this.ReceiveRecordsAsync(cancellationToken);
                 await this.FlushRecordsAsync(cancellationToken);
             }
@@ -98,7 +97,7 @@ public sealed class ManagedTlsStream : Stream
         }
         catch
         {
-            this.Dispose();
+            await this.DisposeAsync();
             throw;
         }
         finally
@@ -133,7 +132,7 @@ public sealed class ManagedTlsStream : Stream
         }
         catch
         {
-            this.Dispose();
+            await this.DisposeAsync();
             throw;
         }
         finally
@@ -192,7 +191,7 @@ public sealed class ManagedTlsStream : Stream
         }
         catch
         {
-            this.Dispose();
+            await this.DisposeAsync();
             throw;
         }
         finally

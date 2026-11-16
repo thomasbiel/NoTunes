@@ -8,6 +8,16 @@ internal sealed class AfcPeer : Stream
 {
     public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
 
+    public bool AllowWrites { get; init; }
+
+    public bool FailWrite { get; init; }
+
+    public bool CorruptWrite { get; init; }
+
+    public List<byte[]> WritePackets { get; } = [];
+
+    public HashSet<string> Directories { get; } = new(StringComparer.Ordinal);
+
     private readonly Dictionary<ulong, (string Path, int Offset)> handles = [];
     private MemoryStream input = new();
     private bool closePending;
@@ -69,7 +79,7 @@ internal sealed class AfcPeer : Stream
         return ValueTask.CompletedTask;
     }
 
-    public override void Write(byte[] buffer, int offset, int count) => this.Handle(buffer.AsSpan(offset, count).ToArray());
+    public override void Write(byte[] buffer, int offset, int count) => this.Handle([.. buffer.AsSpan(offset, count)]);
 
     private void Handle(byte[] request)
     {
@@ -79,8 +89,24 @@ internal sealed class AfcPeer : Stream
         var body = request.AsSpan(40);
         switch (operation)
         {
+            case 3:
+                var directory = Encoding.UTF8.GetString(body).TrimEnd('\0');
+                var names = this.Files.Keys.Where(name => name.StartsWith(directory + "/", StringComparison.Ordinal))
+                    .Select(name => name[(directory.Length + 1)..]).ToArray();
+                this.Response(id, 2, Encoding.UTF8.GetBytes(string.Join('\0', new[] { ".", ".." }.Concat(names)) + '\0'));
+                return;
+            case 9 when this.AllowWrites:
+                this.Directories.Add(Encoding.UTF8.GetString(body).TrimEnd('\0'));
+                this.Status(id, 0);
+                return;
             case 10:
                 var path = Encoding.UTF8.GetString(body).TrimEnd('\0');
+                if (this.Directories.Contains(path))
+                {
+                    this.Response(id, 2, Encoding.UTF8.GetBytes("st_ifmt\0S_IFDIR\0"));
+                    return;
+                }
+
                 if (!this.Files.TryGetValue(path, out var file))
                 {
                     this.Status(id, 8);
@@ -90,8 +116,11 @@ internal sealed class AfcPeer : Stream
                 this.Response(id, 2, Encoding.UTF8.GetBytes($"st_ifmt\0S_IFREG\0st_size\0{file.Length}\0st_mtime\01\0"));
                 return;
             case 13:
-                Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(body), Is.EqualTo(1), "Only AFC read-only opens are allowed.");
+                var mode = BinaryPrimitives.ReadUInt64LittleEndian(body);
+                Assert.That(mode == 1 || this.AllowWrites && mode is 2 or 3, Is.True, "Only explicitly enabled writes are allowed.");
                 var name = Encoding.UTF8.GetString(body[8..]).TrimEnd('\0');
+                if (mode == 3 || mode == 2 && !this.Files.ContainsKey(name))
+                    this.Files[name] = [];
                 Assert.That(this.Files.ContainsKey(name), Is.True);
                 var handle = (ulong)++this.Opens;
                 this.handles.Add(handle, (name, 0));
@@ -105,8 +134,33 @@ internal sealed class AfcPeer : Stream
                 var requested = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(body[8..]));
                 var source = this.handles[readHandle];
                 var count = this.EarlyEof ? 0 : Math.Min(Math.Min(this.ChunkLimit, requested), this.Files[source.Path].Length - source.Offset);
-                this.Response(id, 2, this.Files[source.Path].AsSpan(source.Offset, count).ToArray());
+                this.Response(id, 2, [.. this.Files[source.Path].AsSpan(source.Offset, count)]);
                 this.handles[readHandle] = (source.Path, source.Offset + count);
+                return;
+            case 16 when this.AllowWrites:
+                this.WritePackets.Add(request);
+                if (this.FailWrite)
+                {
+                    this.Status(id, 10);
+                    return;
+                }
+
+                var target = this.handles[BinaryPrimitives.ReadUInt64LittleEndian(body)];
+                var content = body[8..].ToArray();
+                if (this.CorruptWrite && content.Length > 0)
+                    content[0] ^= 1;
+                this.Files[target.Path] = [.. this.Files[target.Path], .. content];
+                this.Status(id, 0);
+                return;
+            case 24 when this.AllowWrites:
+                var rename = Encoding.UTF8.GetString(body).TrimEnd('\0').Split('\0');
+                Assert.That(this.Files.ContainsKey(rename[1]), Is.False);
+                this.Files[rename[1]] = this.Files[rename[0]];
+                this.Files.Remove(rename[0]);
+                this.Status(id, 0);
+                return;
+            case 27 when this.AllowWrites:
+                this.Status(id, 0);
                 return;
             case 20:
                 this.Closes++;

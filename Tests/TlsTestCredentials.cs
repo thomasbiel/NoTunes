@@ -48,7 +48,11 @@ internal sealed class TlsTestCredentials
         var original = Asn1Sequence.GetInstance(certificate.GetEncoded());
         var tbs = Asn1Sequence.GetInstance(original[0]);
         var fields = new Asn1Encodable[tbs.Count];
-        for (var index = 0; index < fields.Length; index++) fields[index] = tbs[index];
+        for (var index = 0; index < fields.Length; index++)
+        {
+            fields[index] = tbs[index];
+        }
+
         var issuerIndex = fields[0] is Asn1TaggedObject ? 3 : 2;
         fields[issuerIndex] = new DerSequence();
         var encodedTbs = new DerSequence(fields).GetEncoded();

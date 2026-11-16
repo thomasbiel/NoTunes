@@ -74,7 +74,7 @@ public sealed class ManagedTlsTests
     {
         var raw = new SilentPeerStream();
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
         await Assert.ThatAsync(async () => await ManagedTlsStream.ConnectAsync(
             raw,
             Keys.Value.Identity,
@@ -113,7 +113,10 @@ public sealed class ManagedTlsTests
         Asn1Encodable parameters = DerNull.Instance;
         // Exceed the parser's depth limit without risking a stack overflow in older versions.
         for (var i = 0; i < 128; i++)
+        {
             parameters = new DerSequence(parameters);
+        }
+
         var signatureAlgorithm = new AlgorithmIdentifier(AlgorithmIdentifier.GetInstance(certificate[1]).Algorithm, parameters);
         var nestedCertificate = new DerSequence(certificate[0], signatureAlgorithm, certificate[2]);
         var record = credentials.Record();
@@ -237,7 +240,12 @@ public sealed class ManagedTlsTests
         var record = Keys.Value.Record();
         record["HostID"] = "test-host";
         record["SystemBUID"] = "test-buid";
-        var raw = new ScriptedStream(ProtocolFrames.UsbMux(1, Plist.Dict(("Number", 0L))).Concat(ProtocolFrames.PlistMessage(Plist.Dict(("Request", "QueryType"), ("Type", "com.apple.mobile.lockdown")))).Concat(ProtocolFrames.PlistMessage(sessionReply)).ToArray(), maxReadBytes: int.MaxValue);
+        var raw = new ScriptedStream(
+        [
+            .. ProtocolFrames.UsbMux(1, Plist.Dict(("Number", 0L))),
+            .. ProtocolFrames.PlistMessage(Plist.Dict(("Request", "QueryType"), ("Type", "com.apple.mobile.lockdown"))),
+            .. ProtocolFrames.PlistMessage(sessionReply)
+        ], maxReadBytes: int.MaxValue);
         var pairing = new ScriptedStream(ProtocolFrames.UsbMux(2, Plist.Dict(("PairRecordData", Plist.ToXml(record)))), maxReadBytes: int.MaxValue);
         return (new ReplyUsbMuxTransport(raw, pairing), raw);
     }
@@ -251,7 +259,7 @@ public sealed class ManagedTlsTests
         var server = Task.Run(async () =>
         {
             using var serverSocket = await listener.AcceptTcpClientAsync(deadline.Token);
-            using var onCancel = deadline.Token.Register(serverSocket.Dispose);
+            await using var onCancel = deadline.Token.Register(serverSocket.Dispose);
             var protocol = new TlsServerProtocol(serverSocket.GetStream());
             try
             {

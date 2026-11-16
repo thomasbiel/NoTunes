@@ -1,0 +1,50 @@
+namespace NoTunes.Music;
+
+internal static class MediaKeys
+{
+    public const string Operation = "operation";
+    public const string PersistentId = "pid";
+    public const string DatabaseInfo = "db_info";
+    public const string PrimaryContainerId = "primary_container_pid";
+    public const string Item = "item";
+    public const string Audio = "avformat_info";
+    public const string Location = "location";
+    public const string Kind = "kind";
+    public const string Stats = "item_stats";
+    public const string Revision = "revision";
+    public const string Timestamp = "timestamp";
+    public const string Operations = "operations";
+    public const string Title = "title";
+    public const string Artist = "artist";
+    public const string Album = "album";
+    public const string AlbumArtist = "album_artist";
+    public const string AlbumId = "album_pid";
+    public const string ArtistId = "artist_pid";
+    public const string SortTitle = "sort_name";
+    public const string SortArtist = "sort_artist";
+    public const string SortAlbum = "sort_album";
+    public const string SortAlbumArtist = "sort_album_artist";
+    public const string Genre = "genre";
+    public const string IsSong = "is_song";
+    public const string RememberBookmark = "remember_bookmark";
+    public const string TotalMilliseconds = "total_time_ms";
+    public const string ArtworkChecksum = "artwork_checksum";
+    public const string TrackNumber = "track_number";
+    public const string TrackCount = "track_count";
+    public const string DiscNumber = "disc_number";
+    public const string DiscCount = "disc_count";
+    public const string Year = "year";
+    public const string Composer = "composer";
+    public const string SortComposer = "sort_composer";
+    public const string Comment = "comment";
+    public const string AudioFormat = "audio_format";
+    public const string SampleRate = "sample_rate";
+    public const string Channels = "channels";
+    public const string BitRate = "bit_rate";
+    public const string Duration = "duration";
+    public const string UserPlayCount = "play_count_user";
+    public const string RecentPlayCount = "play_count_recent";
+    public const string UserSkipCount = "skip_count_user";
+    public const string RecentSkipCount = "skip_count_recent";
+    public const string HasBeenPlayed = "has_been_played";
+}

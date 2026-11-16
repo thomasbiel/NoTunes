@@ -34,7 +34,7 @@ public sealed class LinuxSourceSessionTests
         Directory.CreateSymbolicLink(this.source, this.outside);
         this.links.Add(this.source);
         var entries = session.EnumerateDirectory(new DirectoryInfo(this.source)).ToArray();
-        Assert.That(entries.Select(entry => entry.Name), Is.EqualTo(new[] { "original.mp3" }));
+        Assert.That(entries.Select(entry => entry.Name), Is.EqualTo(["original.mp3"]));
         await using var stream = session.OpenRead(new FileInfo(Path.Combine(this.source, "original.mp3")));
         using var reader = new StreamReader(stream);
         Assert.That(await reader.ReadToEndAsync(), Is.EqualTo("original"));

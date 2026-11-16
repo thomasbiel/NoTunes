@@ -20,18 +20,18 @@ public sealed class PlatformServicesTests
             registrations.AddWindowsPlatform();
         else
             registrations.AddLinuxPlatform();
-        registrations.AddTransient<SourceScanner>();
-        registrations.AddTransient<Commands>();
+        registrations.AddApplication(TextWriter.Null, TextWriter.Null);
         using var services = registrations.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true });
         Assert.That(services.GetRequiredService<IUsbMuxTransport>(), windows ? Is.TypeOf<WindowsUsbMuxTransport>() : Is.TypeOf<LinuxUsbMuxTransport>());
         Assert.That(services.GetRequiredService<ISourceFileSystem>(), windows ? Is.TypeOf<WindowsSourceFileSystem>() : Is.TypeOf<LinuxSourceFileSystem>());
         Assert.That(services.GetRequiredService<Commands>(), Is.Not.Null);
+        Assert.That(services.GetRequiredService<SyncEngine>(), Is.Not.Null);
     }
 
     [Test]
     public void Application_Registers_The_Current_Platform()
     {
-        using var services = new ServiceCollection().AddNoTunes().BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+        using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
         Assert.That(services.GetRequiredService<IUsbMuxTransport>(), OperatingSystem.IsWindows() ? Is.TypeOf<WindowsUsbMuxTransport>() : Is.TypeOf<LinuxUsbMuxTransport>());
         Assert.That(services.GetRequiredService<Commands>(), Is.Not.Null);
     }
@@ -70,7 +70,7 @@ public sealed class PlatformServicesTests
         {
             await File.WriteAllTextAsync(actual, "abc");
             var fileSystem = new InjectedSourceFileSystem(actual);
-            using var services = new ServiceCollection().AddSingleton<ISourceFileSystem>(fileSystem).AddTransient<SourceScanner>().BuildServiceProvider();
+            await using var services = new ServiceCollection().AddSingleton<ISourceFileSystem>(fileSystem).AddTransient<SourceScanner>().BuildServiceProvider();
             var result = await services.GetRequiredService<SourceScanner>().ScanAsync(root, CancellationToken.None);
             Assert.That(result.Tracks.Single().RelativePath, Is.EqualTo("injected.mp3"));
             Assert.That(result.TotalBytes, Is.EqualTo(3));

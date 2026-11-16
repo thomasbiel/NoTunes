@@ -31,6 +31,22 @@
   the guard, or after the final guard in a consecutive group.
 - Keep one class per file; extract helper classes into their own files.
 - Format auto-properties on one line, for example `public required bool SyncAllowed { get; init; }`.
+- Give protocol values, keys, paths, offsets and limits descriptive constants or enums; avoid magic numbers and strings.
+- Use `string.Empty` instead of empty string literals.
+- Use injected `TextWriter` instances for output and diagnostics. Only the
+  application entry point selects `System.Console.Out` and `System.Console.Error`;
+  pass them through callers/DI instead of accessing the global console in services.
+- Always enclose `for` and `foreach` loop bodies in braces, including single-statement bodies.
+
+## Dependency licenses
+
+- When adding or updating a dependency, retain its required license text,
+  copyright notices and attribution in the repository's license/NOTICE area.
+- Document the use of LGPL licensed dependencies in `THIRD-PARTY-NOTICES.md`; include the complete, unmodified license text and the upstream authors' copyright notice under `Licenses/`.
+- Ship the license texts and notices with build and publish output, not only as
+  external links. Keep the original notices when updating a package.
+- Record the corresponding upstream source/version and whether the dependency
+  has been modified.
 
 ## Project layout
 

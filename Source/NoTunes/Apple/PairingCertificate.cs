@@ -11,7 +11,7 @@ internal static class PairingCertificate
     {
         if (content.Length == 0) throw new InvalidDataException("The saved pairing certificate is empty.");
 
-        if (content[0] == 0x30) return content.ToArray();
+        if (content[0] == 0x30) return [.. content];
         using var reader = new StringReader(Encoding.UTF8.GetString(content));
         var pem = new PemReader(reader).ReadPemObject();
         if (pem is null || !StringComparer.Ordinal.Equals(pem.Type, "CERTIFICATE"))
@@ -36,7 +36,11 @@ internal static class PairingCertificate
                 // Apple pairing certificates can have an empty issuer. Only the internal crypto view
                 // gets a placeholder; TLS transmission and certificate pinning use the original DER.
                 var fields = new Asn1Encodable[tbs.Count];
-                for (var index = 0; index < fields.Length; index++) fields[index] = tbs[index];
+                for (var index = 0; index < fields.Length; index++)
+                {
+                    fields[index] = tbs[index];
+                }
+
                 fields[issuerIndex] = new X509Name("CN=Apple Pairing");
                 certificate = new DerSequence(new DerSequence(fields), certificate[1], certificate[2]);
             }

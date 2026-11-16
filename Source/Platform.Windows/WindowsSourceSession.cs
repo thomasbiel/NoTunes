@@ -29,7 +29,10 @@ internal sealed class WindowsSourceSession : ISourceSession
             // Pin ancestors first: OPEN_REPARSE_POINT only protects the last path component.
             var ancestors = new Stack<DirectoryInfo>();
             for (var directory = root; directory is not null; directory = directory.Parent)
+            {
                 ancestors.Push(directory);
+            }
+
             while (ancestors.TryPop(out var directory))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -130,7 +133,10 @@ internal sealed class WindowsSourceSession : ISourceSession
     public void Dispose()
     {
         for (var i = this.directories.Count - 1; i >= 0; i--)
+        {
             this.directories[i].Dispose();
+        }
+
         this.directories.Clear();
     }
 

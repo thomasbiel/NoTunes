@@ -1,0 +1,21 @@
+TagLibSharp 2.3.0 (TagLib#)
+
+Copyright (c) 2006-2007 Brian Nickel.
+Copyright (c) 2009-2020 Other contributors.
+
+Authors listed by the NuGet package:
+Brian Nickel, Gabriel Burt, Stephen Shaw, etc.
+
+The copyright and author notices above are reproduced from the metadata of
+the unmodified TagLibSharp 2.3.0 NuGet package.
+
+License: GNU Lesser General Public License version 2.1 only (LGPL-2.1-only).
+The complete license is included in LGPL-2.1.txt beside this notice.
+
+Package: https://www.nuget.org/packages/TagLibSharp/2.3.0
+Corresponding source: https://github.com/mono/taglib-sharp/tree/TaglibSharp-2.3.0.0
+Source archive: https://github.com/mono/taglib-sharp/archive/refs/tags/TaglibSharp-2.3.0.0.tar.gz
+License source: https://raw.githubusercontent.com/mono/taglib-sharp/TaglibSharp-2.3.0.0/COPYING
+
+NoTunes uses this library to read MP3 tags and audio properties. The library
+has not been modified and is supplied as the separate TaglibSharp.dll assembly.

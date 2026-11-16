@@ -66,7 +66,10 @@ public sealed class CliProcessTests
         };
         start.ArgumentList.Add(typeof(ApplicationServices).Assembly.Location);
         foreach (var argument in arguments)
+        {
             start.ArgumentList.Add(argument);
+        }
+
         using var process = Process.Start(start)!;
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var output = process.StandardOutput.ReadToEndAsync(deadline.Token);

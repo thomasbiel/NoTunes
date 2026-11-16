@@ -58,7 +58,7 @@ public sealed class LockdownClient : IAsyncDisposable
             info.Text(LockdownKeys.BuildVersion));
     }
 
-    public async Task<object> GetValueAsync(string? domain, string? key, CancellationToken cancellationToken)
+    private async Task<object> GetValueAsync(string? domain, string? key, CancellationToken cancellationToken)
     {
         var fields = new Dictionary<string, object>();
         if (domain is not null)
@@ -100,7 +100,7 @@ public sealed class LockdownClient : IAsyncDisposable
 
         var reply = await this.RequestAsync(LockdownRequests.StartService, Plist.Dict((LockdownKeys.Service, name)), cancellationToken);
         var port = reply.Number(LockdownKeys.Port);
-        if (port < 1 || port > ushort.MaxValue)
+        if (port is < 1 or > ushort.MaxValue)
             throw new InvalidDataException("The iPhone returned an invalid service port.");
 
         var stream = await this.mux.ConnectDeviceAsync(this.device, (ushort)port, cancellationToken);

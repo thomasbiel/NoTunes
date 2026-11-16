@@ -23,7 +23,9 @@ internal sealed class BudgetSourceSession(DirectoryInfo rootDirectory, bool fail
         try
         {
             foreach (var entry in directory.EnumerateFileSystemInfos())
+            {
                 yield return new SourceEntry(entry.Name, entry.Attributes);
+            }
         }
         finally
         {

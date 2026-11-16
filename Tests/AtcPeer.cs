@@ -38,7 +38,7 @@ internal sealed class AtcPeer : Stream
             var size = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             offset += sizeof(int);
             Assert.That(size, Is.InRange(1, bytes.Length - offset));
-            messages.Add(BinaryPlist.Read(bytes.AsSpan(offset, size).ToArray()).AsDict());
+            messages.Add(BinaryPlist.Read([.. bytes.AsSpan(offset, size)]).AsDict());
             offset += size;
         }
 

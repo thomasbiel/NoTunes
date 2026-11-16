@@ -53,7 +53,9 @@ public sealed class SourceScanner(ISourceFileSystem fileSystem)
         finally
         {
             foreach (var directory in directories)
+            {
                 directory.Entries.Dispose();
+            }
         }
 
         tracks.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.RelativePath, b.RelativePath));
