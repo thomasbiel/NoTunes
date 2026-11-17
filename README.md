@@ -95,6 +95,15 @@ The command-line parser uses the same supplied output writer for help.
 Tests can provide `StringWriter` or `TextWriter.Null` without redirecting global
 process output.
 
+`SyncEngineIntegrationTests` exercise the complete sync engine with real source
+files, SQLite catalogues, durable journals and the AFC/ATC clients. An internal
+connection factory substitutes a simulated device after pairing; the normal
+connection factory is unchanged. The tests cover multiple addition batches before
+deletions, artwork-only and mixed artwork updates, dry-run with pending recovery,
+audio verification failures, interrupted transfers and interrupted recovery.
+Pairing and TLS have separate protocol tests; the simulated receiver does not
+replace physical-iPhone validation.
+
 The copied catalogue is read with `System.Data.SQLite` 2.0.4 and the separate
 native `SQLite` 3.53.4 package. This avoids the SQLitePCLRaw dependency chain.
 The native package includes Windows and Linux binaries; both provider paths
@@ -137,7 +146,9 @@ After building, the equivalent executable is
   and the phone's SQLite database is never edited directly. Existing libraries,
   foreign preferences and saved host catalogues are refused. Run `init` again
   after an interruption: it reuses its saved identities and verifies any partial
-  preference writes before completing them. A partial catalogue commit without
+  preference writes before completing them. If initialization has already committed,
+  a write run clears matching metadata staging remnants under the sync lock.
+  A partial catalogue commit without
   the primary container or first Media revision is refused and requires manual
   reconciliation. `--dry-run` sends no sync request
   and writes no device files. The initial iOS database must exist; open Music on
@@ -231,8 +242,10 @@ Operation journals are stored under the user's local application data in
 are flushed before staging. Version 2 journals also retain the before-catalogue,
 prepared metadata and verified durable audio/JPEG copies in private state storage.
 Journal metadata is limited to 256 MiB before any device operation is staged;
-audio and JPEG data are kept in separate files.
-A failure leaves `pending.json`. The next write run reconciles that batch before
+audio and JPEG data are kept in separate files. If preparing these copies or saving
+their journal fails, the unjournaled copies are removed; an existing pending batch
+retains its recovery evidence.
+A failure after journal creation leaves `pending.json`. The next write run reconciles that batch before
 planning new changes: unapplied operations are archived, completed results are
 verified, and only that batch's unfilled insertions are removed through a new signed
 compensating session before the source plan retries them. Interrupted artwork-only

@@ -22,12 +22,12 @@ internal sealed record CatalogueCheckpoint(
             catalogue.DatabaseId,
             catalogue.ContainerId,
             catalogue.Anchor,
-            catalogue.Tracks.ToArray(),
+            [.. catalogue.Tracks],
             new Dictionary<string, long>(catalogue.Albums),
             new Dictionary<string, long>(catalogue.Artists),
-            catalogue.OccupiedIds.ToArray(),
+            [.. catalogue.OccupiedIds],
             catalogue.SortNames,
-            catalogue.ProtectedItems.ToArray(),
+            [.. catalogue.ProtectedItems],
             catalogue.ArtworkAvailable,
             catalogue.ArtworkHighWaterMark,
             new Dictionary<long, ArtworkReference>(catalogue.TrackArtwork),
@@ -41,7 +41,7 @@ internal sealed record CatalogueCheckpoint(
             this.DatabaseId,
             this.ContainerId,
             this.Anchor,
-            this.Tracks.Select(track => track with { Metadata = this.TrackMetadata.GetValueOrDefault(track.Id) }).ToArray(),
+            [.. this.Tracks.Select(track => track with { Metadata = this.TrackMetadata.GetValueOrDefault(track.Id) })],
             new Dictionary<string, long>(this.Albums, GroupNameComparer.Instance),
             new Dictionary<string, long>(this.Artists, GroupNameComparer.Instance),
             this.OccupiedIds.ToHashSet())
@@ -51,10 +51,13 @@ internal sealed record CatalogueCheckpoint(
                 new Dictionary<string, string?>(this.SortNames.AlbumArtists, GroupNameComparer.Instance),
                 new Dictionary<string, string?>(this.SortNames.Artists, GroupNameComparer.Instance),
                 new Dictionary<string, string?>(this.SortNames.Composers, GroupNameComparer.Instance)),
-            ProtectedItems = this.ProtectedItems.Select(item => item with
-            {
-                Metadata = this.ProtectedMetadata.GetValueOrDefault(item.ItemId)
-            }).ToArray(),
+            ProtectedItems =
+            [
+                .. this.ProtectedItems.Select(item => item with
+                {
+                    Metadata = this.ProtectedMetadata.GetValueOrDefault(item.ItemId)
+                })
+            ],
             ArtworkAvailable = this.ArtworkAvailable,
             ArtworkHighWaterMark = this.ArtworkHighWaterMark,
             TrackArtwork = this.TrackArtwork

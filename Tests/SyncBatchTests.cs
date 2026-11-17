@@ -25,7 +25,7 @@ public sealed class SyncBatchTests
         var batches = 0;
         while (received.Count < tracks.Length)
         {
-            var batch = SyncBatch.Create(catalogue, tracks.Skip(received.Count).ToArray(), []);
+            var batch = SyncBatch.Create(catalogue, [.. tracks.Skip(received.Count)], []);
             Assert.That(batch.Operation.Length, Is.LessThanOrEqualTo(SyncProtocol.MaxOperationBytes));
             using var signer = new GrappaSigner(GrappaSignerTests.Reply());
             Assert.That(signer.Sign(batch.Operation), Has.Length.EqualTo(21));

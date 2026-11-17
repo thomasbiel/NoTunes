@@ -45,12 +45,12 @@ internal static class SyncRecovery
         var incompleteIds = incomplete.Select(track => track.Id).ToHashSet();
         var projected = actual with
         {
-            Tracks = actual.Tracks.Where(track => !incompleteIds.Contains(track.Id)).ToArray()
+            Tracks = [.. actual.Tracks.Where(track => !incompleteIds.Contains(track.Id))]
         };
         var presentIds = actual.Tracks.Select(track => track.Id).ToHashSet();
         var appliedDeletions = pending.Deletions.Where(track => !presentIds.Contains(track.Id)).ToArray();
         SyncEngine.VerifyResult(before, projected,
-            additions.Where(track => presentIds.Contains(track.Id) && !incompleteIds.Contains(track.Id)).ToArray(),
+            [.. additions.Where(track => presentIds.Contains(track.Id) && !incompleteIds.Contains(track.Id))],
             appliedDeletions);
         return [.. incomplete, .. remainingDeletions];
     }

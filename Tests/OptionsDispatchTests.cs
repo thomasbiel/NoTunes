@@ -13,7 +13,7 @@ public sealed class OptionsDispatchTests
     public async Task Executes_A_Parsed_Scan_Through_The_Common_Options_Base()
     {
         using var source = new SyncWorkspace();
-        using var output = new StringWriter();
+        await using var output = new StringWriter();
         await using var services = new ServiceCollection().AddNoTunes(output, TextWriter.Null).BuildServiceProvider();
         using var parser = new CommandLine.Parser(settings => settings.HelpWriter = null);
         var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions>(

@@ -70,7 +70,7 @@ public sealed class AtcSyncSessionTests
             AllowWrites = true,
             BeforeFileWriteReplyAsync = async token =>
             {
-                cancellation.Cancel();
+                await cancellation.CancelAsync();
                 await Task.Delay(System.Threading.Timeout.Infinite, token);
             }
         };

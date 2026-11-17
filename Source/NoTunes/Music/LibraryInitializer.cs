@@ -40,41 +40,60 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
             ? JsonSerializer.Deserialize<InitializationState>(await File.ReadAllBytesAsync(statePath, cancellationToken))
                 ?? throw new InvalidDataException("Invalid initialization record.")
             : null;
+        
         var before = await ReadAsync(afc, cancellationToken);
         if (before.DatabaseId != 0)
         {
             if (saved is null || before.DatabaseId != saved.DatabaseId || before.ContainerId != saved.ContainerId)
+            {
                 throw new IOException("This iPhone already belongs to a music library. Use sync; init will not replace it.");
+            }
 
             if (before.Anchor < SyncProtocol.FirstMediaRevision)
             {
-                throw new IOException("The music library initialization is incomplete: "
-                    + "Media revision 1 has not been committed.");
+                throw new IOException("The music library initialization is incomplete: Media revision 1 has not been committed.");
             }
 
             await RequirePreferencesAsync(afc, saved, cancellationToken);
+            if (!options.DryRun)
+            {
+                await ClearCompletedStagingAsync(
+                    afc,
+                    saved,
+                    before,
+                    cancellationToken);
+            }
+
             return new InitializationResult(device, options.DryRun, true, before.DatabaseId);
         }
 
         if (before.Anchor != SyncProtocol.UninitializedMediaRevision || before.Tracks.Count != 0)
+        {
             throw new IOException("Initialization requires an unsynced library at Media revision 0.");
+        }
 
         foreach (var path in new[] { SyncPaths.SavedCatalogue, ArtworkDatabase.Path })
         {
             if (await afc.GetFileInfoAsync(path, cancellationToken) is not null)
+            {
                 throw new IOException("Initialization refuses existing host state: " + path);
+            }
         }
 
         if (await afc.GetFileInfoAsync(SyncPaths.MusicDirectory, cancellationToken) is not null
             && (await afc.ReadDirectoryAsync(SyncPaths.MusicDirectory, cancellationToken)).Count != 0)
+        {
             throw new IOException("Initialization refuses an occupied music directory.");
+        }
 
         if (saved is null)
         {
             foreach (var path in new[] { SyncPaths.Preferences, SyncPaths.PreferencesPlist })
             {
                 if (await afc.GetFileInfoAsync(path, cancellationToken) is not null)
+                {
                     throw new IOException("Initialization refuses existing library preferences: " + path);
+                }
             }
 
             var ids = before.OccupiedIds.ToHashSet();
@@ -104,25 +123,16 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
         DeviceState.Save(statePath, saved);
         await using var syncLock = await afc.AcquireSyncLockAsync(cancellationToken);
         SyncEngine.RequireUnchanged(before, await ReadAsync(afc, cancellationToken));
-        if (saved.Signature is not null)
-        {
-            await DeviceStaging.RemoveMatchingAsync(afc, SyncPaths.Metadata, saved.Operation, cancellationToken);
-            await DeviceStaging.RemoveMatchingAsync(
-                afc,
-                SyncPaths.Metadata + SyncPaths.SignatureSuffix,
-                saved.Signature,
-                cancellationToken);
-        }
-
-        await SyncEngine.RequireEmptyStagingAsync(afc, cancellationToken);
+        await ClearMetadataAsync(afc, saved, cancellationToken);
         var identity = LibraryIdentity.Parse(saved.Preferences);
         var session = new AtcSyncSession(atc, error);
         using var signer = await session.BeginAsync(identity, SyncProtocol.UninitializedMediaRevision, cancellationToken);
         saved = saved with { Signature = signer.Sign(saved.Operation) };
+        
         DeviceState.Save(statePath, saved);
         await WritePreferenceAsync(afc, SyncPaths.Preferences, saved.Preferences, cancellationToken);
-        await WritePreferenceAsync(afc, SyncPaths.PreferencesPlist, LibraryPreferences.Wrap(saved.Preferences),
-            cancellationToken);
+        await WritePreferenceAsync(afc, SyncPaths.PreferencesPlist, LibraryPreferences.Wrap(saved.Preferences), cancellationToken);
+        
         await afc.EnsureDirectoryAsync(SyncPaths.MetadataDirectory, cancellationToken);
         await DeviceStaging.WriteVerifiedAsync(afc, SyncPaths.Metadata, saved.Operation, cancellationToken);
         await DeviceStaging.WriteVerifiedAsync(
@@ -130,6 +140,7 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
             SyncPaths.Metadata + SyncPaths.SignatureSuffix,
             saved.Signature,
             cancellationToken);
+        
         await session.FinishMetadataAsync(SyncProtocol.UninitializedMediaRevision, cancellationToken);
         await session.TransferAsync(afc, [], new HashSet<long>(), cancellationToken);
         for (var attempt = 0; attempt < VerificationAttempts; attempt++)
@@ -138,11 +149,16 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
             {
                 var after = await ReadAsync(afc, cancellationToken);
                 SyncEngine.VerifyResult(before with
-                {
-                    DatabaseId = saved.DatabaseId,
-                    ContainerId = saved.ContainerId
-                }, after, [], []);
+                    {
+                        DatabaseId = saved.DatabaseId,
+                        ContainerId = saved.ContainerId
+                    },
+                    after,
+                    [],
+                    []);
+                
                 await RequirePreferencesAsync(afc, saved, cancellationToken);
+                await ClearMetadataAsync(afc, saved, cancellationToken);
                 await error.WriteLineAsync("Verified new music library at Media revision 1.");
                 return new InitializationResult(device, false, false, after.DatabaseId);
             }
@@ -153,6 +169,44 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
         }
 
         throw new IOException("Initialization finished but its result could not be verified. Run init again.");
+    }
+
+    private static async Task ClearCompletedStagingAsync(
+        AfcClient afc,
+        InitializationState saved,
+        DeviceCatalogue expected,
+        CancellationToken cancellationToken)
+    {
+        if (await afc.GetFileInfoAsync(SyncPaths.MetadataDirectory, cancellationToken) is null || 
+            (await afc.ReadDirectoryAsync(SyncPaths.MetadataDirectory, cancellationToken)).Count == 0) return;
+
+        await using var syncLock = await afc.AcquireSyncLockAsync(cancellationToken);
+        SyncEngine.RequireUnchanged(expected, await ReadAsync(afc, cancellationToken));
+        await RequirePreferencesAsync(afc, saved, cancellationToken);
+        await ClearMetadataAsync(afc, saved, cancellationToken);
+    }
+
+    private static async Task ClearMetadataAsync(
+        AfcClient afc,
+        InitializationState saved,
+        CancellationToken cancellationToken)
+    {
+        if (saved.Signature is not null)
+        {
+            await DeviceStaging.RemoveMatchingAsync(
+                afc,
+                SyncPaths.Metadata,
+                saved.Operation,
+                cancellationToken);
+            
+            await DeviceStaging.RemoveMatchingAsync(
+                afc,
+                SyncPaths.Metadata + SyncPaths.SignatureSuffix,
+                saved.Signature,
+                cancellationToken);
+        }
+
+        await SyncEngine.RequireEmptyStagingAsync(afc, cancellationToken);
     }
 
     private static async Task WritePreferenceAsync(
@@ -179,7 +233,9 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
     {
         await CheckPreferenceOwnershipAsync(afc, saved, allowPartial: false, cancellationToken);
         if (await LibraryIdentity.ReadAsync(afc, cancellationToken) != LibraryIdentity.Parse(saved.Preferences))
+        {
             throw new IOException("The initialized library identity changed.");
+        }
     }
 
     private static async Task CheckPreferenceOwnershipAsync(
@@ -198,13 +254,17 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
 
             var bytes = await afc.ReadFileAsync(path, expected.Length, cancellationToken);
             if (!expected.AsSpan().StartsWith(bytes) || !allowPartial && bytes.Length != expected.Length)
+            {
                 throw new IOException("Initialization preferences belong to a different operation: " + path);
+            }
         }
     }
 
     private static async Task<DeviceCatalogue> ReadAsync(AfcClient afc, CancellationToken cancellationToken)
     {
-        return await CatalogueReader.ReadAsync(await CatalogueSnapshot.CaptureAsync(afc, cancellationToken),
-            cancellationToken, allowUninitialized: true);
+        return await CatalogueReader.ReadAsync(
+            await CatalogueSnapshot.CaptureAsync(afc, cancellationToken),
+            cancellationToken,
+            allowUninitialized: true);
     }
 }

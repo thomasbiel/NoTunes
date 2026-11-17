@@ -28,27 +28,35 @@ public sealed class UsbMuxClient
 
     public async Task<IReadOnlyList<UsbDevice>> ListUsbDevicesAsync(CancellationToken cancellationToken)
     {
-        var reply = await this.RequestAsync(Plist.Dict((UsbMuxKeys.MessageType, UsbMuxMessages.ListDevices)), cancellationToken);
+        var request = Plist.Dict((UsbMuxKeys.MessageType, UsbMuxMessages.ListDevices));
+        var reply = await this.RequestAsync(request, cancellationToken);
         CheckResult(reply, "list devices");
         if (!reply.TryGetValue(UsbMuxKeys.DeviceList, out var value) || value is not object[] devices)
+        {
             throw new InvalidDataException("The USB service did not return a device list.");
+        }
 
         var result = new List<UsbDevice>();
         foreach (var entry in devices)
         {
             var record = entry.AsDict();
             if (!record.TryGetValue(UsbMuxKeys.Properties, out var propertiesValue))
+            {
                 throw new InvalidDataException("USB device properties are missing.");
+            }
 
             var properties = propertiesValue.AsDict();
-            if (properties.Text(UsbMuxKeys.ConnectionType) != UsbConnectionType)
-                continue;
+            if (properties.Text(UsbMuxKeys.ConnectionType) != UsbConnectionType) continue;
+            
             var id = record.Number(UsbMuxKeys.DeviceId);
             if (id is < 1 or > uint.MaxValue) throw new InvalidDataException("Invalid USB device ID.");
 
             var udid = properties.Text(UsbMuxKeys.SerialNumber);
             if (udid.Length == DeviceUdid.ModernCompactLength)
+            {
                 udid = udid.Insert(DeviceUdid.ModernPrefixLength, DeviceUdid.Separator);
+            }
+            
             result.Add(new UsbDevice((uint)id, udid, properties.Number(UsbMuxKeys.ProductId)));
         }
 
@@ -57,10 +65,16 @@ public sealed class UsbMuxClient
 
     public async Task<Dictionary<string, object>> ReadPairRecordAsync(string udid, CancellationToken cancellationToken)
     {
-        var reply = await this.RequestAsync(Plist.Dict((UsbMuxKeys.MessageType, UsbMuxMessages.ReadPairRecord), (UsbMuxKeys.PairRecordId, udid)), cancellationToken);
+        var request = Plist.Dict(
+            (UsbMuxKeys.MessageType, UsbMuxMessages.ReadPairRecord),
+            (UsbMuxKeys.PairRecordId, udid));
+        
+        var reply = await this.RequestAsync(request, cancellationToken);
         CheckResult(reply, "read pairing record; unlock the iPhone and trust this computer first");
         if (!reply.TryGetValue(UsbMuxKeys.PairRecordData, out var value) || value is not byte[] bytes)
+        {
             throw new IOException("No pairing record is available. Unlock the iPhone and establish trust with this computer first.");
+        }
 
         // Pairing keys never leave this process and must never be included in diagnostics.
         return Plist.Parse(bytes).AsDict();
@@ -68,7 +82,8 @@ public sealed class UsbMuxClient
 
     public async Task<string> ReadSystemBuidAsync(CancellationToken cancellationToken)
     {
-        var reply = await this.RequestAsync(Plist.Dict((UsbMuxKeys.MessageType, UsbMuxMessages.ReadBuid)), cancellationToken);
+        var request = Plist.Dict((UsbMuxKeys.MessageType, UsbMuxMessages.ReadBuid));
+        var reply = await this.RequestAsync(request, cancellationToken);
         CheckResult(reply, "read the system pairing identity");
         return reply.Text(UsbMuxKeys.Buid);
     }
@@ -80,9 +95,16 @@ public sealed class UsbMuxClient
         {
             // usbmux wraps the device port in a plist integer in network byte order.
             var networkPort = BinaryPrimitives.ReverseEndianness(port);
-            var reply = await this.ExchangeAsync(stream, Plist.Dict((UsbMuxKeys.MessageType, UsbMuxMessages.Connect), (UsbMuxKeys.DeviceId, (long)device.DeviceId), (UsbMuxKeys.PortNumber, (long)networkPort)), cancellationToken);
+            var request = Plist.Dict(
+                (UsbMuxKeys.MessageType, UsbMuxMessages.Connect),
+                (UsbMuxKeys.DeviceId, (long)device.DeviceId),
+                (UsbMuxKeys.PortNumber, (long)networkPort));
+            
+            var reply = await this.ExchangeAsync(stream, request, cancellationToken);
             if (!reply.TryGetValue(UsbMuxKeys.ResultNumber, out var status) || status is not long)
+            {
                 throw new InvalidDataException("The USB service did not acknowledge the device connection.");
+            }
 
             CheckResult(reply, $"connect to iPhone port {port}");
             return stream; // From now on the connection carries the device service, not usbmux packets.
@@ -114,7 +136,10 @@ public sealed class UsbMuxClient
         }
     }
 
-    private async Task<Dictionary<string, object>> ExchangeAsync(Stream stream, Dictionary<string, object> request, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, object>> ExchangeAsync(
+        Stream stream,
+        Dictionary<string, object> request,
+        CancellationToken cancellationToken)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(this.timeout);
@@ -135,8 +160,12 @@ public sealed class UsbMuxClient
             var header = new byte[HeaderBytes];
             await stream.ReadExactlyAsync(header, deadline.Token);
             var size = BinaryPrimitives.ReadUInt32LittleEndian(header);
-            if (size < HeaderBytes || size > Plist.MaxBytes + HeaderBytes || BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(VersionOffset)) != ProtocolVersion || BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(MessageTypeOffset)) != PlistMessageType || BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(TagOffset)) != tag)
-                throw new InvalidDataException("Invalid USB multiplexer response header.");
+            var version = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(VersionOffset));
+            var messageType = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(MessageTypeOffset));
+            var responseTag = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(TagOffset));
+            var validSize = size is >= HeaderBytes and <= Plist.MaxBytes + HeaderBytes;
+            var expectedEnvelope = version == ProtocolVersion && messageType == PlistMessageType && responseTag == tag;
+            if (!validSize || !expectedEnvelope) throw new InvalidDataException("Invalid USB multiplexer response header.");
 
             var response = new byte[checked((int)size - HeaderBytes)];
             await stream.ReadExactlyAsync(response, deadline.Token);
@@ -150,10 +179,8 @@ public sealed class UsbMuxClient
 
     private static void CheckResult(Dictionary<string, object> reply, string operation)
     {
-        if (!reply.TryGetValue(UsbMuxKeys.ResultNumber, out var result))
-            return;
+        if (!reply.TryGetValue(UsbMuxKeys.ResultNumber, out var result)) return;
         if (result is not long code) throw new InvalidDataException("Invalid USB service result code.");
-        if (code != SuccessResultCode)
-            throw new IOException($"Apple USB service could not {operation} (error {code}).");
+        if (code != SuccessResultCode) throw new IOException($"Apple USB service could not {operation} (error {code}).");
     }
 }

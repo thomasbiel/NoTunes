@@ -164,6 +164,31 @@ public sealed class CatalogueReadTests
         Assert.That(AfcClient.SameAttributes(first, null), Is.False);
     }
 
+    [TestCase(AfcKeys.FileSize, "5", true)]
+    [TestCase("ST_SIZE", "5", false)]
+    [TestCase(AfcKeys.FileSize, "05", false)]
+    public void Compares_Stable_Attribute_Names_And_Values_Ordinally(
+        string sizeKey,
+        string size,
+        bool expected)
+    {
+        const string regularFile = "S_IFREG";
+        var left = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AfcKeys.FileType] = regularFile,
+            [AfcKeys.FileSize] = "5",
+            [AfcKeys.AccessTime] = "1"
+        };
+        var right = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [sizeKey] = size,
+            [AfcKeys.FileType] = regularFile
+        };
+
+        Assert.That(AfcClient.SameAttributes(left, right), Is.EqualTo(expected));
+        Assert.That(AfcClient.SameAttributes(right, left), Is.EqualTo(expected));
+    }
+
     private static byte[] Database()
     {
         var bytes = new byte[256];

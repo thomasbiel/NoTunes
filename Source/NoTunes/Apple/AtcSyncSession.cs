@@ -121,7 +121,7 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
                 if (!stop.IsCancellationRequested)
                 {
                     Volatile.Write(ref controlFailure, ExceptionDispatchInfo.Capture(exception));
-                    stop.Cancel();
+                    await stop.CancelAsync();
                 }
 
                 throw;

@@ -74,17 +74,44 @@ internal sealed class SyncJournal : IDisposable
             RecoverableFormatVersion,
             identity,
             CatalogueCheckpoint.Capture(before),
-            batch.Additions.Select(JournalTrack.Capture).ToArray(),
-            batch.Deletions.ToArray(),
+            [.. batch.Additions.Select(JournalTrack.Capture)],
+            [.. batch.Deletions],
             batch.Operation,
             signature);
         var directory = this.Assets(state);
-        Directory.CreateDirectory(directory);
+        try
+        {
+            Directory.CreateDirectory(directory);
+            await CopyAssetsAsync(batch, directory, cancellationToken);
+            DeviceState.Save(this.pending, state, MaximumJournalBytes);
+        }
+        catch
+        {
+            if (previous is null || !StringComparer.Ordinal.Equals(this.Assets(previous), directory))
+            {
+                this.CleanAssets(state);
+            }
+
+            throw;
+        }
+
+        if (previous is not null && !StringComparer.Ordinal.Equals(this.Assets(previous), directory))
+        {
+            this.CleanAssets(previous);
+        }
+    }
+
+    private static async Task CopyAssetsAsync(SyncBatch batch, string directory, CancellationToken cancellationToken)
+    {
         foreach (var track in batch.Additions)
         {
             var path = JournalTrack.AssetPath(directory, track.Id, SyncPaths.Mp3Extension);
             await using (var input = File.OpenRead(track.LocalPath))
-            await using (var output = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+            await using (var output = new FileStream(
+                path,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None))
             {
                 await input.CopyToAsync(output, cancellationToken);
                 output.Flush(flushToDisk: true);
@@ -96,18 +123,15 @@ internal sealed class SyncJournal : IDisposable
 
             if (track.Metadata.Artwork is { } artwork)
             {
-                using var cover = new FileStream(
+                await using var cover = new FileStream(
                     JournalTrack.AssetPath(directory, track.Id, SyncPaths.JpegExtension),
-                    FileMode.Create,
+                    FileMode.CreateNew,
                     FileAccess.Write,
                     FileShare.None);
                 cover.Write(artwork.Bytes);
                 cover.Flush(flushToDisk: true);
             }
         }
-
-        DeviceState.Save(this.pending, state, MaximumJournalBytes);
-        if (previous is not null && this.Assets(previous) != directory) this.CleanAssets(previous);
     }
 
     public void ResolveUnapplied()
@@ -174,7 +198,7 @@ internal sealed class SyncJournal : IDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // The operation is settled; an inaccessible private cache does not undo that result.
+            // Cleanup must not hide a preparation failure or undo a settled operation.
         }
     }
 

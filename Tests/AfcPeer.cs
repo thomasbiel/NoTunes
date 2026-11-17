@@ -7,12 +7,16 @@ namespace NoTunes.Tests;
 
 internal sealed class AfcPeer : Stream
 {
-    private const int ReadFragmentBytes = 5;
+    private const int DefaultReadFragmentBytes = 5;
     private const int DefaultChunkLimit = 1024 * 1024;
     private const ulong InjectedFailureStatus = 10;
     internal const ulong LockWouldBlockStatus = 19;
 
-    public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, byte[]> Files { get; init; } = new(StringComparer.Ordinal);
+
+    public int ReadFragmentBytes { get; init; } = DefaultReadFragmentBytes;
+
+    public long FreeBytes { get; init; } = long.MaxValue;
 
     public bool AllowWrites { get; init; }
 
@@ -24,7 +28,7 @@ internal sealed class AfcPeer : Stream
 
     public List<byte[]> WritePackets { get; } = [];
 
-    public HashSet<string> Directories { get; } = new(StringComparer.Ordinal);
+    public HashSet<string> Directories { get; init; } = new(StringComparer.Ordinal);
 
     public HashSet<string> LockedPaths { get; } = new(StringComparer.Ordinal);
 
@@ -79,7 +83,7 @@ internal sealed class AfcPeer : Stream
 
     public override int Read(byte[] buffer, int offset, int count)
     {
-        return this.input.Read(buffer, offset, Math.Min(count, ReadFragmentBytes));
+        return this.input.Read(buffer, offset, Math.Min(count, this.ReadFragmentBytes));
     }
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
@@ -87,7 +91,7 @@ internal sealed class AfcPeer : Stream
         if (this.closePending)
             await Task.Delay(Timeout.Infinite, cancellationToken);
 
-        return await this.input.ReadAsync(buffer[..Math.Min(buffer.Length, ReadFragmentBytes)], cancellationToken);
+        return await this.input.ReadAsync(buffer[..Math.Min(buffer.Length, this.ReadFragmentBytes)], cancellationToken);
     }
 
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
@@ -120,6 +124,10 @@ internal sealed class AfcPeer : Stream
         var body = request.AsSpan(ProtocolFrames.AfcHeaderBytes);
         switch (operation)
         {
+            case AfcOperation.GetDeviceInfo:
+                this.Response(id, AfcOperation.Data,
+                    Encoding.UTF8.GetBytes($"{AfcKeys.FreeBytes}\0{this.FreeBytes}\0"));
+                return;
             case AfcOperation.RemovePath when this.AllowWrites:
                 this.Files.Remove(Encoding.UTF8.GetString(body).TrimEnd('\0'));
                 this.Status(id, 0);

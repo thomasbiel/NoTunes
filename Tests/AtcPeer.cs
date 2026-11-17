@@ -24,13 +24,20 @@ internal sealed class AtcPeer : Stream
 
     public AtcPeer(params Dictionary<string, object>[] messages)
     {
+        this.Enqueue(messages);
+    }
+
+    public void Enqueue(params Dictionary<string, object>[] messages)
+    {
+        var position = this.incoming.Position;
+        this.incoming.Position = this.incoming.Length;
         foreach (var message in messages)
         {
             this.incoming.Write(ProtocolFrames.PlistMessage(message, atc: true));
             this.frameEnds.Add(this.incoming.Position);
         }
 
-        this.incoming.Position = 0;
+        this.incoming.Position = position;
     }
 
     public List<Dictionary<string, object>> SentMessages()

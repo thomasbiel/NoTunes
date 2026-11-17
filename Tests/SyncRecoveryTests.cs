@@ -23,7 +23,7 @@ public sealed class SyncRecoveryTests
             SyncOperations.Serialize(before, [], [owned]),
             [1, 2]);
         var actual = before with { Anchor = revisionAdvanced ? before.Anchor + 1 : before.Anchor };
-        Assert.That(SyncRecovery.Assess(pending, actual, []).Select(track => track.Id), Is.EqualTo(new[] { owned.Id }));
+        Assert.That(SyncRecovery.Assess(pending, actual, []).Select(track => track.Id), Is.EqualTo([owned.Id]));
         Assert.Throws<IOException>(() => SyncRecovery.Assess(pending,
             actual with { Tracks = [owned, unrelated with { Title = "Foreign change" }] }, []));
     }
@@ -106,7 +106,7 @@ public sealed class SyncRecoveryTests
         var pending = resumed.ReadPending();
         Assert.DoesNotThrow(() => SyncEngine.RequireUnchanged(before, pending.Before.Restore()));
         var recovered = pending.Additions.Single().Restore(resumed.Assets(pending));
-        Assert.That(File.ReadAllBytes(recovered.LocalPath), Is.EqualTo(File.ReadAllBytes(SyncTestData.FixturePath)));
+        Assert.That(await File.ReadAllBytesAsync(recovered.LocalPath), Is.EqualTo(await File.ReadAllBytesAsync(SyncTestData.FixturePath)));
         Assert.That(recovered.Metadata.Artwork!.Bytes, Is.EqualTo(track.Metadata.Artwork!.Bytes));
         Assert.DoesNotThrow(() => SyncRecovery.Assess(pending, before, [recovered]));
     }
@@ -152,14 +152,14 @@ public sealed class SyncRecoveryTests
         await using var afc = new AfcClient(files, TimeSpan.FromSeconds(1));
         if (owned)
         {
-            await DeviceStaging.RemoveMatchingAsync(afc, SyncPaths.Metadata, new byte[] { 1, 2, 3 }, CancellationToken.None);
+            await DeviceStaging.RemoveMatchingAsync(afc, SyncPaths.Metadata, [1, 2, 3], CancellationToken.None);
         }
         else
         {
             await Assert.ThrowsAsync<IOException>(() => DeviceStaging.RemoveMatchingAsync(
                 afc,
                 SyncPaths.Metadata,
-                new byte[] { 1, 2, 3 },
+                [1, 2, 3],
                 CancellationToken.None));
         }
 
@@ -177,7 +177,7 @@ public sealed class SyncRecoveryTests
             new LibraryIdentity("id", "binding"),
             CatalogueCheckpoint.Capture(before),
             [],
-            before.Tracks.ToArray(),
+            [.. before.Tracks],
             SyncOperations.Serialize(before, [], before.Tracks),
             [1, 2]);
         var after = before with { Anchor = before.Anchor + 1, Tracks = [before.Tracks[1]] };

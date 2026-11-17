@@ -9,7 +9,7 @@ internal static class FeatureTestData
     {
         using var output = new MemoryStream();
         new StbImageWriteSharp.ImageWriter().WritePng(
-            new byte[] { 255, 0, 0, 255, 0, 255, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255 },
+            [255, 0, 0, 255, 0, 255, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255],
             2,
             2,
             StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha,

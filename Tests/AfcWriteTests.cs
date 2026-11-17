@@ -19,7 +19,7 @@ public sealed class AfcWriteTests
         await using var afc = new AfcClient(peer, RequestTimeout);
         await using (await afc.AcquireSyncLockAsync(CancellationToken.None))
         {
-            Assert.That(peer.Files.Keys, Is.EqualTo(new[] { sharedLock }));
+            Assert.That(peer.Files.Keys, Is.EqualTo([sharedLock]));
             Assert.That(peer.Files[sharedLock], Is.EqualTo(new byte[] { 1, 2, 3 }));
             Assert.That(peer.OpenHandles, Is.EqualTo(1));
         }
@@ -45,7 +45,7 @@ public sealed class AfcWriteTests
     {
         var peer = new AfcPeer { AllowWrites = true, StallClose = true };
         await using var afc = new AfcClient(peer, RequestTimeout);
-        using var input = new MemoryStream(new byte[] { 1 });
+        using var input = new MemoryStream([1]);
         var exception = await Assert.ThrowsAsync<IOException>(() => afc.WriteNewFileAsync(
             Target,
             input,
@@ -90,7 +90,7 @@ public sealed class AfcWriteTests
         using var cancellation = new CancellationTokenSource();
         var peer = new AfcPeer { AllowWrites = true, StallClose = true };
         await using var afc = new AfcClient(peer, RequestTimeout);
-        using var input = new MemoryStream(new byte[] { 1 });
+        using var input = new MemoryStream([1]);
         var exception = await Assert.CatchAsync<OperationCanceledException>(() => afc.WriteNewFileAsync(
             Target,
             input,
@@ -116,7 +116,7 @@ public sealed class AfcWriteTests
             OnClose = cancellation.Cancel
         };
         await using var afc = new AfcClient(peer, RequestTimeout);
-        using var input = new MemoryStream(new byte[] { 1 });
+        using var input = new MemoryStream([1]);
         await Assert.CatchAsync<OperationCanceledException>(() => afc.WriteNewFileAsync(
             Target,
             input,
@@ -167,7 +167,7 @@ public sealed class AfcWriteTests
     {
         var peer = new AfcPeer { AllowWrites = true };
         peer.Files[Target] = [7];
-        using var input = new MemoryStream(new byte[] { 1 });
+        using var input = new MemoryStream([1]);
         var afc = new AfcClient(peer, TimeSpan.FromSeconds(1));
         await Assert.ThrowsAsync<IOException>(() => afc.WriteNewFileAsync(
             Target,
@@ -184,7 +184,7 @@ public sealed class AfcWriteTests
     {
         var peer = new AfcPeer { AllowWrites = true };
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(1));
-        using var input = new MemoryStream(new byte[] { 1 });
+        using var input = new MemoryStream([1]);
         await Assert.ThrowsAsync<IOException>(() => afc.WriteNewFileAsync(
             Target,
             input,
@@ -200,7 +200,7 @@ public sealed class AfcWriteTests
         foreach (var peer in new[] { new AfcPeer { AllowWrites = true, FailWrite = true }, new AfcPeer { AllowWrites = true, FailClose = true } })
         {
             await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(1));
-            using var input = new MemoryStream(new byte[] { 1 });
+            using var input = new MemoryStream([1]);
             await Assert.ThrowsAsync<AfcException>(() => afc.WriteNewFileAsync(
                 Target,
                 input,

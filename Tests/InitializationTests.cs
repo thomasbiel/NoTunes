@@ -10,6 +10,88 @@ public sealed class InitializationTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(1);
 
+    [TestCase(false, false)]
+    [TestCase(false, true)]
+    [TestCase(true, false)]
+    [TestCase(true, true)]
+    public async Task Clears_Own_Staging_After_A_Committed_Initialization_Unless_Dry_Run(bool dryRun, bool partial)
+    {
+        using var state = new SyncWorkspace();
+        using var fixture = Fresh();
+        var saved = await SaveStateAsync(fixture, state.Root);
+        CommitInitialization(fixture, saved);
+        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var files = new AfcPeer { AllowWrites = !dryRun };
+        files.Directories.Add(SyncPaths.MetadataDirectory);
+        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        files.Files[SyncPaths.Preferences] = saved.Preferences;
+        files.Files[SyncPaths.PreferencesPlist] = LibraryPreferences.Wrap(saved.Preferences);
+        var operation = partial ? saved.Operation[..^1] : saved.Operation;
+        var signature = partial ? saved.Signature![..^1] : saved.Signature!;
+        files.Files[SyncPaths.Metadata] = operation;
+        files.Files[SyncPaths.Metadata + SyncPaths.SignatureSuffix] = signature;
+        await using var afc = new AfcClient(files, Timeout);
+        await using var peer = new AtcPeer();
+        await using var atc = new AtcClient(peer, Timeout);
+        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
+        var result = await initializer.InitializeAsync(
+            afc,
+            atc,
+            "Test iPhone",
+            "phone",
+            new InitOptions { StateFolder = state.Root, DryRun = dryRun },
+            CancellationToken.None);
+
+        Assert.That(result.AlreadyInitialized, Is.True);
+        Assert.That(result.DryRun, Is.EqualTo(dryRun));
+        Assert.That(peer.SentMessages(), Is.Empty);
+        SyncEngine.RequireUnchanged(before, await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None));
+        if (dryRun)
+        {
+            Assert.That(files.WritePackets, Is.Empty);
+            Assert.That(files.Files[SyncPaths.Metadata], Is.EqualTo(operation));
+            Assert.That(files.Files[SyncPaths.Metadata + SyncPaths.SignatureSuffix], Is.EqualTo(signature));
+        }
+        else
+        {
+            Assert.That(files.Files.ContainsKey(SyncPaths.Lock), Is.True);
+            await Assert.DoesNotThrowAsync(() => SyncEngine.RequireEmptyStagingAsync(afc, CancellationToken.None));
+        }
+    }
+
+    [TestCase(SyncPaths.Metadata)]
+    [TestCase(SyncPaths.Metadata + SyncPaths.SignatureSuffix)]
+    [TestCase(SyncPaths.MetadataDirectory + "/Sync_00000001.plist")]
+    public async Task Refuses_Foreign_Staging_After_A_Committed_Initialization(string foreignPath)
+    {
+        using var state = new SyncWorkspace();
+        using var fixture = Fresh();
+        var saved = await SaveStateAsync(fixture, state.Root);
+        CommitInitialization(fixture, saved);
+        var foreign = new byte[] { 90, 91, 92 };
+        var files = new AfcPeer { AllowWrites = true };
+        files.Directories.Add(SyncPaths.MetadataDirectory);
+        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        files.Files[SyncPaths.Preferences] = saved.Preferences;
+        files.Files[SyncPaths.PreferencesPlist] = LibraryPreferences.Wrap(saved.Preferences);
+        files.Files[SyncPaths.Metadata] = saved.Operation;
+        files.Files[SyncPaths.Metadata + SyncPaths.SignatureSuffix] = saved.Signature!;
+        files.Files[foreignPath] = foreign;
+        await using var afc = new AfcClient(files, Timeout);
+        await using var peer = new AtcPeer();
+        await using var atc = new AtcClient(peer, Timeout);
+        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
+        await Assert.ThrowsAsync<IOException>(() => initializer.InitializeAsync(
+            afc,
+            atc,
+            "Test iPhone",
+            "phone",
+            new InitOptions { StateFolder = state.Root },
+            CancellationToken.None));
+        Assert.That(files.Files[foreignPath], Is.EqualTo(foreign));
+        Assert.That(peer.SentMessages(), Is.Empty);
+    }
+
     [TestCase(false, SyncPaths.Metadata)]
     [TestCase(false, SyncPaths.Metadata + SyncPaths.SignatureSuffix)]
     [TestCase(false, SyncPaths.MetadataDirectory + "/Sync_00000001.plist")]
@@ -127,7 +209,7 @@ public sealed class InitializationTests
         files.Files[SyncPaths.Preferences] = saved.Preferences;
         files.Files[SyncPaths.PreferencesPlist] = LibraryPreferences.Wrap(saved.Preferences);
         await using var afc = new AfcClient(files, Timeout);
-        using var peer = new AtcPeer();
+        await using var peer = new AtcPeer();
         await using var atc = new AtcClient(peer, Timeout);
         var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
         var options = new InitOptions { StateFolder = state.Root };
@@ -229,7 +311,7 @@ public sealed class InitializationTests
         }
 
         var record = Directory.GetFiles(state.Root, "initialization.json", SearchOption.AllDirectories).Single();
-        var saved = System.Text.Json.JsonSerializer.Deserialize<InitializationState>(File.ReadAllBytes(record))!;
+        var saved = System.Text.Json.JsonSerializer.Deserialize<InitializationState>(await File.ReadAllBytesAsync(record))!;
         var retry = new AfcPeer { AllowWrites = true };
         foreach (var file in failed.Files)
         {
@@ -275,6 +357,15 @@ public sealed class InitializationTests
         Assert.That(files.Files.ContainsKey(SyncPaths.Lock), Is.False);
     }
 
+    private static void CommitInitialization(CatalogueFixture fixture, InitializationState saved)
+    {
+        fixture.Execute($"""
+            INSERT INTO db_info VALUES({saved.DatabaseId},{saved.ContainerId});
+            INSERT INTO container(sync_id,container_pid) VALUES({saved.ContainerId},{saved.ContainerId});
+            INSERT INTO _MLDatabaseProperties VALUES('MLSyncClientSyncAnchor','{SyncProtocol.FirstMediaRevision}');
+            """);
+    }
+
     private static CatalogueFixture Fresh()
     {
         var fixture = new CatalogueFixture();
@@ -294,7 +385,7 @@ public sealed class InitializationTests
             2002,
             SyncOperations.Initialize(2001, 2002, "Test iPhone"),
             CatalogueCheckpoint.Capture(before),
-            new byte[] { 1, 2, 3 });
+            [1, 2, 3]);
         DeviceState.Save(Path.Combine(DeviceState.DirectoryFor(root, "phone"), "initialization.json"), saved);
         return saved;
     }

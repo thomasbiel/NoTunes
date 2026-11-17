@@ -12,7 +12,7 @@ public sealed class SyncPlannerTests
     {
         var source = new SourceLibrary("source", hasSource ? [Track("new.mp3", "A")] : []);
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
         await Assert.ThrowsAsync<OperationCanceledException>(() => SyncPlanner.CreateAsync(
             "phone",
             source,

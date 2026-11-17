@@ -40,12 +40,14 @@ public sealed class SyncWritePlanTests
         int added,
         int deleted)
     {
-        var catalogue = SyncPlannerTests.Catalogue(Enumerable.Range(FirstTrackId, existing)
-            .Select(id => new DeviceTrack(
-                id,
-                "Existing",
-                $"F01/{id}.mp3",
-                1)).ToArray());
+        var catalogue = SyncPlannerTests.Catalogue([
+            .. Enumerable.Range(FirstTrackId, existing)
+                .Select(id => new DeviceTrack(
+                    id,
+                    "Existing",
+                    $"F01/{id}.mp3",
+                    1))
+        ]);
         var additions = Enumerable.Range(0, added)
             .Select(id => new SourceTrack(
                 $"{id}.mp3",
@@ -53,17 +55,20 @@ public sealed class SyncWritePlanTests
                 DateTime.UnixEpoch,
                 "hash")).ToArray();
         var unchanged = existing - deleted;
-        var source = new SourceLibrary("source", additions.Concat(Enumerable.Repeat(
-            new SourceTrack(
-                "retained.mp3",
-                1,
-                DateTime.UnixEpoch,
-                "hash"), unchanged)).ToArray());
+        var source = new SourceLibrary("source", [
+            .. additions,
+            .. Enumerable.Repeat(
+                new SourceTrack(
+                    "retained.mp3",
+                    1,
+                    DateTime.UnixEpoch,
+                    "hash"), unchanged)
+        ]);
         var plan = new SyncPlan(
             "phone",
             catalogue.Anchor,
             additions,
-            catalogue.Tracks.Take(deleted).ToArray(),
+            [.. catalogue.Tracks.Take(deleted)],
             unchanged);
         return (source, plan, catalogue);
     }

@@ -5,7 +5,6 @@ public sealed class AtcClient : IAsyncDisposable
     private const int StartupMessageLimit = 24;
     private const long ProbeSession = 1;
     private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(15);
-    private readonly TimeSpan timeout;
     private readonly TimeSpan keepAliveInterval;
     private readonly CancellationTokenSource keepAliveStop = new();
     private Task? keepAlive;
@@ -13,30 +12,31 @@ public sealed class AtcClient : IAsyncDisposable
 
     internal PlistConnection Connection { get; }
 
-    internal TimeSpan RequestTimeout => this.timeout;
+    internal TimeSpan RequestTimeout { get; }
 
     internal bool SupportsGrappa { get; private set; }
 
-    public AtcClient(Stream stream, TimeSpan timeout) : this(stream, timeout, KeepAliveInterval)
-    {
-    }
+    public AtcClient(Stream stream, TimeSpan timeout) : this(stream, timeout, KeepAliveInterval) { }
 
     internal AtcClient(Stream stream, TimeSpan timeout, TimeSpan keepAliveInterval)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(keepAliveInterval, TimeSpan.Zero);
-        this.timeout = timeout;
+        this.RequestTimeout = timeout;
         this.keepAliveInterval = keepAliveInterval;
         this.Connection = new PlistConnection(stream, timeout, atc: true);
     }
 
     internal void StartKeepAlive(CancellationToken cancellationToken)
     {
-        this.keepAlive ??= this.SendKeepAlivesAsync(cancellationToken);
+        this.keepAlive ??= this.SendKeepAliveAsync(cancellationToken);
     }
 
     public async Task<AtcSyncStatus> ReadSyncStatusAsync(CancellationToken cancellationToken)
     {
-        await this.Connection.SendAsync(Plist.Dict((AtcKeys.Command, AtcCommands.Ping), (AtcKeys.Session, ProbeSession)), cancellationToken);
+        await this.Connection.SendAsync(
+            Plist.Dict((AtcKeys.Command, AtcCommands.Ping), (AtcKeys.Session, ProbeSession)),
+            cancellationToken);
+        
         long? count = null;
         long? bytes = null;
         // Bound unsolicited startup frames rather than waiting indefinitely for a particular message.
@@ -44,8 +44,9 @@ public sealed class AtcClient : IAsyncDisposable
         {
             var message = await this.Connection.ReceiveAsync(cancellationToken);
             var command = message.Text(AtcKeys.Command);
-            if (command == AtcCommands.Capabilities && message.TryGetValue(AtcKeys.Parameters, out var capabilities)
-                && capabilities.AsDict().TryGetValue(AtcKeys.Capabilities, out var grappa))
+            if (command == AtcCommands.Capabilities && 
+                message.TryGetValue(AtcKeys.Parameters, out var capabilities) && 
+                capabilities.AsDict().TryGetValue(AtcKeys.Capabilities, out var grappa))
             {
                 var values = grappa.AsDict();
                 this.SupportsGrappa = values.Number(AtcKeys.CapabilityVersion) == SyncProtocol.CapabilityVersion
@@ -54,12 +55,17 @@ public sealed class AtcClient : IAsyncDisposable
 
             if (command == AtcCommands.Ping)
             {
-                await this.Connection.SendAsync(Plist.Dict((AtcKeys.Command, AtcCommands.Pong), (AtcKeys.Session, message.Number(AtcKeys.Session))), cancellationToken);
+                await this.Connection.SendAsync(
+                    Plist.Dict((AtcKeys.Command, AtcCommands.Pong), (AtcKeys.Session, message.Number(AtcKeys.Session))),
+                    cancellationToken);
+                
                 continue;
             }
 
             if (command is AtcCommands.SyncFailed or AtcCommands.ConnectionInvalid)
+            {
                 throw new IOException($"The iPhone music sync service returned {command}.");
+            }
 
             if (command == AtcCommands.AssetMetrics)
             {
@@ -68,10 +74,10 @@ public sealed class AtcClient : IAsyncDisposable
                 bytes = metrics.MusicBytes ?? bytes;
             }
 
-            if (command != AtcCommands.SyncAllowed)
-                continue;
-            var parameters = message.TryGetValue(AtcKeys.Parameters, out var data) ? data.AsDict() : throw new InvalidDataException("Music sync permissions are missing.");
-            var permissions = ReadSyncPermissions(parameters);
+            if (command != AtcCommands.SyncAllowed) continue;
+            if (!message.TryGetValue(AtcKeys.Parameters, out var data)) throw new InvalidDataException("Music sync permissions are missing.");
+
+            var permissions = ReadSyncPermissions(data.AsDict());
             return new AtcSyncStatus
             {
                 SyncAllowed = permissions.Allowed,
@@ -86,8 +92,13 @@ public sealed class AtcClient : IAsyncDisposable
 
     private static (long? TrackCount, long? MusicBytes) ReadMusicMetrics(Dictionary<string, object> message)
     {
-        if (!message.TryGetValue(AtcKeys.Parameters, out var parameters) || !parameters.AsDict().TryGetValue(AtcKeys.Media, out var media) || !media.AsDict().TryGetValue(AtcKeys.Music, out var music))
+        if (!message.TryGetValue(AtcKeys.Parameters, out var parameters) ||
+            !parameters.AsDict().TryGetValue(AtcKeys.Media, out var media) ||
+            !media.AsDict().TryGetValue(AtcKeys.Music, out var music))
+        {
             return (null, null);
+        }
+
         var values = music.AsDict();
         return (OptionalNumber(values, AtcKeys.TrackCount), OptionalNumber(values, AtcKeys.PhysicalSize));
     }
@@ -106,7 +117,9 @@ public sealed class AtcClient : IAsyncDisposable
         if (parameters.TryGetValue(AtcKeys.DisabledAssetTypes, out var disabled))
         {
             if (disabled is not object[] types || types.Any(type => type is not string))
+            {
                 throw new InvalidDataException("Music sync permission 'DisabledAssetTypes' must be an array of strings.");
+            }
 
             musicDisabled = types.Any(type => StringComparer.Ordinal.Equals(type, AtcKeys.Music));
         }
@@ -114,13 +127,12 @@ public sealed class AtcClient : IAsyncDisposable
         return ((manualSync || autoSync) && !dataProtected && !musicDisabled, dataProtected);
         bool ReadFlag(string key)
         {
-            if (!parameters.TryGetValue(key, out var value))
-                return false;
+            if (!parameters.TryGetValue(key, out var value)) return false;
             return value is bool flag ? flag : throw new InvalidDataException($"Music sync permission '{key}' must be a boolean.");
         }
     }
 
-    private async Task SendKeepAlivesAsync(CancellationToken cancellationToken)
+    private async Task SendKeepAliveAsync(CancellationToken cancellationToken)
     {
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this.keepAliveStop.Token);
         using var timer = new PeriodicTimer(this.keepAliveInterval);
@@ -128,9 +140,9 @@ public sealed class AtcClient : IAsyncDisposable
         {
             while (await timer.WaitForNextTickAsync(stop.Token))
             {
-                await this.Connection.SendAsync(Plist.Dict(
-                    (AtcKeys.Command, AtcCommands.Ping),
-                    (AtcKeys.Session, SyncProtocol.Session)), stop.Token);
+                await this.Connection.SendAsync(
+                    Plist.Dict((AtcKeys.Command, AtcCommands.Ping), (AtcKeys.Session, SyncProtocol.Session)), 
+                    stop.Token);
             }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)

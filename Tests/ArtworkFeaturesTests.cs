@@ -26,7 +26,7 @@ public sealed class ArtworkFeaturesTests
             file.Tag.AlbumArtists = [artist];
             file.Tag.Pictures = [new TagLib.Picture
             {
-                Data = new TagLib.ByteVector(FeatureTestData.Png()),
+                Data = [.. FeatureTestData.Png()],
                 MimeType = "image/png",
                 Type = TagLib.PictureType.FrontCover
             }];
@@ -77,7 +77,7 @@ public sealed class ArtworkFeaturesTests
         var operation = ((object[])document[MediaKeys.Operations])[1].AsDict();
         Assert.That(operation.Text(MediaKeys.Operation), Is.EqualTo(MediaOperations.UpdateTrack));
         Assert.That(operation.Dictionary(MediaKeys.Item).Keys,
-            Is.EquivalentTo(new[] { MediaKeys.ArtworkCacheId, MediaKeys.ArtworkChecksum }));
+            Is.EquivalentTo([MediaKeys.ArtworkCacheId, MediaKeys.ArtworkChecksum]));
         Assert.That(repair.Metadata.Artwork, Is.Not.Null);
     }
 
@@ -137,7 +137,7 @@ public sealed class ArtworkFeaturesTests
         var update = ((object[])operation[MediaKeys.Operations])[1].AsDict();
         Assert.That(update.Text(MediaKeys.Operation), Is.EqualTo("update_track"));
         Assert.That(update.Dictionary(MediaKeys.Item).Keys,
-            Is.EquivalentTo(new[] { MediaKeys.ArtworkCacheId, MediaKeys.ArtworkChecksum }));
+            Is.EquivalentTo([MediaKeys.ArtworkCacheId, MediaKeys.ArtworkChecksum]));
         Assert.That(update.ContainsKey(MediaKeys.Audio), Is.False);
     }
 
@@ -186,14 +186,14 @@ public sealed class ArtworkFeaturesTests
         {
             file.Tag.Pictures = [new TagLib.Picture
             {
-                Data = new TagLib.ByteVector(FeatureTestData.Png()),
+                Data = [.. FeatureTestData.Png()],
                 MimeType = "image/png",
                 Type = TagLib.PictureType.FrontCover
             }];
             file.Save();
         }
 
-        var original = File.ReadAllBytes(path);
+        var original = await File.ReadAllBytesAsync(path);
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
             .BuildServiceProvider();
         var library = await services.GetRequiredService<SourceScanner>().ScanAsync(source.Root, CancellationToken.None);
@@ -208,8 +208,8 @@ public sealed class ArtworkFeaturesTests
             artworkOnly: true);
         Assert.That(result, Has.Count.EqualTo(1));
         Assert.That(result[0].Metadata.Artwork!.CacheId, Is.EqualTo(602));
-        Assert.That(File.ReadAllBytes(path), Is.EqualTo(original));
-        Assert.That(File.ReadAllBytes(result[0].LocalPath), Is.EqualTo(original));
+        Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
+        Assert.That(await File.ReadAllBytesAsync(result[0].LocalPath), Is.EqualTo(original));
         Assert.That(Directory.GetFiles(prepared.Root), Has.Length.EqualTo(1));
     }
 }

@@ -1,6 +1,10 @@
 namespace NoTunes.Apple;
 
-internal sealed class DeviceSyncConnection(LockdownClient lockdown, AfcClient afc, AtcClient atc, DeviceInfo device) : IAsyncDisposable
+internal sealed class DeviceSyncConnection(
+    LockdownClient lockdown,
+    AfcClient afc,
+    AtcClient atc,
+    DeviceInfo device) : IDeviceSyncConnection
 {
     public AfcClient Afc { get; } = afc;
 
