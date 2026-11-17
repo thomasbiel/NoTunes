@@ -104,9 +104,6 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
         DeviceState.Save(statePath, saved);
         await using var syncLock = await afc.AcquireSyncLockAsync(cancellationToken);
         SyncEngine.RequireUnchanged(before, await ReadAsync(afc, cancellationToken));
-        var identity = LibraryIdentity.Parse(saved.Preferences);
-        var session = new AtcSyncSession(atc, error);
-        using var signer = await session.BeginAsync(identity, SyncProtocol.UninitializedMediaRevision, cancellationToken);
         if (saved.Signature is not null)
         {
             await DeviceStaging.RemoveMatchingAsync(afc, SyncPaths.Metadata, saved.Operation, cancellationToken);
@@ -118,6 +115,9 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
         }
 
         await SyncEngine.RequireEmptyStagingAsync(afc, cancellationToken);
+        var identity = LibraryIdentity.Parse(saved.Preferences);
+        var session = new AtcSyncSession(atc, error);
+        using var signer = await session.BeginAsync(identity, SyncProtocol.UninitializedMediaRevision, cancellationToken);
         saved = saved with { Signature = signer.Sign(saved.Operation) };
         DeviceState.Save(statePath, saved);
         await WritePreferenceAsync(afc, SyncPaths.Preferences, saved.Preferences, cancellationToken);

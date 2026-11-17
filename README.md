@@ -199,8 +199,10 @@ changes; `--dry-run` can still display its plan. Preserved cloud, remote and
 nonmusic items do not count against this limit.
 
 Each batch uses at most 499 track changes and 4 MiB of serialized operation
-metadata, an exclusive AFC sync lock and a fresh
-paired ATC connection. The saved library identity and current catalogue must
+metadata, the shared Apple AFC sync lock and a fresh
+paired ATC connection. During an active session, ATC keepalive pings run every
+15 seconds, including during durable journal copies and AFC read-back.
+The saved library identity and current catalogue must
 still match the plan, including existing album and album-artist group identities.
 The live `ReadyForSync` Media anchor must match too; an advertised VoiceMemo
 anchor must be the supported value 1. A signed
@@ -240,7 +242,9 @@ interruptions, including partially applied cleanup batches.
 Partially applied removals are reconciled against the observed inventory; the
 fresh source plan removes only the entries that are still present.
 An uncertain operation is never blindly replayed. Only staging files equal to the
-recorded bytes or a recorded write prefix may be removed. Unexpected revisions,
+recorded bytes or a recorded write prefix may be removed. Metadata staging is
+checked and cleared before requesting a new session, because the receiver can
+delete leftover operation plists during session preparation. Unexpected revisions,
 foreign staging data, changed library identities and unverifiable outcomes stop
 recovery and retain its record. Old version 1 journals lack the required evidence
 and still require manual reconciliation. Verified batches remain recorded; private

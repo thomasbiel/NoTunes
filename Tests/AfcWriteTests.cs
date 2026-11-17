@@ -11,6 +11,36 @@ public sealed class AfcWriteTests
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
     [Test]
+    public async Task Uses_The_Shared_Apple_Sync_Lock_Without_Truncating_It()
+    {
+        const string sharedLock = "com.apple.itunes.lock_sync";
+        var peer = new AfcPeer { AllowWrites = true };
+        peer.Files[sharedLock] = [1, 2, 3];
+        await using var afc = new AfcClient(peer, RequestTimeout);
+        await using (await afc.AcquireSyncLockAsync(CancellationToken.None))
+        {
+            Assert.That(peer.Files.Keys, Is.EqualTo(new[] { sharedLock }));
+            Assert.That(peer.Files[sharedLock], Is.EqualTo(new byte[] { 1, 2, 3 }));
+            Assert.That(peer.OpenHandles, Is.EqualTo(1));
+        }
+
+        Assert.That(peer.OpenHandles, Is.Zero);
+    }
+
+    [Test]
+    public async Task Refuses_A_Sync_Lock_Held_By_Another_Apple_Client()
+    {
+        const string sharedLock = "com.apple.itunes.lock_sync";
+        var peer = new AfcPeer { AllowWrites = true };
+        peer.LockedPaths.Add(sharedLock);
+        await using var afc = new AfcClient(peer, RequestTimeout);
+        var exception = await Assert.ThrowsAsync<AfcException>(async () =>
+            await afc.AcquireSyncLockAsync(CancellationToken.None));
+        Assert.That(exception!.Code, Is.EqualTo(AfcPeer.LockWouldBlockStatus));
+        Assert.That(peer.WasDisposed, Is.True);
+    }
+
+    [Test]
     public async Task Reports_An_Internal_Write_Close_Timeout_As_An_Io_Error()
     {
         var peer = new AfcPeer { AllowWrites = true, StallClose = true };

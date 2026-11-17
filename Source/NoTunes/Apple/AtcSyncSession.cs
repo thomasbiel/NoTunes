@@ -26,6 +26,7 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
                 (AtcKeys.SyncedAssetTypes, new object[] { AtcKeys.Music }),
                 (AtcKeys.Wakeable, 0L),
                 (AtcKeys.Grappa, GrappaSigner.HostRequest)))), cancellationToken);
+        client.StartKeepAlive(cancellationToken);
         var ready = await this.WaitAsync([AtcCommands.ReadyForSync], cancellationToken);
         var parameters = ready.Dictionary(AtcKeys.Parameters);
         var anchors = parameters.Dictionary(AtcKeys.Anchors);

@@ -294,15 +294,16 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
                 }
             }
 
-            var session = new AtcSyncSession(phone.Atc, error);
-            using var signer = await session.BeginAsync(pending.Identity, current.Anchor, cancellationToken);
-            RequireUnchanged(current, await ReadCatalogueAsync(phone.Afc, cancellationToken));
             await DeviceStaging.RemoveMatchingAsync(phone.Afc, SyncPaths.Metadata, pending.Operation, cancellationToken);
             await DeviceStaging.RemoveMatchingAsync(
                 phone.Afc,
                 SyncPaths.Metadata + SyncPaths.SignatureSuffix,
                 pending.Signature,
                 cancellationToken);
+            await RequireEmptyStagingAsync(phone.Afc, cancellationToken);
+            var session = new AtcSyncSession(phone.Atc, error);
+            using var signer = await session.BeginAsync(pending.Identity, current.Anchor, cancellationToken);
+            RequireUnchanged(current, await ReadCatalogueAsync(phone.Afc, cancellationToken));
             foreach (var track in additions)
             {
                 await DeviceStaging.RemoveMatchingAsync(

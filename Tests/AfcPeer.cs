@@ -10,6 +10,7 @@ internal sealed class AfcPeer : Stream
     private const int ReadFragmentBytes = 5;
     private const int DefaultChunkLimit = 1024 * 1024;
     private const ulong InjectedFailureStatus = 10;
+    internal const ulong LockWouldBlockStatus = 19;
 
     public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
 
@@ -22,6 +23,8 @@ internal sealed class AfcPeer : Stream
     public List<byte[]> WritePackets { get; } = [];
 
     public HashSet<string> Directories { get; } = new(StringComparer.Ordinal);
+
+    public HashSet<string> LockedPaths { get; } = new(StringComparer.Ordinal);
 
     private readonly Dictionary<ulong, (string Path, int Offset)> handles = [];
     private MemoryStream input = new();
@@ -40,6 +43,8 @@ internal sealed class AfcPeer : Stream
     public Action? OnClose { get; set; }
 
     public Func<CancellationToken, Task>? BeforeFileWriteReplyAsync { get; init; }
+
+    public Func<CancellationToken, Task>? BeforeFileReadReplyAsync { get; init; }
 
     public int Opens { get; private set; }
 
@@ -92,6 +97,13 @@ internal sealed class AfcPeer : Stream
                 == (ulong)AfcOperation.FileWrite)
         {
             await this.BeforeFileWriteReplyAsync(cancellationToken);
+        }
+
+        if (this.BeforeFileReadReplyAsync is not null
+            && BinaryPrimitives.ReadUInt64LittleEndian(buffer.Span[ProtocolFrames.AfcOperationOffset..])
+                == (ulong)AfcOperation.FileRead)
+        {
+            await this.BeforeFileReadReplyAsync(cancellationToken);
         }
     }
 
@@ -186,7 +198,8 @@ internal sealed class AfcPeer : Stream
                 this.Status(id, 0);
                 return;
             case AfcOperation.FileLock when this.AllowWrites:
-                this.Status(id, 0);
+                var lockPath = this.handles[BinaryPrimitives.ReadUInt64LittleEndian(body)].Path;
+                this.Status(id, this.LockedPaths.Contains(lockPath) ? LockWouldBlockStatus : 0);
                 return;
             case AfcOperation.FileClose:
                 this.Closes++;

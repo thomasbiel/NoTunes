@@ -1,15 +1,38 @@
 namespace NoTunes.Apple;
 
-public sealed class AtcClient(Stream stream, TimeSpan timeout) : IAsyncDisposable
+public sealed class AtcClient : IAsyncDisposable
 {
     private const int StartupMessageLimit = 24;
     private const long ProbeSession = 1;
+    private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(15);
+    private readonly TimeSpan timeout;
+    private readonly TimeSpan keepAliveInterval;
+    private readonly CancellationTokenSource keepAliveStop = new();
+    private Task? keepAlive;
+    private int disposed;
 
-    internal PlistConnection Connection { get; } = new(stream, timeout, atc: true);
+    internal PlistConnection Connection { get; }
 
-    internal TimeSpan RequestTimeout => timeout;
+    internal TimeSpan RequestTimeout => this.timeout;
 
     internal bool SupportsGrappa { get; private set; }
+
+    public AtcClient(Stream stream, TimeSpan timeout) : this(stream, timeout, KeepAliveInterval)
+    {
+    }
+
+    internal AtcClient(Stream stream, TimeSpan timeout, TimeSpan keepAliveInterval)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(keepAliveInterval, TimeSpan.Zero);
+        this.timeout = timeout;
+        this.keepAliveInterval = keepAliveInterval;
+        this.Connection = new PlistConnection(stream, timeout, atc: true);
+    }
+
+    internal void StartKeepAlive(CancellationToken cancellationToken)
+    {
+        this.keepAlive ??= this.SendKeepAlivesAsync(cancellationToken);
+    }
 
     public async Task<AtcSyncStatus> ReadSyncStatusAsync(CancellationToken cancellationToken)
     {
@@ -97,5 +120,48 @@ public sealed class AtcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         }
     }
 
-    public ValueTask DisposeAsync() => this.Connection.DisposeAsync();
+    private async Task SendKeepAlivesAsync(CancellationToken cancellationToken)
+    {
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this.keepAliveStop.Token);
+        using var timer = new PeriodicTimer(this.keepAliveInterval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stop.Token))
+            {
+                await this.Connection.SendAsync(Plist.Dict(
+                    (AtcKeys.Command, AtcCommands.Ping),
+                    (AtcKeys.Session, SyncProtocol.Session)), stop.Token);
+            }
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+            // Cancellation stops the timer and any pending send.
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+        {
+            // SendAsync has discarded the connection; the active protocol reader observes its failure.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref this.disposed, 1) != 0) return;
+
+        await this.keepAliveStop.CancelAsync();
+        try
+        {
+            await this.Connection.DisposeAsync();
+        }
+        finally
+        {
+            try
+            {
+                if (this.keepAlive is not null) await this.keepAlive;
+            }
+            finally
+            {
+                this.keepAliveStop.Dispose();
+            }
+        }
+    }
 }

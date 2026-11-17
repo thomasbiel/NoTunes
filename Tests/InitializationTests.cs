@@ -10,6 +10,90 @@ public sealed class InitializationTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(1);
 
+    [TestCase(false, SyncPaths.Metadata)]
+    [TestCase(false, SyncPaths.Metadata + SyncPaths.SignatureSuffix)]
+    [TestCase(false, SyncPaths.MetadataDirectory + "/Sync_00000001.plist")]
+    [TestCase(true, SyncPaths.Metadata)]
+    [TestCase(true, SyncPaths.Metadata + SyncPaths.SignatureSuffix)]
+    [TestCase(true, SyncPaths.MetadataDirectory + "/Sync_00000001.plist")]
+    public async Task Preserves_Foreign_Staging_Before_The_Receiver_Prepares_A_Session(bool recovering, string foreignPath)
+    {
+        using var state = new SyncWorkspace();
+        using var fixture = Fresh();
+        var saved = await SaveStateAsync(fixture, state.Root);
+        if (!recovering)
+        {
+            File.Delete(Path.Combine(DeviceState.DirectoryFor(state.Root, "phone"), "initialization.json"));
+        }
+
+        var foreign = new byte[] { 90, 91, 92 };
+        var files = new AfcPeer { AllowWrites = true };
+        files.Directories.Add(SyncPaths.MetadataDirectory);
+        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        if (recovering)
+        {
+            files.Files[SyncPaths.Metadata] = saved.Operation;
+            files.Files[SyncPaths.Metadata + SyncPaths.SignatureSuffix] = saved.Signature!;
+        }
+
+        files.Files[foreignPath] = foreign;
+        var started = false;
+        var peer = Peer(files, fixture, () =>
+        {
+            started = true;
+            // Receiver prepare deletes every Sync_*.plist, including files from another operation.
+            foreach (var path in files.Files.Keys.Where(path =>
+                path.StartsWith(SyncPaths.MetadataDirectory + "/Sync_", StringComparison.Ordinal)
+                && path.EndsWith(".plist", StringComparison.Ordinal)).ToArray())
+            {
+                files.Files.Remove(path);
+            }
+        });
+        await using var afc = new AfcClient(files, Timeout);
+        await using var atc = new AtcClient(peer, Timeout);
+        await atc.ReadSyncStatusAsync(CancellationToken.None);
+        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
+        await Assert.ThrowsAsync<IOException>(() => initializer.InitializeAsync(
+            afc,
+            atc,
+            "Test iPhone",
+            "phone",
+            new InitOptions { StateFolder = state.Root },
+            CancellationToken.None));
+        Assert.That(started, Is.False);
+        Assert.That(files.Files[foreignPath], Is.EqualTo(foreign));
+    }
+
+    [Test]
+    public async Task Removes_Own_Metadata_Prefixes_Before_Starting_A_Recovery_Session()
+    {
+        using var state = new SyncWorkspace();
+        using var fixture = Fresh();
+        var saved = await SaveStateAsync(fixture, state.Root);
+        var files = new AfcPeer { AllowWrites = true };
+        files.Directories.Add(SyncPaths.MetadataDirectory);
+        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        files.Files[SyncPaths.Metadata] = saved.Operation[..^1];
+        files.Files[SyncPaths.Metadata + SyncPaths.SignatureSuffix] = saved.Signature![..^1];
+        var peer = Peer(files, fixture, () =>
+        {
+            Assert.That(files.Files.ContainsKey(SyncPaths.Metadata), Is.False);
+            Assert.That(files.Files.ContainsKey(SyncPaths.Metadata + SyncPaths.SignatureSuffix), Is.False);
+        });
+        await using var afc = new AfcClient(files, Timeout);
+        await using var atc = new AtcClient(peer, Timeout);
+        await atc.ReadSyncStatusAsync(CancellationToken.None);
+        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
+        var result = await initializer.InitializeAsync(
+            afc,
+            atc,
+            "Test iPhone",
+            "phone",
+            new InitOptions { StateFolder = state.Root },
+            CancellationToken.None);
+        Assert.That(result.DatabaseId, Is.EqualTo(saved.DatabaseId));
+    }
+
     [TestCase(0, false)]
     [TestCase(0, true)]
     [TestCase(1, false)]
@@ -201,7 +285,21 @@ public sealed class InitializationTests
         return fixture;
     }
 
-    private static AtcPeer Peer(AfcPeer files, CatalogueFixture fixture)
+    private static async Task<InitializationState> SaveStateAsync(CatalogueFixture fixture, string root)
+    {
+        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None, allowUninitialized: true);
+        var saved = new InitializationState(
+            LibraryPreferences.Create(),
+            2001,
+            2002,
+            SyncOperations.Initialize(2001, 2002, "Test iPhone"),
+            CatalogueCheckpoint.Capture(before),
+            new byte[] { 1, 2, 3 });
+        DeviceState.Save(Path.Combine(DeviceState.DirectoryFor(root, "phone"), "initialization.json"), saved);
+        return saved;
+    }
+
+    private static AtcPeer Peer(AfcPeer files, CatalogueFixture fixture, Action? onRequestingSync = null)
     {
         return new AtcPeer(
             SyncTestData.Capabilities(),
@@ -211,6 +309,11 @@ public sealed class InitializationTests
         {
             OnMessageSent = message =>
             {
+                if (message.Text(AtcKeys.Command) == AtcCommands.RequestingSync)
+                {
+                    onRequestingSync?.Invoke();
+                }
+
                 if (message.Text(AtcKeys.Command) != AtcCommands.FinishedMetadata) return;
 
                 var document = Plist.Parse(files.Files[SyncPaths.Metadata]).AsDict();
