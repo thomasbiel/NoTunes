@@ -9,6 +9,49 @@ public sealed class AtcSyncSessionTests
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(1);
     private static readonly LibraryIdentity Identity = new("0011223344556677", "binding");
 
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task Transfers_Audio_Without_Cover_With_Or_Without_Existing_Airlock(bool airlockExists)
+    {
+        var track = SyncTestData.Track();
+        Assert.That(track.Metadata.Artwork, Is.Null);
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var peer = new AtcPeer(
+            SyncTestData.Capabilities(),
+            SyncTestData.Allowed(),
+            SyncTestData.Ready(),
+            SyncTestData.Message(AtcCommands.AssetManifest, SyncTestData.Manifest(SyncTestData.Asset(track.AssetId))),
+            SyncTestData.Message(AtcCommands.SyncFinished))
+        {
+            BeforeFrameAsync = (frame, token) => frame >= 4 ? completed.Task.WaitAsync(token) : Task.CompletedTask,
+            OnMessageSent = message =>
+            {
+                if (message.Text(AtcKeys.Command) == AtcCommands.FileComplete) completed.TrySetResult();
+            }
+        };
+        var files = new AfcPeer { AllowWrites = true, RequireParentDirectories = true };
+        if (airlockExists)
+        {
+            files.Directories.Add(SyncPaths.Airlock.TrimEnd('/'));
+        }
+
+        await using var afc = new AfcClient(files, Timeout);
+        await using var client = new AtcClient(peer, Timeout);
+        await client.ReadSyncStatusAsync(CancellationToken.None);
+        var session = new AtcSyncSession(client, TextWriter.Null);
+        using var signer = await session.BeginAsync(Identity, 7, CancellationToken.None);
+        await session.FinishMetadataAsync(7, CancellationToken.None);
+        await session.TransferAsync(
+            afc,
+            [track],
+            new HashSet<long>(),
+            CancellationToken.None);
+
+        Assert.That(files.Directories, Does.Contain(SyncPaths.Airlock.TrimEnd('/')));
+        Assert.That(files.Files[SyncPaths.Airlock + track.AssetId],
+            Is.EqualTo(await File.ReadAllBytesAsync(track.LocalPath)));
+    }
+
     [Test]
     public async Task Caller_Cancellation_Stops_The_Control_Reader_And_The_Upload()
     {

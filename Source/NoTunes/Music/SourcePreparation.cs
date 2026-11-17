@@ -6,6 +6,8 @@ namespace NoTunes.Music;
 
 internal static class SourcePreparation
 {
+    private const long UnusedGroupId = 0;
+
     public static async Task<IReadOnlyList<PreparedTrack>> PrepareAsync(
         SourceLibrary library,
         SyncPlan plan,
@@ -98,30 +100,35 @@ internal static class SourcePreparation
                     metadata.Item[MediaKeys.ArtworkCacheId] = (long)artworkId;
                 }
 
-                var artistId = GroupId(artists, metadata.AlbumArtist, ids);
-                var albumId = GroupId(albums, CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist), ids);
-                PreserveSortName(
-                    albumSorts,
-                    CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist),
-                    metadata.Item,
-                    MediaKeys.SortAlbum);
-                PreserveSortName(
-                    albumArtistSorts,
-                    metadata.AlbumArtist,
-                    metadata.Item,
-                    MediaKeys.SortAlbumArtist);
-                PreserveSortName(
-                    artistSorts,
-                    (string)metadata.Item[MediaKeys.Artist],
-                    metadata.Item,
-                    MediaKeys.SortArtist);
-                if (metadata.Item.TryGetValue(MediaKeys.Composer, out var composer))
+                var artistId = UnusedGroupId;
+                var albumId = UnusedGroupId;
+                if (!artworkOnly)
                 {
+                    artistId = GroupId(artists, metadata.AlbumArtist, ids);
+                    albumId = GroupId(albums, CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist), ids);
                     PreserveSortName(
-                        composerSorts,
-                        (string)composer,
+                        albumSorts,
+                        CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist),
                         metadata.Item,
-                        MediaKeys.SortComposer);
+                        MediaKeys.SortAlbum);
+                    PreserveSortName(
+                        albumArtistSorts,
+                        metadata.AlbumArtist,
+                        metadata.Item,
+                        MediaKeys.SortAlbumArtist);
+                    PreserveSortName(
+                        artistSorts,
+                        (string)metadata.Item[MediaKeys.Artist],
+                        metadata.Item,
+                        MediaKeys.SortArtist);
+                    if (metadata.Item.TryGetValue(MediaKeys.Composer, out var composer))
+                    {
+                        PreserveSortName(
+                            composerSorts,
+                            (string)composer,
+                            metadata.Item,
+                            MediaKeys.SortComposer);
+                    }
                 }
 
                 result.Add(new PreparedTrack(

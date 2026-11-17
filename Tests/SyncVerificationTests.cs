@@ -6,6 +6,90 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class SyncVerificationTests
 {
+    [TestCase(null, 101U)]
+    [TestCase("aa/other.jpg", 101U)]
+    [TestCase("aa/cover.jpg", 102U)]
+    public void Rejects_Unrequested_Artwork_Changes_On_Retained_Tracks(string? path, uint cacheId)
+    {
+        var retained = new DeviceTrack(
+            2001,
+            "Retained",
+            "retained.mp3",
+            5);
+        var removed = new DeviceTrack(
+            2002,
+            "Removed",
+            "removed.mp3",
+            5);
+        var original = new ArtworkReference(101, "aa/cover.jpg");
+        var before = SyncPlannerTests.Catalogue([retained, removed]) with
+        {
+            TrackArtwork = new Dictionary<long, ArtworkReference> { [retained.Id] = original }
+        };
+        var after = before with
+        {
+            Anchor = before.Anchor + 1,
+            Tracks = [retained],
+            TrackArtwork = new Dictionary<long, ArtworkReference>()
+        };
+        Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
+            before,
+            after,
+            [],
+            [removed]));
+        after = after with
+        {
+            TrackArtwork = new Dictionary<long, ArtworkReference>
+            {
+                [retained.Id] = new ArtworkReference(cacheId, path)
+            }
+        };
+        Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
+            before,
+            after,
+            [],
+            [removed]));
+        Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
+            before,
+            after with { TrackArtwork = before.TrackArtwork },
+            [],
+            [removed]));
+    }
+
+    [Test]
+    public void Allows_Requested_Artwork_Updates_And_Artwork_Removal_For_Deleted_Tracks()
+    {
+        var repair = FeatureTestData.Covered(artworkOnly: true);
+        var retained = FeatureTestData.Stored(repair);
+        var removed = new DeviceTrack(
+            2002,
+            "Removed",
+            "removed.mp3",
+            5);
+        var before = SyncPlannerTests.Catalogue([retained, removed]) with
+        {
+            TrackArtwork = new Dictionary<long, ArtworkReference>
+            {
+                [retained.Id] = new ArtworkReference(100, null),
+                [removed.Id] = new ArtworkReference(99, "aa/removed.jpg")
+            }
+        };
+        var after = before with
+        {
+            Anchor = before.Anchor + 1,
+            Tracks = [retained],
+            TrackArtwork = new Dictionary<long, ArtworkReference>
+            {
+                [retained.Id] = new ArtworkReference(repair.Metadata.Artwork!.CacheId, "aa/repaired.jpg")
+            }
+        };
+        Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
+            before,
+            after,
+            [repair],
+            [removed]));
+    }
+
     [Test]
     public async Task Accepts_Collected_Groups_After_Verifying_The_Deleted_Track_Inventory()
     {

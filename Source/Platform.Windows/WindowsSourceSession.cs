@@ -15,7 +15,8 @@ internal sealed class WindowsSourceSession : ISourceSession
     private const uint BackupSemantics = 0x02000000;
     private const uint SequentialScan = 0x08000000;
     private const uint Overlapped = 0x40000000;
-    private readonly List<SafeFileHandle> directories = [];
+    // Pin different spellings separately because Windows directories can enable case-sensitive names.
+    private readonly Dictionary<string, SafeFileHandle> directories = new(StringComparer.Ordinal);
 
     private WindowsSourceSession()
     {
@@ -51,11 +52,15 @@ internal sealed class WindowsSourceSession : ISourceSession
     // Attribute-only handles do not enforce Windows sharing restrictions.
     public void AddDirectory(DirectoryInfo directory)
     {
-        this.directories.Add(Open(
-            directory.FullName,
+        var path = Path.TrimEndingDirectorySeparator(directory.FullName);
+        if (this.directories.ContainsKey(path)) return;
+
+        var handle = Open(
+            path,
             ReadAttributes | ListDirectory,
             BackupSemantics,
-            directory: true));
+            directory: true);
+        this.directories.Add(path, handle);
     }
 
     // Windows must keep sharing guards until the complete inventory is finished.
@@ -132,9 +137,9 @@ internal sealed class WindowsSourceSession : ISourceSession
 
     public void Dispose()
     {
-        for (var i = this.directories.Count - 1; i >= 0; i--)
+        foreach (var handle in this.directories.Values.Reverse())
         {
-            this.directories[i].Dispose();
+            handle.Dispose();
         }
 
         this.directories.Clear();

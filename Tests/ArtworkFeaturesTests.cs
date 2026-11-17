@@ -9,6 +9,78 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class ArtworkFeaturesTests
 {
+    [TestCase(true)]
+    [TestCase(false)]
+    public async Task Repairs_Covers_Without_Resolving_Ambiguous_Group_Identities_Or_Sort_Names(bool ambiguousIds)
+    {
+        const string album = "Album";
+        const string artist = "Artist";
+        using var source = new SyncWorkspace();
+        using var output = new SyncWorkspace();
+        var path = Path.Combine(source.Root, "covered.mp3");
+        File.Copy(SyncTestData.FixturePath, path);
+        using (var file = TagLib.File.Create(path))
+        {
+            file.Tag.Album = album;
+            file.Tag.Performers = [artist];
+            file.Tag.AlbumArtists = [artist];
+            file.Tag.Pictures = [new TagLib.Picture
+            {
+                Data = new TagLib.ByteVector(FeatureTestData.Png()),
+                MimeType = "image/png",
+                Type = TagLib.PictureType.FrontCover
+            }];
+            file.Save();
+        }
+
+        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
+            .BuildServiceProvider();
+        var library = await services.GetRequiredService<SourceScanner>().ScanAsync(source.Root, CancellationToken.None);
+        var groupKey = CatalogueReader.GroupKey(album, artist);
+        var catalogue = SyncPlannerTests.Catalogue([]) with
+        {
+            ArtworkAvailable = true,
+            Albums = new Dictionary<string, long> { [groupKey] = ambiguousIds ? 0 : 1012 },
+            Artists = new Dictionary<string, long> { [artist] = ambiguousIds ? 0 : 1011 },
+            SortNames = GroupSortNames.Empty with
+            {
+                Albums = new Dictionary<string, string?> { [groupKey] = ambiguousIds ? album : null },
+                AlbumArtists = new Dictionary<string, string?> { [artist] = ambiguousIds ? artist : null }
+            }
+        };
+        var plan = new SyncPlan(
+            "phone",
+            catalogue.Anchor,
+            library.Tracks,
+            [],
+            0);
+        var fileSystem = services.GetRequiredService<ISourceFileSystem>();
+        await Assert.ThrowsAsync<InvalidDataException>(() => SourcePreparation.PrepareAsync(
+            library,
+            plan,
+            catalogue,
+            fileSystem,
+            output,
+            CancellationToken.None));
+
+        var prepared = await SourcePreparation.PrepareAsync(
+            library,
+            plan,
+            catalogue,
+            fileSystem,
+            output,
+            CancellationToken.None,
+            artworkOnly: true);
+        Assert.That(prepared, Has.Count.EqualTo(1));
+        var repair = prepared[0] with { Id = SyncTestData.TrackId, IsArtworkOnly = true };
+        var document = Plist.Parse(SyncOperations.Serialize(catalogue, [repair], [])).AsDict();
+        var operation = ((object[])document[MediaKeys.Operations])[1].AsDict();
+        Assert.That(operation.Text(MediaKeys.Operation), Is.EqualTo(MediaOperations.UpdateTrack));
+        Assert.That(operation.Dictionary(MediaKeys.Item).Keys,
+            Is.EquivalentTo(new[] { MediaKeys.ArtworkCacheId, MediaKeys.ArtworkChecksum }));
+        Assert.That(repair.Metadata.Artwork, Is.Not.Null);
+    }
+
     [Test]
     public void Converts_Transparent_Png_To_Jpeg_And_Preserves_An_Existing_Jpeg()
     {

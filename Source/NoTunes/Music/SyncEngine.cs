@@ -420,6 +420,13 @@ public sealed class SyncEngine(SourceScanner scanner, ISourceFileSystem fileSyst
             throw new IOException("The iPhone track inventory differs from the requested changes.");
         }
 
+        var artworkUpdates = additions.Where(track => track.IsArtworkOnly).Select(track => track.Id).ToHashSet();
+        if (before.TrackArtwork.Any(pair => !deletedIds.Contains(pair.Key) && !artworkUpdates.Contains(pair.Key)
+            && (!after.TrackArtwork.TryGetValue(pair.Key, out var artwork) || artwork != pair.Value)))
+        {
+            throw new IOException("Artwork on an unchanged track differs after synchronization.");
+        }
+
         var actual = after.Tracks.ToDictionary(track => track.Id);
         if (!after.SortNames.Preserves(before.SortNames, allowRemovedGroups: true)
             || !PreservesGroupIds(after.Albums, before.Albums, allowRemovedGroups: true)

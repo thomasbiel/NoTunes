@@ -175,6 +175,7 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
                 continue;
             }
 
+            await afc.EnsureDirectoryAsync(SyncPaths.Airlock.TrimEnd('/'), cancellationToken);
             var staged = SyncPaths.Airlock + track.AssetId;
             await this.error.WriteLineAsync($"Transfer: {track.Source.RelativePath}");
             await using var input = new FileStream(

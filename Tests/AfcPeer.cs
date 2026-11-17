@@ -16,6 +16,8 @@ internal sealed class AfcPeer : Stream
 
     public bool AllowWrites { get; init; }
 
+    public bool RequireParentDirectories { get; init; }
+
     public bool FailWrite { get; init; }
 
     public bool CorruptWrite { get; init; }
@@ -156,6 +158,14 @@ internal sealed class AfcPeer : Stream
                     || this.AllowWrites && mode is AfcOpenMode.ReadWrite or AfcOpenMode.WriteTruncate,
                     Is.True, "Only explicitly enabled writes are allowed.");
                 var name = Encoding.UTF8.GetString(body[sizeof(ulong)..]).TrimEnd('\0');
+                var separator = name.LastIndexOf('/');
+                if (this.RequireParentDirectories && mode != AfcOpenMode.ReadOnly && separator >= 0
+                    && !this.Directories.Contains(name[..separator]))
+                {
+                    this.Status(id, (ulong)AfcStatusCode.ObjectNotFound);
+                    return;
+                }
+
                 if (mode == AfcOpenMode.WriteTruncate || mode == AfcOpenMode.ReadWrite && !this.Files.ContainsKey(name))
                     this.Files[name] = [];
 

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
@@ -54,6 +55,34 @@ public sealed class SourcePathGuardTests
             guard.AddDirectory(child);
             Assert.That(() => this.MoveWithinFixture(child.FullName, child.FullName + "-moved"), Throws.InstanceOf<IOException>());
             Assert.That(() => this.CreateJunction(child.FullName, this.outside), Throws.InstanceOf<IOException>());
+        }
+
+        this.MoveWithinFixture(child.FullName, child.FullName + "-moved");
+    }
+
+    [Test]
+    public void Repeated_Preparation_Visits_Keep_Native_Handle_Usage_Bounded_And_Directories_Pinned()
+    {
+        const int visits = 1000;
+        const int maximumAdditionalHandles = 32;
+        var child = Directory.CreateDirectory(Path.Combine(this.source, "album"));
+        var alternate = new DirectoryInfo(child.FullName.ToUpperInvariant() + Path.DirectorySeparatorChar);
+        using (var guard = WindowsSourceSession.Acquire(new DirectoryInfo(this.source), CancellationToken.None))
+        using (var process = Process.GetCurrentProcess())
+        {
+            guard.AddDirectory(child);
+            var before = process.HandleCount;
+            for (var index = 0; index < visits; index++)
+            {
+                var directory = index % 2 == 0 ? child : alternate;
+                guard.AddDirectory(directory);
+                guard.ReleaseDirectory(directory);
+            }
+
+            process.Refresh();
+            Assert.That(process.HandleCount - before, Is.LessThan(maximumAdditionalHandles));
+            Assert.That(() => this.MoveWithinFixture(child.FullName, child.FullName + "-moved"),
+                Throws.InstanceOf<IOException>());
         }
 
         this.MoveWithinFixture(child.FullName, child.FullName + "-moved");
