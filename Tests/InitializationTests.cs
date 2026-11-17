@@ -1,0 +1,166 @@
+using NoTunes.Apple;
+using NoTunes.Cli;
+using NoTunes.Music;
+using NUnit.Framework;
+
+namespace NoTunes.Tests;
+
+public sealed class InitializationTests
+{
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(1);
+
+    [Test]
+    public void Generates_Compatible_Independent_Library_Preferences()
+    {
+        var raw = LibraryPreferences.Create();
+        Assert.That(raw, Has.Length.EqualTo(1232));
+        Assert.That(LibraryIdentity.Parse(raw), Is.EqualTo(LibraryIdentity.Parse(LibraryPreferences.Wrap(raw))));
+        Assert.That(LibraryIdentity.Parse(raw), Is.Not.EqualTo(LibraryIdentity.Parse(LibraryPreferences.Create())));
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task Initializes_Only_A_New_Library_And_Verifies_The_Committed_Result(bool dryRun)
+    {
+        using var state = new SyncWorkspace();
+        using var fixture = Fresh();
+        var files = new AfcPeer { AllowWrites = !dryRun };
+        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        var peer = Peer(files, fixture);
+        await using var afc = new AfcClient(files, Timeout);
+        await using var atc = new AtcClient(peer, Timeout);
+        await atc.ReadSyncStatusAsync(CancellationToken.None);
+        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
+        var options = new InitOptions { StateFolder = state.Root, DryRun = dryRun };
+        var result = await initializer.InitializeAsync(
+            afc,
+            atc,
+            "Test iPhone",
+            "phone",
+            options,
+            CancellationToken.None);
+        Assert.That(result.DryRun, Is.EqualTo(dryRun));
+        Assert.That(files.Files.ContainsKey(SyncPaths.Preferences), Is.EqualTo(!dryRun));
+        if (dryRun)
+        {
+            Assert.That(files.WritePackets, Is.Empty);
+            Assert.That(peer.SentMessages().Select(message => message.Text(AtcKeys.Command)), Is.EqualTo([AtcCommands.Ping]));
+            return;
+        }
+
+        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        Assert.That(catalogue.DatabaseId, Is.EqualTo(result.DatabaseId));
+        Assert.That(catalogue.Anchor, Is.EqualTo(1));
+        Assert.That(catalogue.Tracks, Is.Empty);
+        Assert.That(files.Files[SyncPaths.PreferencesPlist], Is.EqualTo(LibraryPreferences.Wrap(files.Files[SyncPaths.Preferences])));
+    }
+
+    [Test]
+    public async Task Resumes_An_Interrupted_Preference_Write_With_The_Same_Identity()
+    {
+        using var state = new SyncWorkspace();
+        using var fixture = Fresh();
+        var failed = new AfcPeer { AllowWrites = true, FailWrite = true };
+        failed.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
+        var options = new InitOptions { StateFolder = state.Root };
+        await using (var afc = new AfcClient(failed, Timeout))
+        await using (var atc = new AtcClient(Peer(failed, fixture), Timeout))
+        {
+            await atc.ReadSyncStatusAsync(CancellationToken.None);
+            await Assert.ThrowsAsync<AfcException>(() => initializer.InitializeAsync(
+                afc,
+                atc,
+                "Test iPhone",
+                "phone",
+                options,
+                CancellationToken.None));
+        }
+
+        var record = Directory.GetFiles(state.Root, "initialization.json", SearchOption.AllDirectories).Single();
+        var saved = System.Text.Json.JsonSerializer.Deserialize<InitializationState>(File.ReadAllBytes(record))!;
+        var retry = new AfcPeer { AllowWrites = true };
+        foreach (var file in failed.Files)
+        {
+            retry.Files[file.Key] = file.Value;
+        }
+
+        await using var retryAfc = new AfcClient(retry, Timeout);
+        await using var retryAtc = new AtcClient(Peer(retry, fixture), Timeout);
+        await retryAtc.ReadSyncStatusAsync(CancellationToken.None);
+        var result = await initializer.InitializeAsync(
+            retryAfc,
+            retryAtc,
+            "Test iPhone",
+            "phone",
+            options,
+            CancellationToken.None);
+        Assert.That(result.DatabaseId, Is.EqualTo(saved.DatabaseId));
+        Assert.That(retry.Files[SyncPaths.Preferences], Is.EqualTo(saved.Preferences));
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task Refuses_Existing_Libraries_And_Foreign_Preferences_Without_Writing(bool preferencesOnly)
+    {
+        using var state = new SyncWorkspace();
+        using var fixture = preferencesOnly ? Fresh() : new CatalogueFixture();
+        var files = new AfcPeer();
+        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        if (preferencesOnly) files.Files[SyncPaths.Preferences] = LibraryPreferences.Create();
+
+        await using var afc = new AfcClient(files, Timeout);
+        await using var atc = new AtcClient(Peer(files, fixture), Timeout);
+        await atc.ReadSyncStatusAsync(CancellationToken.None);
+        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
+        await Assert.ThrowsAsync<IOException>(() => initializer.InitializeAsync(
+            afc,
+            atc,
+            "Test iPhone",
+            "phone",
+            new InitOptions { StateFolder = state.Root },
+            CancellationToken.None));
+        Assert.That(files.WritePackets, Is.Empty);
+        Assert.That(files.Files.ContainsKey(SyncPaths.Lock), Is.False);
+    }
+
+    private static CatalogueFixture Fresh()
+    {
+        var fixture = new CatalogueFixture();
+        fixture.Execute("""
+            DELETE FROM db_info; DELETE FROM item; DELETE FROM item_store; DELETE FROM item_extra;
+            DELETE FROM container; DELETE FROM _MLDatabaseProperties;
+            """);
+        return fixture;
+    }
+
+    private static AtcPeer Peer(AfcPeer files, CatalogueFixture fixture)
+    {
+        return new AtcPeer(
+            SyncTestData.Capabilities(),
+            SyncTestData.Allowed(),
+            SyncTestData.Ready("0"),
+            SyncTestData.Message(AtcCommands.SyncFinished))
+        {
+            OnMessageSent = message =>
+            {
+                if (message.Text(AtcKeys.Command) != AtcCommands.FinishedMetadata) return;
+
+                var document = Plist.Parse(files.Files[SyncPaths.Metadata]).AsDict();
+                var operations = (object[])document[MediaKeys.Operations];
+                Assert.That(operations, Has.Length.EqualTo(2));
+                var database = operations[0].AsDict().Number(MediaKeys.PersistentId);
+                var playlist = operations[1].AsDict();
+                Assert.That(playlist.Text(MediaKeys.Operation), Is.EqualTo("insert_playlist"));
+                Assert.That(playlist.Dictionary("container").Flag("is_hidden"), Is.True);
+                var container = playlist.Number(MediaKeys.PersistentId);
+                fixture.Execute($"INSERT INTO db_info VALUES({database},{container}); "
+                    + $"INSERT INTO container(sync_id) VALUES({container}); "
+                    + "INSERT INTO _MLDatabaseProperties VALUES('MLSyncClientSyncAnchor','1');");
+                files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+                files.Files.Remove(SyncPaths.Metadata);
+                files.Files.Remove(SyncPaths.Metadata + SyncPaths.SignatureSuffix);
+            }
+        };
+    }
+}

@@ -26,7 +26,7 @@ internal sealed class DeviceSyncConnection(LockdownClient lockdown, AfcClient af
         {
             await lockdown.StartPairedSessionAsync(cancellationToken);
             var info = await lockdown.GetInfoAsync(cancellationToken);
-            if (!info.Model.StartsWith("iPhone", StringComparison.Ordinal))
+            if (!info.Model.StartsWith(DeviceInfo.IphoneModelPrefix, StringComparison.Ordinal))
             {
                 throw new IOException("Music synchronization requires an iPhone.");
             }

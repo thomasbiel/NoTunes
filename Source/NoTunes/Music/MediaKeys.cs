@@ -30,6 +30,7 @@ internal static class MediaKeys
     public const string RememberBookmark = "remember_bookmark";
     public const string TotalMilliseconds = "total_time_ms";
     public const string ArtworkChecksum = "artwork_checksum";
+    public const string ArtworkCacheId = "artwork_cache_id";
     public const string TrackNumber = "track_number";
     public const string TrackCount = "track_count";
     public const string DiscNumber = "disc_number";
@@ -48,4 +49,17 @@ internal static class MediaKeys
     public const string UserSkipCount = "skip_count_user";
     public const string RecentSkipCount = "skip_count_recent";
     public const string HasBeenPlayed = "has_been_played";
+    public const string Container = "container";
+    public const string ContainerUi = "container_ui";
+    public const string ItemToContainer = "item_to_container";
+    public const string Name = "name";
+    public const string IsHidden = "is_hidden";
+    public const string DateCreated = "date_created";
+    public const string DateModified = "date_modified";
+    public const string AlbumFieldOrder = "album_field_order";
+    public const string HasBeenShuffled = "has_been_shuffled";
+    public const string IsReversed = "is_reversed";
+    public const string PlayOrder = "play_order";
+    public const string RepeatMode = "repeat_mode";
+    public const string ShuffleItems = "shuffle_items";
 }

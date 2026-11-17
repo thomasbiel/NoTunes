@@ -7,14 +7,27 @@ namespace NoTunes.Apple;
 
 internal static class PairingCertificate
 {
+    private const byte DerSequenceTag = 0x30;
+    private const string PemCertificateType = "CERTIFICATE";
+    private const string EmptyIssuerPlaceholder = "CN=Apple Pairing";
+    private const int CertificateFieldCount = 3;
+    private const int BodyIndex = 0;
+    private const int SignatureAlgorithmIndex = 1;
+    private const int SignatureValueIndex = 2;
+    private const int MinimumBodyFieldCount = 6;
+    private const int MaximumBodyFieldCount = 10;
+    private const int IssuerIndexWithoutVersion = 2;
+    private const int IssuerIndexWithVersion = 3;
+
     public static byte[] Decode(byte[] content)
     {
         if (content.Length == 0) throw new InvalidDataException("The saved pairing certificate is empty.");
 
-        if (content[0] == 0x30) return [.. content];
+        if (content[0] == DerSequenceTag) return [.. content];
+
         using var reader = new StringReader(Encoding.UTF8.GetString(content));
         var pem = new PemReader(reader).ReadPemObject();
-        if (pem is null || !StringComparer.Ordinal.Equals(pem.Type, "CERTIFICATE"))
+        if (pem is null || !StringComparer.Ordinal.Equals(pem.Type, PemCertificateType))
             throw new InvalidDataException("The saved pairing certificate is not a PEM certificate.");
 
         return pem.Content;
@@ -25,12 +38,14 @@ internal static class PairingCertificate
         try
         {
             var certificate = Asn1Sequence.GetInstance(Asn1Object.FromByteArray(encoded));
-            if (certificate.Count != 3) throw new InvalidDataException("Invalid pairing certificate structure.");
+            if (certificate.Count != CertificateFieldCount)
+                throw new InvalidDataException("Invalid pairing certificate structure.");
 
-            var tbs = Asn1Sequence.GetInstance(certificate[0]);
-            if (tbs.Count is < 6 or > 10) throw new InvalidDataException("Invalid pairing certificate body.");
+            var tbs = Asn1Sequence.GetInstance(certificate[BodyIndex]);
+            if (tbs.Count is < MinimumBodyFieldCount or > MaximumBodyFieldCount)
+                throw new InvalidDataException("Invalid pairing certificate body.");
 
-            var issuerIndex = tbs[0] is Asn1TaggedObject ? 3 : 2;
+            var issuerIndex = tbs[BodyIndex] is Asn1TaggedObject ? IssuerIndexWithVersion : IssuerIndexWithoutVersion;
             if (X509Name.GetInstance(tbs[issuerIndex]).IsEmpty)
             {
                 // Apple pairing certificates can have an empty issuer. Only the internal crypto view
@@ -41,8 +56,9 @@ internal static class PairingCertificate
                     fields[index] = tbs[index];
                 }
 
-                fields[issuerIndex] = new X509Name("CN=Apple Pairing");
-                certificate = new DerSequence(new DerSequence(fields), certificate[1], certificate[2]);
+                fields[issuerIndex] = new X509Name(EmptyIssuerPlaceholder);
+                certificate = new DerSequence(new DerSequence(fields),
+                    certificate[SignatureAlgorithmIndex], certificate[SignatureValueIndex]);
             }
 
             return X509CertificateStructure.GetInstance(certificate);

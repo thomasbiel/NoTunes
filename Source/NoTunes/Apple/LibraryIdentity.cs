@@ -1,23 +1,11 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using static NoTunes.Apple.LibraryPreferencesFormat;
 
 namespace NoTunes.Apple;
 
 internal sealed record LibraryIdentity(string LibraryId, string Binding)
 {
-    private const int PreferenceLength = 1232;
-    private const int MajorVersionOffset = 4;
-    private const int MinorVersionOffset = 6;
-    private const int ConfiguredOffset = 8;
-    private const ushort MajorVersion = 1;
-    private const ushort MinorVersion = 25;
-    private const byte Configured = 1;
-    private const int CatalogueIdentityOffset = 12;
-    private const int UserIdentityOffset = CatalogueIdentityOffset + sizeof(ulong);
-    private const string PreferencesKey = "iPodPrefs";
-
-    private static ReadOnlySpan<byte> Magic => "frpd"u8;
-
     public static LibraryIdentity Parse(byte[] content)
     {
         if (!content.AsSpan().StartsWith(Magic))
@@ -27,7 +15,7 @@ internal sealed record LibraryIdentity(string LibraryId, string Binding)
                 ?? throw new InvalidDataException("Missing iPodPrefs library identity.");
         }
 
-        if (content.Length != PreferenceLength || !content.AsSpan().StartsWith(Magic)
+        if (content.Length != Length || !content.AsSpan().StartsWith(Magic)
             || BinaryPrimitives.ReadUInt16LittleEndian(content.AsSpan(MajorVersionOffset)) != MajorVersion
             || BinaryPrimitives.ReadUInt16LittleEndian(content.AsSpan(MinorVersionOffset)) != MinorVersion
             || content[ConfiguredOffset] != Configured)
@@ -55,6 +43,7 @@ internal sealed record LibraryIdentity(string LibraryId, string Binding)
             result = identity;
         }
 
-        return result ?? throw new IOException("No configured music library identity found on the iPhone.");
+        return result ?? throw new IOException("No configured music library identity found. "
+            + "Run 'notunes init' to prepare a new, unsynced iPhone.");
     }
 }

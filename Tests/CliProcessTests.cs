@@ -6,6 +6,17 @@ namespace NoTunes.Tests;
 
 public sealed class CliProcessTests
 {
+    [Test]
+    public async Task Executes_A_Valid_Scan_Through_The_Shared_MapResult_Callback()
+    {
+        using var source = new NoTunes.Music.SyncWorkspace();
+        var result = await RunAsync("scan", source.Root, "--json");
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        Assert.That(result.Error, Is.Empty);
+        using var json = System.Text.Json.JsonDocument.Parse(result.Output);
+        Assert.That(json.RootElement.GetProperty("Tracks").GetArrayLength(), Is.Zero);
+    }
+
     [TestCase("scan")]
     [TestCase("sync")]
     public async Task Rejects_Additional_Source_Arguments_Before_Scanning(string command)

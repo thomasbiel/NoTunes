@@ -4,6 +4,44 @@ namespace NoTunes.Music;
 
 internal static class SyncOperations
 {
+    private const long DefaultAlbumFieldOrder = 0;
+    private const long DefaultPlayOrder = 1;
+    private const long RepeatOff = 0;
+
+    public static byte[] Initialize(long database, long container, string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (database == 0 || container == 0 || database == container)
+            throw new InvalidDataException("Initialization requires distinct nonzero identities.");
+
+        var created = DateTime.UtcNow;
+        created = created.AddTicks(-(created.Ticks % TimeSpan.TicksPerSecond));
+        return BinaryPlist.Write(Plist.Dict(
+            (MediaKeys.Revision, SyncProtocol.FirstMediaRevision),
+            (MediaKeys.Timestamp, created),
+            (MediaKeys.Operations, new object[]
+            {
+                Plist.Dict((MediaKeys.Operation, MediaOperations.UpdateDatabase), (MediaKeys.PersistentId, database),
+                    (MediaKeys.DatabaseInfo, Plist.Dict((MediaKeys.PrimaryContainerId, container)))),
+                Plist.Dict(
+                    (MediaKeys.Operation, MediaOperations.InsertPlaylist),
+                    (MediaKeys.PersistentId, container),
+                    (MediaKeys.Container, Plist.Dict(
+                        (MediaKeys.Name, name),
+                        (MediaKeys.IsHidden, true),
+                        (MediaKeys.DateCreated, created),
+                        (MediaKeys.DateModified, created))),
+                    (MediaKeys.ContainerUi, Plist.Dict(
+                        (MediaKeys.AlbumFieldOrder, DefaultAlbumFieldOrder),
+                        (MediaKeys.HasBeenShuffled, false),
+                        (MediaKeys.IsReversed, false),
+                        (MediaKeys.PlayOrder, DefaultPlayOrder),
+                        (MediaKeys.RepeatMode, RepeatOff),
+                        (MediaKeys.ShuffleItems, false))),
+                    (MediaKeys.ItemToContainer, Array.Empty<object>()))
+            })));
+    }
+
     public static byte[] Serialize(DeviceCatalogue catalogue, IReadOnlyList<PreparedTrack> additions, IReadOnlyList<DeviceTrack> deletions)
     {
         return BinaryPlist.Write(CreateDocument(catalogue, additions, deletions));
@@ -23,7 +61,7 @@ internal static class SyncOperations
         IReadOnlyList<DeviceTrack> deletions)
     {
         if (additions.Count + deletions.Count is < 1 or > SyncProtocol.MaxTrackChanges)
-            throw new InvalidDataException("A sync batch must contain between 1 and 499 track changes.");
+            throw new InvalidDataException($"A sync batch must contain between 1 and {SyncProtocol.MaxTrackChanges} track changes.");
 
         var operations = new List<object>
         {
@@ -32,6 +70,17 @@ internal static class SyncOperations
         };
         foreach (var track in additions)
         {
+            if (track.IsArtworkOnly)
+            {
+                var artwork = track.Metadata.Artwork ?? throw new InvalidDataException("An artwork update has no image.");
+                operations.Add(Plist.Dict(
+                    (MediaKeys.Operation, MediaOperations.UpdateTrack),
+                    (MediaKeys.PersistentId, track.Id),
+                    (MediaKeys.Item, Plist.Dict((MediaKeys.ArtworkCacheId, (long)artwork.CacheId),
+                        (MediaKeys.ArtworkChecksum, (long)artwork.Checksum)))));
+                continue;
+            }
+
             var item = new Dictionary<string, object>(track.Metadata.Item)
             {
                 [MediaKeys.AlbumId] = track.AlbumId,

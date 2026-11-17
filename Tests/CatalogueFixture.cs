@@ -31,6 +31,29 @@ internal sealed class CatalogueFixture : IDisposable
         INSERT INTO item_store VALUES(1,101,0),(2,0,999),(3,103,0),(4,104,0),(5,105,555);
         INSERT INTO item_extra VALUES(1,'Title','one.mp3',5),(2,'Purchase','two.mp3',5),
             (3,'Video','video.mp4',5),(4,'Remote','four.mp3',5),(5,'Cloud','five.mp3',5);
+        ALTER TABLE item ADD COLUMN album_pid INTEGER DEFAULT 12;
+        ALTER TABLE item ADD COLUMN album_artist_pid INTEGER DEFAULT 11;
+        ALTER TABLE item ADD COLUMN item_artist_pid INTEGER DEFAULT 15;
+        ALTER TABLE item ADD COLUMN composer_pid INTEGER DEFAULT 14;
+        ALTER TABLE item ADD COLUMN genre_id INTEGER DEFAULT 16;
+        ALTER TABLE item ADD COLUMN track_number INTEGER DEFAULT 1;
+        ALTER TABLE item ADD COLUMN disc_number INTEGER DEFAULT 1;
+        ALTER TABLE item ADD COLUMN is_compilation INTEGER DEFAULT 0;
+        ALTER TABLE item_extra ADD COLUMN sort_title TEXT DEFAULT 'Title';
+        ALTER TABLE item_extra ADD COLUMN comment TEXT;
+        ALTER TABLE item_extra ADD COLUMN track_count INTEGER DEFAULT 1;
+        ALTER TABLE item_extra ADD COLUMN disc_count INTEGER DEFAULT 1;
+        ALTER TABLE item_extra ADD COLUMN year INTEGER DEFAULT 2026;
+        ALTER TABLE item_extra ADD COLUMN total_time_ms REAL DEFAULT 1000;
+        ALTER TABLE item_extra ADD COLUMN media_kind INTEGER DEFAULT 1;
+        ALTER TABLE composer ADD COLUMN composer_pid INTEGER DEFAULT 14;
+        ALTER TABLE item_artist ADD COLUMN item_artist_pid INTEGER DEFAULT 15;
+        CREATE TABLE genre(genre_id INTEGER,genre TEXT);
+        INSERT INTO genre VALUES(16,'Genre');
+        CREATE TABLE item_playback(item_pid INTEGER,audio_format INTEGER,bit_rate INTEGER,sample_rate REAL,duration INTEGER);
+        INSERT INTO item_playback SELECT item_pid,301,128,44100,44100 FROM item;
+        CREATE TABLE item_stats(item_pid INTEGER,remember_bookmark INTEGER);
+        INSERT INTO item_stats SELECT item_pid,0 FROM item;
         """;
     private readonly SyncWorkspace workspace = new();
 
@@ -50,6 +73,22 @@ internal sealed class CatalogueFixture : IDisposable
         using var command = this.Connection.CreateCommand();
         command.CommandText = sql;
         command.ExecuteNonQuery();
+    }
+
+    public void ReplaceLocalTracks(int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+
+        this.Execute($"""
+            DELETE FROM item;
+            DELETE FROM item_store;
+            DELETE FROM item_extra;
+            WITH RECURSIVE tracks(id) AS (VALUES(1) UNION ALL SELECT id+1 FROM tracks WHERE id<{count})
+            INSERT INTO item(item_pid,media_type,remote_location_id,base_location_id) SELECT id,8,0,1 FROM tracks;
+            INSERT INTO item_store SELECT item_pid,100000+item_pid,0 FROM item;
+            INSERT INTO item_extra(item_pid,title,location,file_size)
+            SELECT item_pid,'Title','song-'||item_pid||'.mp3',5 FROM item;
+            """);
     }
 
     public CatalogueSnapshot Snapshot()

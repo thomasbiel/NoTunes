@@ -5,6 +5,7 @@ internal enum AfcOperation : ulong
     Status = 1,
     Data = 2,
     ReadDirectory = 3,
+    RemovePath = 8,
     MakeDirectory = 9,
     GetFileInfo = 10,
     GetDeviceInfo = 11,

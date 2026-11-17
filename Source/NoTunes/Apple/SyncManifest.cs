@@ -26,7 +26,13 @@ internal static class SyncManifest
             if (entry.Text(AtcKeys.AssetType) != AtcKeys.Music || !entry.Flag(AtcKeys.IsDownload) || !seen.Add(id))
                 throw new InvalidDataException("Invalid or duplicate asset request.");
 
-            if (own.TryGetValue(id, out var track) && parts is SyncProtocol.AudioPart or SyncProtocol.AudioWithGenius)
+            if (own.TryGetValue(id, out var track)
+                && (track.IsArtworkOnly
+                    ? parts is SyncProtocol.ArtworkPart or (SyncProtocol.ArtworkPart | SyncProtocol.GeniusPart)
+                    : track.Metadata.Artwork is null
+                    ? parts is SyncProtocol.AudioPart or SyncProtocol.AudioWithGenius
+                    : parts is (SyncProtocol.AudioPart | SyncProtocol.ArtworkPart)
+                        or (SyncProtocol.AudioWithGenius | SyncProtocol.ArtworkPart)))
                 result.Add(new SyncAsset(id, track));
             else if (long.TryParse(
                 id,

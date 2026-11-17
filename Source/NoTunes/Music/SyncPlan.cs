@@ -7,7 +7,11 @@ public sealed record SyncPlan(
     IReadOnlyList<DeviceTrack> Delete,
     int Unchanged)
 {
+    internal IReadOnlyList<SourceMatch> Matches { get; init; } = [];
+
+    public IReadOnlyList<SourceTrack> Artwork { get; init; } = [];
+
     public long TransferBytes => this.Add.Sum(track => track.Size);
 
-    public bool HasChanges => this.Add.Count != 0 || this.Delete.Count != 0;
+    public bool HasChanges => this.Add.Count != 0 || this.Delete.Count != 0 || this.Artwork.Count != 0;
 }

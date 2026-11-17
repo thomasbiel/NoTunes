@@ -7,7 +7,9 @@ namespace NoTunes.Tests;
 
 internal sealed class AfcPeer : Stream
 {
-    private const int OperationOffset = 4 * sizeof(ulong);
+    private const int ReadFragmentBytes = 5;
+    private const int DefaultChunkLimit = 1024 * 1024;
+    private const ulong InjectedFailureStatus = 10;
 
     public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
 
@@ -25,7 +27,7 @@ internal sealed class AfcPeer : Stream
     private MemoryStream input = new();
     private bool closePending;
 
-    public int ChunkLimit { get; init; } = 1024 * 1024;
+    public int ChunkLimit { get; init; } = DefaultChunkLimit;
 
     public bool EarlyEof { get; init; }
 
@@ -68,13 +70,17 @@ internal sealed class AfcPeer : Stream
 
     public override void SetLength(long value) => throw new NotSupportedException();
 
-    public override int Read(byte[] buffer, int offset, int count) => this.input.Read(buffer, offset, Math.Min(count, 5));
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        return this.input.Read(buffer, offset, Math.Min(count, ReadFragmentBytes));
+    }
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         if (this.closePending)
             await Task.Delay(Timeout.Infinite, cancellationToken);
-        return await this.input.ReadAsync(buffer[..Math.Min(buffer.Length, 5)], cancellationToken);
+
+        return await this.input.ReadAsync(buffer[..Math.Min(buffer.Length, ReadFragmentBytes)], cancellationToken);
     }
 
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
@@ -82,7 +88,8 @@ internal sealed class AfcPeer : Stream
         cancellationToken.ThrowIfCancellationRequested();
         this.Handle(buffer.ToArray());
         if (this.BeforeFileWriteReplyAsync is not null
-            && BinaryPrimitives.ReadUInt64LittleEndian(buffer.Span[OperationOffset..]) == (ulong)AfcOperation.FileWrite)
+            && BinaryPrimitives.ReadUInt64LittleEndian(buffer.Span[ProtocolFrames.AfcOperationOffset..])
+                == (ulong)AfcOperation.FileWrite)
         {
             await this.BeforeFileWriteReplyAsync(cancellationToken);
         }
@@ -93,85 +100,95 @@ internal sealed class AfcPeer : Stream
     private void Handle(byte[] request)
     {
         Assert.That(this.input.Position, Is.EqualTo(this.input.Length), "The previous response must be consumed first.");
-        var operation = BinaryPrimitives.ReadUInt64LittleEndian(request.AsSpan(32));
-        var id = BinaryPrimitives.ReadUInt64LittleEndian(request.AsSpan(24));
-        var body = request.AsSpan(40);
+        var operation = (AfcOperation)BinaryPrimitives.ReadUInt64LittleEndian(
+            request.AsSpan(ProtocolFrames.AfcOperationOffset));
+        var id = BinaryPrimitives.ReadUInt64LittleEndian(request.AsSpan(ProtocolFrames.AfcSequenceOffset));
+        var body = request.AsSpan(ProtocolFrames.AfcHeaderBytes);
         switch (operation)
         {
-            case 3:
+            case AfcOperation.RemovePath when this.AllowWrites:
+                this.Files.Remove(Encoding.UTF8.GetString(body).TrimEnd('\0'));
+                this.Status(id, 0);
+                return;
+            case AfcOperation.ReadDirectory:
                 var directory = Encoding.UTF8.GetString(body).TrimEnd('\0');
                 var names = this.Files.Keys.Where(name => name.StartsWith(directory + "/", StringComparison.Ordinal))
                     .Select(name => name[(directory.Length + 1)..]).ToArray();
-                this.Response(id, 2, Encoding.UTF8.GetBytes(string.Join('\0', new[] { ".", ".." }.Concat(names)) + '\0'));
+                this.Response(id, AfcOperation.Data,
+                    Encoding.UTF8.GetBytes(string.Join('\0', new[] { ".", ".." }.Concat(names)) + '\0'));
                 return;
-            case 9 when this.AllowWrites:
+            case AfcOperation.MakeDirectory when this.AllowWrites:
                 this.Directories.Add(Encoding.UTF8.GetString(body).TrimEnd('\0'));
                 this.Status(id, 0);
                 return;
-            case 10:
+            case AfcOperation.GetFileInfo:
                 var path = Encoding.UTF8.GetString(body).TrimEnd('\0');
                 if (this.Directories.Contains(path))
                 {
-                    this.Response(id, 2, Encoding.UTF8.GetBytes("st_ifmt\0S_IFDIR\0"));
+                    this.Response(id, AfcOperation.Data, Encoding.UTF8.GetBytes("st_ifmt\0S_IFDIR\0"));
                     return;
                 }
 
                 if (!this.Files.TryGetValue(path, out var file))
                 {
-                    this.Status(id, 8);
+                    this.Status(id, (ulong)AfcStatusCode.ObjectNotFound);
                     return;
                 }
 
-                this.Response(id, 2, Encoding.UTF8.GetBytes($"st_ifmt\0S_IFREG\0st_size\0{file.Length}\0st_mtime\01\0"));
+                this.Response(id, AfcOperation.Data,
+                    Encoding.UTF8.GetBytes($"st_ifmt\0S_IFREG\0st_size\0{file.Length}\0st_mtime\01\0"));
                 return;
-            case 13:
-                var mode = BinaryPrimitives.ReadUInt64LittleEndian(body);
-                Assert.That(mode == 1 || this.AllowWrites && mode is 2 or 3, Is.True, "Only explicitly enabled writes are allowed.");
-                var name = Encoding.UTF8.GetString(body[8..]).TrimEnd('\0');
-                if (mode == 3 || mode == 2 && !this.Files.ContainsKey(name))
+            case AfcOperation.FileOpen:
+                var mode = (AfcOpenMode)BinaryPrimitives.ReadUInt64LittleEndian(body);
+                Assert.That(mode == AfcOpenMode.ReadOnly
+                    || this.AllowWrites && mode is AfcOpenMode.ReadWrite or AfcOpenMode.WriteTruncate,
+                    Is.True, "Only explicitly enabled writes are allowed.");
+                var name = Encoding.UTF8.GetString(body[sizeof(ulong)..]).TrimEnd('\0');
+                if (mode == AfcOpenMode.WriteTruncate || mode == AfcOpenMode.ReadWrite && !this.Files.ContainsKey(name))
                     this.Files[name] = [];
+
                 Assert.That(this.Files.ContainsKey(name), Is.True);
                 var handle = (ulong)++this.Opens;
                 this.handles.Add(handle, (name, 0));
-                var opened = new byte[8];
+                var opened = new byte[sizeof(ulong)];
                 BinaryPrimitives.WriteUInt64LittleEndian(opened, handle);
-                this.Response(id, 14, opened);
+                this.Response(id, AfcOperation.FileOpenResult, opened);
                 return;
-            case 15:
+            case AfcOperation.FileRead:
                 this.Reads++;
                 var readHandle = BinaryPrimitives.ReadUInt64LittleEndian(body);
-                var requested = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(body[8..]));
+                var requested = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(body[sizeof(ulong)..]));
                 var source = this.handles[readHandle];
                 var count = this.EarlyEof ? 0 : Math.Min(Math.Min(this.ChunkLimit, requested), this.Files[source.Path].Length - source.Offset);
-                this.Response(id, 2, [.. this.Files[source.Path].AsSpan(source.Offset, count)]);
+                this.Response(id, AfcOperation.Data, [.. this.Files[source.Path].AsSpan(source.Offset, count)]);
                 this.handles[readHandle] = (source.Path, source.Offset + count);
                 return;
-            case 16 when this.AllowWrites:
+            case AfcOperation.FileWrite when this.AllowWrites:
                 this.WritePackets.Add(request);
                 if (this.FailWrite)
                 {
-                    this.Status(id, 10);
+                    this.Status(id, InjectedFailureStatus);
                     return;
                 }
 
                 var target = this.handles[BinaryPrimitives.ReadUInt64LittleEndian(body)];
-                var content = body[8..].ToArray();
+                var content = body[sizeof(ulong)..].ToArray();
                 if (this.CorruptWrite && content.Length > 0)
                     content[0] ^= 1;
                 this.Files[target.Path] = [.. this.Files[target.Path], .. content];
                 this.Status(id, 0);
                 return;
-            case 24 when this.AllowWrites:
+            case AfcOperation.RenamePath when this.AllowWrites:
                 var rename = Encoding.UTF8.GetString(body).TrimEnd('\0').Split('\0');
                 Assert.That(this.Files.ContainsKey(rename[1]), Is.False);
                 this.Files[rename[1]] = this.Files[rename[0]];
                 this.Files.Remove(rename[0]);
                 this.Status(id, 0);
                 return;
-            case 27 when this.AllowWrites:
+            case AfcOperation.FileLock when this.AllowWrites:
                 this.Status(id, 0);
                 return;
-            case 20:
+            case AfcOperation.FileClose:
                 this.Closes++;
                 Assert.That(this.handles.Remove(BinaryPrimitives.ReadUInt64LittleEndian(body)), Is.True);
                 this.OnClose?.Invoke();
@@ -181,7 +198,7 @@ internal sealed class AfcPeer : Stream
                     return;
                 }
 
-                this.Status(id, this.FailClose ? 10UL : 0UL);
+                this.Status(id, this.FailClose ? InjectedFailureStatus : (ulong)AfcStatusCode.Success);
                 return;
             default:
                 Assert.Fail($"Unexpected AFC operation {operation}; the reader must not modify any files.");
@@ -191,15 +208,15 @@ internal sealed class AfcPeer : Stream
 
     private void Status(ulong id, ulong code)
     {
-        var body = new byte[8];
+        var body = new byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64LittleEndian(body, code);
-        this.Response(id, 1, body);
+        this.Response(id, AfcOperation.Status, body);
     }
 
-    private void Response(ulong id, ulong operation, byte[] body)
+    private void Response(ulong id, AfcOperation operation, byte[] body)
     {
         this.input.Dispose();
-        this.input = new MemoryStream(ProtocolFrames.Afc(id, operation, body), writable: false);
+        this.input = new MemoryStream(ProtocolFrames.Afc(id, (ulong)operation, body), writable: false);
     }
 
     protected override void Dispose(bool disposing)

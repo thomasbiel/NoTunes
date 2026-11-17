@@ -2,11 +2,10 @@ namespace NoTunes.Apple;
 
 public sealed record CatalogueSnapshot(byte[] Database, byte[]? Wal)
 {
-    internal const string DatabasePath = "iTunes_Control/iTunes/MediaLibrary.sqlitedb";
-    private const string WalPath = DatabasePath + "-wal";
+    internal const string DatabasePath = "iTunes_Control/iTunes/" + SyncPaths.DatabaseFile;
+    private const string WalPath = DatabasePath + SyncPaths.WalSuffix;
     private const string SharedMemoryPath = DatabasePath + "-shm";
     private const int MinimumSqliteHeaderBytes = 100;
-    private const int MaxFileBytes = 64 * 1024 * 1024;
     private static readonly string[] Paths = [DatabasePath, WalPath, SharedMemoryPath];
 
     private static ReadOnlySpan<byte> SqliteSignature => "SQLite format 3\0"u8;
@@ -26,8 +25,9 @@ public sealed record CatalogueSnapshot(byte[] Database, byte[]? Wal)
         var before = await StatAll(afc, cancellationToken);
         if (before[DatabasePath] is null) throw new IOException("The iPhone music catalogue is not initialized.");
 
-        var database = await afc.ReadFileAsync(DatabasePath, MaxFileBytes, cancellationToken);
-        var wal = before[WalPath] is null ? null : await afc.ReadFileAsync(WalPath, MaxFileBytes, cancellationToken);
+        var database = await afc.ReadFileAsync(DatabasePath, SyncProtocol.MaxCatalogueBytes, cancellationToken);
+        var wal = before[WalPath] is null ? null
+            : await afc.ReadFileAsync(WalPath, SyncProtocol.MaxCatalogueBytes, cancellationToken);
         var after = await StatAll(afc, cancellationToken);
         if (!SameFileAttributes(before, after))
             throw new IOException("The iPhone music catalogue changed during capture. Try again after it settles.");

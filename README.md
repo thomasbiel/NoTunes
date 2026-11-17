@@ -74,9 +74,12 @@ and use their local mount path. Windows UNC paths are not mapped automatically.
 | `Source/Platform.Linux/NoTunes.Platform.Linux.csproj` | usbmuxd Unix-socket transport and Linux descriptor-relative file access. |
 
 All projects target `net10.0`. The CLI registers the current platform using
-`Microsoft.Extensions.DependencyInjection` and resolves `Commands` and
-`SourceScanner` through constructor injection. Platform providers are singletons;
-each scan owns and disposes its own source session. Commands, source scanning and
+`Microsoft.Extensions.DependencyInjection` and resolves `CommandContext` and
+`SourceScanner` through constructor injection. Every verb derives from
+`CommandOptions` and implements its command directly in `Execute(context, token)`;
+`Program` uses one common `MapResult` execution callback. `DeviceOptions` supplies
+shared USB selection and timeout validation. Platform providers are singletons;
+each scan owns and disposes its own source session. Command options, source scanning and
 Apple protocols share the application assembly; platform selection stays in
 `ApplicationServices`, and native implementations stay in the platform projects.
 Unsupported operating systems produce a clear error at the composition boundary.
@@ -109,6 +112,10 @@ the message limit, malformed responses, timeout, cancellation and stream disposa
 ```powershell
 dotnet run --project Source/NoTunes/NoTunes.csproj -- --help
 dotnet run --project Source/NoTunes/NoTunes.csproj -- devices
+
+dotnet run --project Source/NoTunes/NoTunes.csproj -- init --dry-run
+
+dotnet run --project Source/NoTunes/NoTunes.csproj -- init
 dotnet run --project Source/NoTunes/NoTunes.csproj -- probe
 dotnet run --project Source/NoTunes/NoTunes.csproj -- probe --read-catalog --json
 dotnet run --project Source/NoTunes/NoTunes.csproj -- probe --device 00008030-0011223344556677 --timeout 30 --json
@@ -122,6 +129,17 @@ dotnet run --project Source/NoTunes/NoTunes.csproj -- sync "D:\Music"
 After building, the equivalent executable is
 `Source\NoTunes\bin\Debug\net10.0\NoTunes.exe`.
 
+- `init [--dry-run] [--device <UDID>] [--state-folder <path>]` prepares an iPhone
+  that has never been synced with a host music library. It creates a persistent
+  library identity, writes the matching preference pair and sends a signed delta
+  containing `update_db_info` and a hidden, empty library playlist. It verifies
+  Media revision 1 by reading the device catalogue back. No audio is transferred
+  and the phone's SQLite database is never edited directly. Existing libraries,
+  foreign preferences and saved host catalogues are refused. Run `init` again
+  after an interruption: it reuses its saved identities and verifies any partial
+  preference writes before completing them. `--dry-run` sends no sync request
+  and writes no device files. The initial iOS database must exist; open Music on
+  the phone first if iOS has not created it yet.
 - `devices` lists USB devices through Apple's local USB multiplexer; network
   devices are excluded. It does not require a music library.
 - `probe` validates the saved pairing, opens an encrypted lockdown session,
@@ -146,6 +164,10 @@ After building, the equivalent executable is
   hashes, including duplicate counts; a renamed file does not trigger a transfer.
   Replacing changed bytes uses an insertion followed by removal of the old track;
   it creates a new track identity. Unchanged tracks retain their identities.
+  Embedded covers are registered with new tracks. Missing covers on byte-identical
+  existing tracks are repaired with artwork-only updates that retain their audio,
+  metadata and track identities. Dry-run lists these under `Artwork` in JSON or
+  as `~ Cover:` entries in text output.
 
 Device commands take `--timeout` (1–300 seconds per request) and `--json`.
 With multiple USB devices, `probe` requires `--device`; it never chooses one
@@ -161,14 +183,25 @@ prints the plan, dry-run flag and verified batch count to stdout.
 Before writes, all new source files are copied to a private temporary directory,
 checked against the scan hashes and read with TagLibSharp. Source access continues
 to use the platform's directory and file guards. This requires temporary disk
-space for the additions. Invalid or changed source files abort before metadata
+space for the additions and any missing-cover repairs. Tracks without embedded
+covers are checked through a guarded read-only tag stream without making a copy.
+Invalid or changed source files abort before metadata
 is staged. The iPhone must have room for all additions plus a metadata reserve;
 pending deletions are not counted as available space.
+
+The catalogue supports at most 50,000 computer-synced local music tracks.
+Write runs check the full intermediate inventory before staging anything:
+existing tracks plus all additions must fit this limit, because additions are
+verified before deletions. A replacement at the limit is refused before device
+changes; `--dry-run` can still display its plan. Preserved cloud, remote and
+nonmusic items do not count against this limit.
 
 Each batch uses at most 499 track changes and 4 MiB of serialized operation
 metadata, an exclusive AFC sync lock and a fresh
 paired ATC connection. The saved library identity and current catalogue must
-still match the plan. The live `ReadyForSync` anchor must match too. A signed
+still match the plan, including existing album and album-artist group identities.
+The live `ReadyForSync` Media anchor must match too; an advertised VoiceMemo
+anchor must be the supported value 1. A signed
 binary operation file and its `.cig` sidecar are staged and read back before
 metadata completion is announced. Audio is streamed in bounded chunks, read
 back, renamed in the Airlock and completed through ATC. ATC messages are processed
@@ -179,19 +212,36 @@ phone's SQLite database or directly deletes its audio files.
 
 Success requires the current session's `SyncFinished`, the next catalogue
 revision, exactly the expected track inventory and byte-identical read-back of
-new permanent audio files. Additions finish and are verified before any removal
+new permanent audio files. Protected purchases, cloud, remote and nonmusic
+entries are captured separately, including entries without a sync identity or
+complete audio metadata. Their identities and captured metadata must remain
+unchanged before and after every batch. Existing groups retain their identities;
+empty groups may be removed by the receiver after track deletion.
+Additions finish and are verified before any removal
 batch begins. Apple's receiver may reset recent play/skip counters during a
 normal sync; byte matching preserves existing track identities, not those
 receiver-maintained recent counters.
 
 Operation journals are stored under the user's local application data in
 `NoTunes`, or under `--state-folder <path>`. The exact operation and signature
-are flushed before staging. A failure leaves `pending.json` and prevents another
-write run from blindly replaying an uncertain operation. `--dry-run` remains
-available to inspect the current state. Automatic recovery of interrupted
-sessions is not implemented: retain the journal and reconcile its operations
-with the phone before clearing it. Completed batches remain recorded even if a
-later batch fails; a multi-batch mirror is not atomic.
+are flushed before staging. Version 2 journals also retain the before-catalogue,
+prepared metadata and verified durable audio/JPEG copies in private state storage.
+Journal metadata is limited to 256 MiB before any device operation is staged;
+audio and JPEG data are kept in separate files.
+A failure leaves `pending.json`. The next write run reconciles that batch before
+planning new changes: unapplied operations are archived, completed results are
+verified, and only that batch's unfilled insertions are removed through a new signed
+compensating session before the source plan retries them. Interrupted artwork-only
+updates retry their cover registration without deleting the existing track.
+Partially applied removals are reconciled against the observed inventory; the
+fresh source plan removes only the entries that are still present.
+An uncertain operation is never blindly replayed. Only staging files equal to the
+recorded bytes or a recorded write prefix may be removed. Unexpected revisions,
+foreign staging data, changed library identities and unverifiable outcomes stop
+recovery and retain its record. Old version 1 journals lack the required evidence
+and still require manual reconciliation. Verified batches remain recorded; private
+asset copies are discarded after settlement. A multi-batch mirror is not atomic.
+`--dry-run` remains read-only and does not perform recovery.
 
 If an interrupted transfer left catalogue entries without audio, the dry-run
 lists them as incomplete. JSON entries have `Path: null` and `IsIncomplete: true`.
@@ -200,12 +250,20 @@ Write runs refuse such a catalogue until the interrupted sync has been reconcile
 An empty source requires `--allow-empty-source` for a write run. A source access
 error aborts the scan and cannot be interpreted as an empty source.
 
-The current implementation requires an existing library identity and `db_info`.
-It supports the observed saved iTunesCDB formats 115 and 117 with VoiceMemo anchor
-1, and initial Media anchor 0 when a legacy library has no ATC anchor yet. New
-library initialization, artwork/playlist transfer and reconstruction of MP3
-gapless timing are not implemented. Embedded artwork remains in the transferred
-MP3 bytes but is not separately registered in the Music artwork catalogue.
+Use `init` once for a new library; subsequent `sync` commands use its saved
+identity and `db_info`. Existing libraries continue to use the observed saved
+iTunesCDB formats 115 and 117 with VoiceMemo anchor 1, and initial Media anchor 0
+when a legacy library has no ATC anchor yet.
+
+Artwork uses a front-cover image when available, otherwise the first embedded
+picture. JPEG bytes are retained; PNG and other formats supported by the managed
+stb decoder are converted to JPEG with transparency flattened onto white. Images
+are bounded to 32 MiB and 16 million pixels and validated before staging. Cache
+IDs are allocated above live local artwork tokens and the saved ArtworkDB counter
+and image IDs. Covers are staged and read back separately, then verified against
+the track's registered token, preferred artwork token and permanent JPEG original.
+The source MP3 is unchanged. The image codecs and their licenses are documented in
+`THIRD-PARTY-NOTICES.md`.
 
 Compilation flags and explicit album artists are retained. A compilation without
 an album artist is rejected during source preparation, before device writes;
@@ -292,10 +350,11 @@ authentication, unchanged certificate bytes and rejection of mismatched pins.
 
 ## Remaining work
 
-New-library initialization, automatic interrupted-session recovery, separate
-artwork registration, playlist synchronization and detailed MP3 gapless timing
-are not implemented. The existing-library MP3 mirror and read-only change plan
-are available.
+Playlist synchronization and detailed MP3 gapless timing remain unimplemented.
+Initialization, recovery and artwork registration have automated simulation tests
+on Windows and Linux; these new paths still require physical-iPhone validation.
+Syncing a NoTunes-initialized library with Apple's host software may replace the
+music that NoTunes transferred, so keep the source music and persistent state.
 
 The iPhone catalogue must be updated through its sync service, never by editing
 `MediaLibrary.sqlitedb` directly. Documentation used for the protocol boundary:

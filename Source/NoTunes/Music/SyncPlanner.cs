@@ -26,12 +26,16 @@ internal static class SyncPlanner
         }
 
         var retained = new HashSet<long>();
+        var sourceMatches = new List<SourceMatch>();
         var additions = new List<SourceTrack>();
         foreach (var track in source.Tracks)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (byHash.TryGetValue(track.Sha256, out var matches) && matches.TryDequeue(out var match))
+            {
                 retained.Add(match.Id);
+                sourceMatches.Add(new SourceMatch(track, match));
+            }
             else
                 additions.Add(track);
         }
@@ -41,6 +45,6 @@ internal static class SyncPlanner
             catalogue.Anchor,
             additions,
             [.. catalogue.Tracks.Where(track => !retained.Contains(track.Id))],
-            retained.Count);
+            retained.Count) { Matches = sourceMatches };
     }
 }

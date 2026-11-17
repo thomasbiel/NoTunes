@@ -28,8 +28,15 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
                 (AtcKeys.Grappa, GrappaSigner.HostRequest)))), cancellationToken);
         var ready = await this.WaitAsync([AtcCommands.ReadyForSync], cancellationToken);
         var parameters = ready.Dictionary(AtcKeys.Parameters);
-        if (!StringComparer.Ordinal.Equals(parameters.Dictionary(AtcKeys.Anchors).Text(AtcKeys.Media), anchor.ToString(CultureInfo.InvariantCulture)))
+        var anchors = parameters.Dictionary(AtcKeys.Anchors);
+        if (!StringComparer.Ordinal.Equals(anchors.Text(AtcKeys.Media), anchor.ToString(CultureInfo.InvariantCulture)))
             throw new IOException("The live Media anchor changed. Recompute the sync plan.");
+
+        if (anchors.TryGetValue(AtcKeys.VoiceMemo, out var voiceMemo)
+            && !StringComparer.Ordinal.Equals(voiceMemo, SyncProtocol.VoiceMemoAnchor))
+        {
+            throw new IOException("Unsupported live VoiceMemo anchor; refusing to overwrite non-Media state.");
+        }
 
         var token = parameters.Dictionary(AtcKeys.DeviceInfo).GetValueOrDefault(AtcKeys.Grappa) as byte[]
             ?? throw new InvalidDataException("ReadyForSync has no Grappa token.");
@@ -147,6 +154,26 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var track = asset.Track!;
+            if (track.Metadata.Artwork is { } artwork)
+            {
+                await afc.EnsureDirectoryAsync(SyncPaths.ArtworkAirlock.TrimEnd('/'), cancellationToken);
+                await DeviceStaging.WriteVerifiedAsync(
+                    afc,
+                    SyncPaths.ArtworkAirlock + track.AssetId,
+                    artwork.Bytes,
+                    cancellationToken);
+            }
+
+            if (track.IsArtworkOnly)
+            {
+                completingAsset();
+                await this.SendAsync(AtcCommands.FileComplete, Plist.Dict(
+                    (AtcKeys.AssetId, track.AssetId),
+                    (AtcKeys.Dataclass, AtcKeys.Media),
+                    (AtcKeys.AssetPath, string.Empty)), cancellationToken);
+                continue;
+            }
+
             var staged = SyncPaths.Airlock + track.AssetId;
             await this.error.WriteLineAsync($"Transfer: {track.Source.RelativePath}");
             await using var input = new FileStream(

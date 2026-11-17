@@ -27,16 +27,19 @@ public static class ApplicationServices
             ArgumentNullException.ThrowIfNull(output);
             ArgumentNullException.ThrowIfNull(error);
             services.AddTransient<SourceScanner>();
+            services.AddTransient(provider => new LibraryInitializer(
+                provider.GetRequiredService<NoTunes.Platform.IUsbMuxTransport>(), error));
             services.AddTransient(provider => new SyncEngine(
                 provider.GetRequiredService<SourceScanner>(),
                 provider.GetRequiredService<NoTunes.Platform.ISourceFileSystem>(),
                 provider.GetRequiredService<NoTunes.Platform.IUsbMuxTransport>(),
                 error));
         
-            services.AddTransient(provider => new Commands(
+            services.AddTransient(provider => new CommandContext(
                 provider.GetRequiredService<SourceScanner>(),
                 provider.GetRequiredService<NoTunes.Platform.IUsbMuxTransport>(),
                 provider.GetRequiredService<SyncEngine>(),
+                provider.GetRequiredService<LibraryInitializer>(),
                 output));
         
             return services;

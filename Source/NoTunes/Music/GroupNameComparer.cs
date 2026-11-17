@@ -6,6 +6,11 @@ internal sealed class GroupNameComparer : IEqualityComparer<string>
 
     private GroupNameComparer() { }
 
+    public static string Normalize(string value)
+    {
+        return value.All(char.IsAscii) ? value.ToUpperInvariant() : value;
+    }
+
     public bool Equals(string? left, string? right)
     {
         return StringComparer.Ordinal.Equals(left, right)

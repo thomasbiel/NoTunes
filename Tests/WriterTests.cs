@@ -14,7 +14,7 @@ public sealed class WriterTests
         await using var output = new StringWriter();
         await using var error = new StringWriter();
         await using var services = new ServiceCollection().AddNoTunes(output, error).BuildServiceProvider();
-        var result = await services.GetRequiredService<Commands>().ScanAsync(new ScanOptions { Folder = source.Root }, CancellationToken.None);
+        var result = await new ScanOptions { Folder = source.Root }.Execute(services.GetRequiredService<CommandContext>(), CancellationToken.None);
         Assert.That(result, Is.Zero);
         Assert.That(output.ToString(), Does.Contain("0 MP3 file(s)"));
         Assert.That(error.ToString(), Is.Empty);
@@ -41,7 +41,7 @@ public sealed class WriterTests
         await using var output = new StringWriter();
         await using var error = new StringWriter();
         await using var services = new ServiceCollection().AddNoTunes(output, error).BuildServiceProvider();
-        var result = await services.GetRequiredService<Commands>().ScanAsync(new ScanOptions { Folder = source.Root, Json = true }, CancellationToken.None);
+        var result = await new ScanOptions { Folder = source.Root, Json = true }.Execute(services.GetRequiredService<CommandContext>(), CancellationToken.None);
         Assert.That(result, Is.Zero);
         using var json = System.Text.Json.JsonDocument.Parse(output.ToString());
         Assert.That(json.RootElement.GetProperty("Tracks").GetArrayLength(), Is.Zero);

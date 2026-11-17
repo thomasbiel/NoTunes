@@ -2,7 +2,10 @@
 
 The fixed-request Grappa calculation, protocol layouts and the synthetic
 Grappa/MP3 test fixtures are based on [rustunes](https://github.com/fbiba/rustunes).
-The implementation uses .NET cryptographic primitives; no Apple binaries are included.
+The adoption preferences, first-library session and artwork protocol are also
+based on that reference, at commit
+`70345d15f4727179c43d4e5a17d633825ccbd4dd`. The C# implementation adapts these
+protocol layouts; it uses .NET cryptographic primitives and includes no Apple binaries.
 
 MIT License
 
@@ -107,6 +110,28 @@ The unmodified library is used as a separate, replaceable `TaglibSharp.dll`.
 Corresponding source for this version is available in the
 [TaglibSharp-2.3.0.0 release](https://github.com/mono/taglib-sharp/tree/TaglibSharp-2.3.0.0).
 These notices and license texts accompany the build and publish output.
+
+## StbImageSharp/2.30.16 and StbImageWriteSharp/1.16.7
+
+NoTunes uses these unmodified managed image libraries to validate embedded
+covers and convert non-JPEG covers to JPEG without changing the MP3 file.
+The packages identify StbImageSharpTeam and StbImageWriteSharpTeam as their
+authors. Their upstream license declarations and credits are retained in
+[StbImageSharp-README.md](Licenses/StbImageSharp-README.md) and
+[StbImageWriteSharp-README.md](Licenses/StbImageWriteSharp-README.md).
+
+StbImageSharp offers the MIT license or public-domain dedication; the
+StbImageWriteSharp port declares public domain. The complete, unmodified
+MIT/Unlicense alternatives of their bundled stb headers, including
+Copyright (c) 2017 Sean Barrett, are retained in
+[StbImageSharp-LICENSE.txt](Licenses/StbImageSharp-LICENSE.txt) and
+[StbImageWriteSharp-LICENSE.txt](Licenses/StbImageWriteSharp-LICENSE.txt).
+These files accompany build and publish output.
+
+Corresponding sources:
+
+- [StbImageSharp, commit 125af70cb557033f2c46aec8e82eaaf72ac49817](https://github.com/StbSharp/StbImageSharp/tree/125af70cb557033f2c46aec8e82eaaf72ac49817).
+- [StbImageWriteSharp 1.16.7, commit 276e0a0e389f8bcc79aa6fb4446ff825d0fdb2b4](https://github.com/StbSharp/StbImageWriteSharp/tree/276e0a0e389f8bcc79aa6fb4446ff825d0fdb2b4).
 
 # Test dependencies
 

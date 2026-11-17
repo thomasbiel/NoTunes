@@ -19,4 +19,40 @@ public sealed class SyncOptions : DeviceOptions
 
     [Option(CliSyntax.StateFolder, HelpText = "Persistent sync journal folder; defaults to the user's local application data.")]
     public string? StateFolder { get; set; }
+
+    public override async Task<int> Execute(CommandContext context, CancellationToken token)
+    {
+        ValidateAdditionalArguments(this.AdditionalArguments);
+        this.ValidateTimeout();
+        var result = await context.SyncEngine.RunAsync(this, token);
+        if (this.Json)
+        {
+            WriteJson(context.Output, result);
+        }
+
+        else
+        {
+            foreach (var track in result.Plan.Add)
+            {
+                await context.Output.WriteLineAsync($"+ {track.RelativePath}");
+            }
+
+            foreach (var track in result.Plan.Delete)
+            {
+                var state = track.IsIncomplete ? " [incomplete: no audio]" : string.Empty;
+                await context.Output.WriteLineAsync($"- {track.Title} ({track.Id}){state}");
+            }
+
+            foreach (var track in result.Plan.Artwork)
+            {
+                await context.Output.WriteLineAsync($"~ Cover: {track.RelativePath}");
+            }
+
+            var covers = result.Plan.Artwork.Count == 0 ? string.Empty : $", {result.Plan.Artwork.Count} cover(s) repaired";
+            await context.Output.WriteLineAsync($"{(result.DryRun ? "Preview" : "Verified")}: "
+                + $"{result.Plan.Add.Count} added, {result.Plan.Delete.Count} removed, {result.Plan.Unchanged} unchanged{covers}.");
+        }
+
+        return ExitCodes.Success;
+    }
 }

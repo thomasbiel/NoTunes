@@ -24,7 +24,7 @@ public sealed class PlatformServicesTests
         using var services = registrations.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true });
         Assert.That(services.GetRequiredService<IUsbMuxTransport>(), windows ? Is.TypeOf<WindowsUsbMuxTransport>() : Is.TypeOf<LinuxUsbMuxTransport>());
         Assert.That(services.GetRequiredService<ISourceFileSystem>(), windows ? Is.TypeOf<WindowsSourceFileSystem>() : Is.TypeOf<LinuxSourceFileSystem>());
-        Assert.That(services.GetRequiredService<Commands>(), Is.Not.Null);
+        Assert.That(services.GetRequiredService<CommandContext>(), Is.Not.Null);
         Assert.That(services.GetRequiredService<SyncEngine>(), Is.Not.Null);
     }
 
@@ -33,7 +33,7 @@ public sealed class PlatformServicesTests
     {
         using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
         Assert.That(services.GetRequiredService<IUsbMuxTransport>(), OperatingSystem.IsWindows() ? Is.TypeOf<WindowsUsbMuxTransport>() : Is.TypeOf<LinuxUsbMuxTransport>());
-        Assert.That(services.GetRequiredService<Commands>(), Is.Not.Null);
+        Assert.That(services.GetRequiredService<CommandContext>(), Is.Not.Null);
     }
 
     [Test]
@@ -42,7 +42,7 @@ public sealed class PlatformServicesTests
         var references = typeof(SourceScanner).Assembly.GetReferencedAssemblies().Select(name => name.Name).ToArray();
         Assert.That(references, Does.Contain("NoTunes.Platform.Abstractions"));
         Assert.That(typeof(SourceScanner).Assembly, Is.SameAs(typeof(ApplicationServices).Assembly));
-        Assert.That(typeof(Commands).Assembly, Is.SameAs(typeof(ApplicationServices).Assembly));
+        Assert.That(typeof(CommandContext).Assembly, Is.SameAs(typeof(ApplicationServices).Assembly));
     }
 
     [TestCase(Architecture.X64, 65536, 131072)]

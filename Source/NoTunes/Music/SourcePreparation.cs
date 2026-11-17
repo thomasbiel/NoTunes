@@ -12,11 +12,13 @@ internal static class SourcePreparation
         DeviceCatalogue catalogue,
         ISourceFileSystem fileSystem,
         SyncWorkspace workspace,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool artworkOnly = false)
     {
         using var session = fileSystem.OpenSource(new DirectoryInfo(library.Root), cancellationToken);
         var result = new List<PreparedTrack>();
         var ids = catalogue.OccupiedIds.ToHashSet();
+        var artworkId = catalogue.ArtworkHighWaterMark;
         var albums = new Dictionary<string, long>(catalogue.Albums, GroupNameComparer.Instance);
         var artists = new Dictionary<string, long>(catalogue.Artists, GroupNameComparer.Instance);
         var albumSorts = new Dictionary<string, string?>(catalogue.SortNames.Albums, GroupNameComparer.Instance);
@@ -46,6 +48,17 @@ internal static class SourcePreparation
                     held.Add(directory);
                 }
 
+                if (artworkOnly)
+                {
+                    await using var guarded = session.OpenRead(new FileInfo(fullPath));
+                    var hasArtwork = Mp3Metadata.HasArtwork(guarded);
+                    if (guarded.Length != track.Size
+                        || File.GetLastWriteTimeUtc(guarded.SafeFileHandle) != track.LastWriteTimeUtc)
+                        throw new IOException($"Source changed while checking artwork: {track.RelativePath}");
+
+                    if (!hasArtwork) continue;
+                }
+
                 var localPath = Path.Combine(workspace.Root, Guid.NewGuid().ToString("N") + SyncPaths.Mp3Extension);
                 await using (var input = session.OpenRead(new FileInfo(fullPath)))
                 await using (var output = new FileStream(
@@ -70,6 +83,21 @@ internal static class SourcePreparation
                 }
 
                 var metadata = Mp3Metadata.Read(localPath, track.RelativePath);
+                if (artworkOnly && metadata.Artwork is null)
+                {
+                    File.Delete(localPath);
+                    continue;
+                }
+
+                if (metadata.Artwork is { } artwork)
+                {
+                    if (!catalogue.ArtworkAvailable) throw new IOException("This catalogue cannot register artwork.");
+
+                    metadata = metadata with { Artwork = artwork with { CacheId = ArtworkImage.Allocate(ref artworkId) } };
+                    metadata.Item[MediaKeys.ArtworkChecksum] = (long)artwork.Checksum;
+                    metadata.Item[MediaKeys.ArtworkCacheId] = (long)artworkId;
+                }
+
                 var artistId = GroupId(artists, metadata.AlbumArtist, ids);
                 var albumId = GroupId(albums, CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist), ids);
                 PreserveSortName(
@@ -119,7 +147,8 @@ internal static class SourcePreparation
     private static long GroupId(Dictionary<string, long> groups, string name, HashSet<long> ids)
     {
         if (groups.TryGetValue(name, out var id) && id == 0)
-            throw new InvalidDataException("Ambiguous music group identity: " + name.Replace('\0', '/'));
+            throw new InvalidDataException("Ambiguous music group identity: "
+                + name.Replace(CatalogueReader.GroupKeySeparator, '/'));
 
         if (!groups.ContainsKey(name))
             groups[name] = id = NewId(ids);

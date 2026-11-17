@@ -2,6 +2,7 @@ namespace NoTunes.Cli;
 
 internal static class CliSyntax
 {
+    public const string Init = "init";
     public const string Devices = "devices";
     public const string Probe = "probe";
     public const string Scan = "scan";

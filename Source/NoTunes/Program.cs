@@ -37,22 +37,20 @@ internal static class Program
         {
             var serviceProviderOptions = new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true };
             await using var services = new ServiceCollection().AddNoTunes(output, error).BuildServiceProvider(serviceProviderOptions);
-            var commands = services.GetRequiredService<Commands>();
-            using var parserOutput = new StringWriter(CultureInfo.InvariantCulture);
+            var context = services.GetRequiredService<CommandContext>();
+            await using var parserOutput = new StringWriter(CultureInfo.InvariantCulture);
             using var parser = new Parser(settings => settings.HelpWriter = parserOutput);
-            var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>(args);
+            var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions>(args);
             if (result is Parsed<object>) ValidateOptionValues(args);
 
-            return await result.MapResult(
-                (DevicesOptions options) => commands.DevicesAsync(options, cancellation.Token),
-                (ProbeOptions options) => commands.ProbeAsync(options, cancellation.Token),
-                (ScanOptions options) => commands.ScanAsync(options, cancellation.Token),
-                (SyncOptions options) => commands.SyncAsync(options, cancellation.Token),
+            return await result.MapResult<CommandOptions, Task<int>>(
+                options => options.Execute(context, cancellation.Token),
                 async errors =>
                 {
                     var exitCode = errors.All(e => e is HelpRequestedError or HelpVerbRequestedError or VersionRequestedError)
                         ? ExitCodes.Success
                         : ExitCodes.InvalidArguments;
+                    
                     await (exitCode == ExitCodes.Success ? output : error).WriteAsync(parserOutput.ToString());
                     return exitCode;
                 });
@@ -92,14 +90,19 @@ internal static class Program
             if (separator >= 0)
             {
                 if (string.IsNullOrWhiteSpace(argument[(separator + 1)..]))
+                {
                     throw new InvalidArgumentsException($"{option} requires a value.");
+                }
 
                 continue;
             }
 
-            if (index + 1 >= arguments.Count || string.IsNullOrWhiteSpace(arguments[index + 1])
-                || arguments[index + 1].StartsWith(LongOptionPrefix, StringComparison.Ordinal))
+            if (index + 1 >= arguments.Count || 
+                string.IsNullOrWhiteSpace(arguments[index + 1]) || 
+                arguments[index + 1].StartsWith(LongOptionPrefix, StringComparison.Ordinal))
+            {
                 throw new InvalidArgumentsException($"{option} requires a value.");
+            }
 
             index++;
         }

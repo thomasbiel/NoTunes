@@ -4,6 +4,8 @@ namespace NoTunes.Music;
 
 internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<string, object> Audio, string Album, string AlbumArtist)
 {
+    public ArtworkImage? Artwork { get; init; }
+
     private const int LayerThree = 3;
     private const int MinimumChannels = 1;
     private const int MaximumChannels = 2;
@@ -86,12 +88,28 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
                 item,
                 audio,
                 album,
-                albumArtist);
+                albumArtist)
+            {
+                Artwork = ReadArtwork(tag)
+            };
         }
         catch (Exception e) when (e is TagLib.CorruptFileException or TagLib.UnsupportedFormatException)
         {
             throw new InvalidDataException($"Cannot read MP3 metadata: {relativePath}", e);
         }
+    }
+
+    public static bool HasArtwork(FileStream source)
+    {
+        using var file = TagLib.File.Create(new SourceTagFile(source), TagLib.ReadStyle.None);
+        return file.Tag.Pictures.Length != 0;
+    }
+
+    private static ArtworkImage? ReadArtwork(TagLib.Tag tag)
+    {
+        var picture = tag.Pictures.FirstOrDefault(value => value.Type == TagLib.PictureType.FrontCover)
+            ?? tag.Pictures.FirstOrDefault();
+        return picture is null ? null : ArtworkImage.Read(picture.Data.Data);
     }
 
     private static string Text(string? value, string fallback)

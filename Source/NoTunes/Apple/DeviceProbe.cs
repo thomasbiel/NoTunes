@@ -2,9 +2,6 @@ namespace NoTunes.Apple;
 
 public static class DeviceProbe
 {
-    private const string IphoneModelPrefix = "iPhone";
-    private const string FreeBytesKey = "FSFreeBytes";
-
     public static async Task<ProbeResult> RunAsync(UsbMuxClient mux, UsbDevice device, TimeSpan timeout, CancellationToken cancellationToken, bool readCatalogue = false)
     {
         await using var lockdown = await LockdownClient.ConnectAsync(
@@ -14,7 +11,7 @@ public static class DeviceProbe
             cancellationToken);
         await lockdown.StartPairedSessionAsync(cancellationToken);
         var info = await lockdown.GetInfoAsync(cancellationToken);
-        if (!info.Model.StartsWith(IphoneModelPrefix, StringComparison.Ordinal))
+        if (!info.Model.StartsWith(DeviceInfo.IphoneModelPrefix, StringComparison.Ordinal))
             throw new IOException($"The selected device is {info.Model}, not an iPhone.");
 
         await using var afc = new AfcClient(await lockdown.OpenServiceAsync(DeviceServices.Afc, cancellationToken), timeout);
@@ -34,7 +31,7 @@ public static class DeviceProbe
             DataProtected = sync.DataProtected,
             MusicTrackCount = sync.MusicTrackCount,
             MusicBytes = sync.MusicBytes,
-            FreeBytes = storage.GetValueOrDefault(FreeBytesKey),
+            FreeBytes = storage.GetValueOrDefault(AfcKeys.FreeBytes),
             CatalogueReadVerified = snapshot is not null,
             CatalogueBytes = snapshot?.Database.Length,
             CatalogueWalBytes = snapshot?.Wal?.Length

@@ -122,6 +122,21 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         ];
     }
 
+    internal async Task RemoveStagingFileAsync(string path, CancellationToken cancellationToken)
+    {
+        ValidatePath(path);
+        if (path != SyncPaths.Metadata && path != SyncPaths.Metadata + SyncPaths.SignatureSuffix
+            && path != SyncPaths.Preferences && path != SyncPaths.PreferencesPlist
+            && !path.StartsWith(SyncPaths.Airlock, StringComparison.Ordinal))
+            throw new InvalidDataException("Only verified staging or initialization files may be removed.");
+
+        await this.RequestAsync(
+            AfcOperation.RemovePath,
+            Encoding.UTF8.GetBytes(path + '\0'),
+            cancellationToken,
+            AfcOperation.Status);
+    }
+
     public async Task EnsureDirectoryAsync(string path, CancellationToken cancellationToken)
     {
         ValidatePath(path);

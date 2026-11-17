@@ -44,10 +44,10 @@ public sealed class CommandTests
     public void Refuses_To_Select_An_Arbitrary_Device()
     {
         UsbDevice[] devices = [new(1, "A", 1), new(2, "B", 1)];
-        Assert.Throws<IOException>(() => Commands.SelectDevice(devices, null));
-        Assert.That(Commands.SelectDevice(devices, "b"), Is.EqualTo(devices[1]));
-        Assert.Throws<IOException>(() => Commands.SelectDevice(devices, "missing"));
-        Assert.Throws<IOException>(() => Commands.SelectDevice([], null));
+        Assert.Throws<IOException>(() => DeviceOptions.SelectDevice(devices, null));
+        Assert.That(DeviceOptions.SelectDevice(devices, "b"), Is.EqualTo(devices[1]));
+        Assert.Throws<IOException>(() => DeviceOptions.SelectDevice(devices, "missing"));
+        Assert.Throws<IOException>(() => DeviceOptions.SelectDevice([], null));
     }
 
     [TestCase("00008030-0011223344556677", "000080300011223344556677")]
@@ -57,6 +57,6 @@ public sealed class CommandTests
     public void Selects_Devices_Using_Normalized_Udids(string actual, string requested)
     {
         var device = new UsbDevice(1, actual, 1);
-        Assert.That(Commands.SelectDevice([device], requested), Is.SameAs(device));
+        Assert.That(DeviceOptions.SelectDevice([device], requested), Is.SameAs(device));
     }
 }

@@ -25,4 +25,6 @@ internal static class SyncProtocol
     public const string WindowsVersion = "10.0";
     public const string VoiceMemoAnchor = "1";
     public const string InitialMediaAnchor = "0";
+    public const uint UninitializedMediaRevision = 0;
+    public const long FirstMediaRevision = 1;
 }

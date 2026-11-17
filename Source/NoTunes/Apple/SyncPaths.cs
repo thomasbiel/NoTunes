@@ -10,8 +10,12 @@ internal static class SyncPaths
     public const string Metadata = MetadataDirectory + "/Sync_00000000.plist";
     public const string SignatureSuffix = ".cig";
     public const string Airlock = "Airlock/Media/";
-    public const string MusicBucketPrefix = "iTunes_Control/Music/F";
+    public const string ArtworkAirlock = Airlock + "Artwork/";
+    public const string ArtworkOriginals = "iTunes_Control/iTunes/Artwork/Originals/";
+    public const string MusicDirectory = "iTunes_Control/Music";
+    public const string MusicBucketPrefix = MusicDirectory + "/F";
     public const string Mp3Extension = ".mp3";
+    public const string JpegExtension = ".jpg";
     public const string DatabaseFile = "MediaLibrary.sqlitedb";
     public const string WalSuffix = "-wal";
 }

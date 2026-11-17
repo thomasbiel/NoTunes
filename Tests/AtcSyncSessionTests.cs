@@ -270,6 +270,45 @@ public sealed class AtcSyncSessionTests
             Is.EqualTo([AtcCommands.Ping, AtcCommands.RequestingSync]));
     }
 
+    [TestCase("0")]
+    [TestCase("2")]
+    [TestCase(1L)]
+    [TestCase(true)]
+    public async Task Rejects_Unsupported_Live_VoiceMemo_Anchors_Before_Metadata_Is_Announced(object anchor)
+    {
+        var ready = SyncTestData.Ready();
+        ready.Dictionary(AtcKeys.Parameters).Dictionary(AtcKeys.Anchors)[AtcKeys.VoiceMemo] = anchor;
+        var peer = new AtcPeer(SyncTestData.Capabilities(), SyncTestData.Allowed(), ready);
+        await using var client = new AtcClient(peer, Timeout);
+        await client.ReadSyncStatusAsync(CancellationToken.None);
+        var session = new AtcSyncSession(client, TextWriter.Null);
+        var exception = await Assert.ThrowsAsync<IOException>(() => session.BeginAsync(
+            Identity, 7, CancellationToken.None));
+        Assert.That(exception!.Message, Does.Contain("VoiceMemo"));
+        Assert.That(peer.SentMessages().Select(message => message.Text(AtcKeys.Command)),
+            Is.EqualTo([AtcCommands.Ping, AtcCommands.RequestingSync]));
+    }
+
+    [TestCase(null)]
+    [TestCase(SyncProtocol.VoiceMemoAnchor)]
+    public async Task Allows_Missing_Or_Qualified_Live_VoiceMemo_Anchors(string? anchor)
+    {
+        var ready = SyncTestData.Ready();
+        if (anchor is not null)
+        {
+            ready.Dictionary(AtcKeys.Parameters).Dictionary(AtcKeys.Anchors)[AtcKeys.VoiceMemo] = anchor;
+        }
+
+        var peer = new AtcPeer(SyncTestData.Capabilities(), SyncTestData.Allowed(), ready);
+        await using var client = new AtcClient(peer, Timeout);
+        await client.ReadSyncStatusAsync(CancellationToken.None);
+        var session = new AtcSyncSession(client, TextWriter.Null);
+        using var signer = await session.BeginAsync(Identity, 7, CancellationToken.None);
+        await session.FinishMetadataAsync(7, CancellationToken.None);
+        var sent = peer.SentMessages().Last().Dictionary(AtcKeys.Parameters).Dictionary(AtcKeys.Anchors);
+        Assert.That(sent.Text(AtcKeys.VoiceMemo), Is.EqualTo(SyncProtocol.VoiceMemoAnchor));
+    }
+
     [Test]
     public async Task Detects_Corrupt_Transfers_Before_FileComplete()
     {
