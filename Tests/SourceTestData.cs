@@ -43,7 +43,8 @@ internal static class SourceTestData
         DeviceCatalogue catalogue,
         SyncWorkspace output,
         GroupNamePrompt? prompt = null,
-        bool artworkOnly = false)
+        bool artworkOnly = false,
+        Action<SkippedSourceFile>? onSkipped = null)
     {
         await using var services = CreateServiceProvider();
         var library = await services.GetRequiredService<SourceScanner>().ScanAsync(root, CancellationToken.None);
@@ -53,7 +54,8 @@ internal static class SourceTestData
             output,
             services.GetRequiredService<ISourceFileSystem>(),
             prompt,
-            artworkOnly);
+            artworkOnly,
+            onSkipped);
     }
 
     public static async Task<IReadOnlyList<PreparedTrack>> PrepareAsync(
@@ -61,7 +63,8 @@ internal static class SourceTestData
         DeviceCatalogue catalogue,
         SyncWorkspace output,
         GroupNamePrompt? prompt = null,
-        bool artworkOnly = false)
+        bool artworkOnly = false,
+        Action<SkippedSourceFile>? onSkipped = null)
     {
         await using var services = CreateServiceProvider();
         return await PrepareAsync(
@@ -70,7 +73,8 @@ internal static class SourceTestData
             output,
             services.GetRequiredService<ISourceFileSystem>(),
             prompt,
-            artworkOnly);
+            artworkOnly,
+            onSkipped);
     }
 
     private static ServiceProvider CreateServiceProvider()
@@ -84,7 +88,8 @@ internal static class SourceTestData
         SyncWorkspace output,
         ISourceFileSystem fileSystem,
         GroupNamePrompt? prompt,
-        bool artworkOnly)
+        bool artworkOnly,
+        Action<SkippedSourceFile>? onSkipped)
     {
         var plan = new SyncPlan(
             "phone",
@@ -101,6 +106,7 @@ internal static class SourceTestData
             output,
             CancellationToken.None,
             artworkOnly,
-            prompt: prompt);
+            prompt: prompt,
+            onSkipped: onSkipped);
     }
 }

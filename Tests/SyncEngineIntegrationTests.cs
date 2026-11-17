@@ -8,6 +8,151 @@ namespace NoTunes.Tests;
 public sealed class SyncEngineIntegrationTests
 {
     [Test]
+    public async Task Skips_Invalid_Source_Files_And_Defers_Deletions(
+        [Values] bool dryRun,
+        [Values] bool invalidCover)
+    {
+        using var source = new SyncWorkspace();
+        using var state = new SyncWorkspace();
+        using var device = new SimulatedSyncDevice(keepExistingTrack: true);
+        var validPath = CreateSource(source.Root, 1);
+        const string invalidName = "!invalid.mp3";
+        if (invalidCover)
+        {
+            SourceTestData.WriteTrack(
+                source.Root,
+                invalidName,
+                "Album",
+                "Artist",
+                file => file.Tag.Pictures = [FeatureTestData.FrontCover([1, 2, 3, 4])]);
+        }
+        else
+        {
+            await File.WriteAllTextAsync(Path.Combine(source.Root, invalidName), "Not an MP3");
+        }
+
+        var before = await device.ReadCatalogueAsync();
+        var result = await RunAsync(
+            device,
+            source.Root,
+            state.Root,
+            dryRun);
+        var after = await device.ReadCatalogueAsync();
+
+        Assert.That(result.Plan.Add.Select(track => track.RelativePath), Is.EqualTo([Path.GetFileName(validPath)]));
+        Assert.That(result.Plan.Delete, Is.Empty);
+        Assert.That(result.Plan.Skipped.Single().RelativePath, Is.EqualTo(invalidName));
+        Assert.That(result.Plan.Skipped.Single().ArtworkOnly, Is.False);
+        Assert.That(result.Plan.Skipped.Single().Reason, Is.Not.Empty);
+        Assert.That(result.Plan.DeferredDeletions, Is.EqualTo(before.Tracks));
+        Assert.That(result.VerifiedBatches, Is.EqualTo(dryRun ? 0 : 1));
+        Assert.That(after.Tracks, Has.Count.EqualTo(dryRun ? 1 : 2));
+        Assert.That(after.Tracks.Single(track => track.Id == SimulatedSyncCatalogue.ExistingTrackId),
+            Is.EqualTo(before.Tracks.Single()));
+        Assert.That(after.ProtectedItems, Is.EqualTo(before.ProtectedItems));
+        Assert.That(device.Files.ContainsKey(SimulatedSyncCatalogue.ExistingTrackPath), Is.True);
+        if (!dryRun)
+        {
+            var added = after.Tracks.Single(track => track.Id != SimulatedSyncCatalogue.ExistingTrackId);
+            Assert.That(device.Files[added.Path!], Is.EqualTo(await File.ReadAllBytesAsync(validPath)));
+        }
+
+        AssertSettled(device, state.Root, dryRun ? 0 : 1);
+    }
+
+    [Test]
+    public async Task Preserves_All_Existing_Tracks_When_Every_Addition_Is_Invalid([Values] bool dryRun)
+    {
+        using var source = new SyncWorkspace();
+        using var state = new SyncWorkspace();
+        using var device = new SimulatedSyncDevice(keepExistingTrack: true);
+        await File.WriteAllTextAsync(Path.Combine(source.Root, "invalid.mp3"), "Not an MP3");
+
+        var before = await device.ReadCatalogueAsync();
+        var result = await RunAsync(
+            device,
+            source.Root,
+            state.Root,
+            dryRun);
+        var after = await device.ReadCatalogueAsync();
+
+        Assert.That(result.Plan.HasChanges, Is.False);
+        Assert.That(result.Plan.Add, Is.Empty);
+        Assert.That(result.Plan.Delete, Is.Empty);
+        Assert.That(result.Plan.Skipped, Has.Count.EqualTo(1));
+        Assert.That(result.Plan.DeferredDeletions, Is.EqualTo(before.Tracks));
+        Assert.That(result.VerifiedBatches, Is.Zero);
+        Assert.That(device.StartedSessions, Is.Zero);
+        Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
+        Assert.That(after.Anchor, Is.EqualTo(before.Anchor));
+        AssertSettled(device, state.Root, 0);
+    }
+
+    [Test]
+    public async Task Skips_A_Broken_Cover_Repair_And_Continues_Audio_Additions([Values] bool dryRun)
+    {
+        using var source = new SyncWorkspace();
+        using var state = new SyncWorkspace();
+        using var device = new SimulatedSyncDevice(keepExistingTrack: true);
+        CreateSource(source.Root, 1);
+        var path = SourceTestData.WriteTrack(
+            source.Root,
+            "covered.mp3",
+            "Album",
+            "Artist",
+            file => file.Tag.Pictures = [FeatureTestData.FrontCover([1, 2, 3, 4])]);
+        var bytes = await File.ReadAllBytesAsync(path);
+        device.SetExistingAudio(bytes);
+
+        var before = await device.ReadCatalogueAsync();
+        var result = await RunAsync(
+            device,
+            source.Root,
+            state.Root,
+            dryRun);
+        var after = await device.ReadCatalogueAsync();
+
+        Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
+        Assert.That(result.Plan.Artwork, Is.Empty);
+        Assert.That(result.Plan.Skipped.Single().RelativePath, Is.EqualTo("covered.mp3"));
+        Assert.That(result.Plan.Skipped.Single().ArtworkOnly, Is.True);
+        Assert.That(result.Plan.Unchanged, Is.EqualTo(1));
+        Assert.That(result.Plan.DeferredDeletions, Is.Empty);
+        Assert.That(result.VerifiedBatches, Is.EqualTo(dryRun ? 0 : 1));
+        Assert.That(after.Tracks.Single(track => track.Id == SimulatedSyncCatalogue.ExistingTrackId),
+            Is.EqualTo(before.Tracks.Single()));
+        Assert.That(device.Files[SimulatedSyncCatalogue.ExistingTrackPath], Is.EqualTo(bytes));
+        Assert.That(device.Batches.SelectMany(batch => batch)
+            .All(operation => operation.Text(MediaKeys.Operation) == MediaOperations.InsertTrack), Is.True);
+        AssertSettled(device, state.Root, dryRun ? 0 : 1);
+    }
+
+    [Test]
+    public async Task Still_Stops_For_An_Unresolved_Group_Before_Any_Device_Write()
+    {
+        using var source = new SyncWorkspace();
+        using var state = new SyncWorkspace();
+        using var device = new SimulatedSyncDevice(keepExistingTrack: true);
+        device.AddAlbumArtist(
+            22,
+            1022,
+            "Artist",
+            "Other Sort");
+        CreateSource(source.Root, 1);
+
+        var before = await device.ReadCatalogueAsync();
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(
+            () => RunAsync(device, source.Root, state.Root));
+        var after = await device.ReadCatalogueAsync();
+
+        Assert.That(exception!.Message, Does.Contain("Cannot uniquely assign"));
+        Assert.That(device.StartedSessions, Is.Zero);
+        Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
+        Assert.That(device.FileConnections.SelectMany(connection => connection.WritePackets), Is.Empty);
+        AssertSettled(device, state.Root, 0);
+    }
+
+    [Test]
     public async Task Synchronizes_After_Automatic_Or_Interactive_Group_Resolution([Values] bool ask)
     {
         using var source = new SyncWorkspace();

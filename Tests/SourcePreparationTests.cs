@@ -7,6 +7,39 @@ namespace NoTunes.Tests;
 public sealed class SourcePreparationTests
 {
     [Test]
+    public async Task Skips_Unrecognized_Leading_Data_Without_Changing_The_Source_Or_Keeping_The_Failed_Copy()
+    {
+        const int leadingDataBytes = 512 * 1024;
+        const string invalidName = "!leading-data.mp3";
+        const string validName = "valid.mp3";
+        using var source = new SyncWorkspace();
+        using var output = new SyncWorkspace();
+        var validPath = SourceTestData.WriteTrack(
+            source.Root,
+            validName,
+            "Album",
+            "Artist");
+        var audio = await File.ReadAllBytesAsync(validPath);
+        var invalidBytes = new byte[leadingDataBytes + audio.Length];
+        audio.CopyTo(invalidBytes, leadingDataBytes);
+        var invalidPath = Path.Combine(source.Root, invalidName);
+        await File.WriteAllBytesAsync(invalidPath, invalidBytes);
+        var skipped = new List<SkippedSourceFile>();
+
+        var prepared = await SourceTestData.PrepareAsync(
+            source.Root,
+            SyncPlannerTests.Catalogue([]),
+            output,
+            onSkipped: skipped.Add);
+
+        Assert.That(prepared.Single().Source.RelativePath, Is.EqualTo(validName));
+        Assert.That(skipped.Single().RelativePath, Is.EqualTo(invalidName));
+        Assert.That(skipped.Single().Reason, Does.Contain("MPEG audio header not found"));
+        Assert.That(await File.ReadAllBytesAsync(invalidPath), Is.EqualTo(invalidBytes));
+        Assert.That(Directory.GetFiles(output.Root, "*.mp3"), Has.Length.EqualTo(1));
+    }
+
+    [Test]
     public async Task Uses_The_Selected_Group_Without_Rewriting_Source_Tags([Values] bool album)
     {
         using var fixture = new CatalogueFixture();
@@ -230,7 +263,7 @@ public sealed class SourcePreparationTests
     }
 
     [Test]
-    public async Task Rejects_Changed_Source_Bytes_Even_When_Size_And_Timestamp_Are_Unchanged()
+    public async Task Rejects_Changed_Source_Bytes_Even_When_Size_And_Timestamp_Are_Unchanged([Values] bool skipInvalidFiles)
     {
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
@@ -242,10 +275,13 @@ public sealed class SourcePreparationTests
         await File.WriteAllBytesAsync(path, bytes);
         File.SetLastWriteTimeUtc(path, library.Tracks[0].LastWriteTimeUtc);
 
+        var skipped = new List<SkippedSourceFile>();
         await Assert.ThrowsAsync<IOException>(() => SourceTestData.PrepareAsync(
             library,
             SyncPlannerTests.Catalogue([]),
-            output));
+            output,
+            onSkipped: skipInvalidFiles ? skipped.Add : null));
+        Assert.That(skipped, Is.Empty);
     }
 
     [Test]

@@ -60,20 +60,10 @@ public sealed class SyncEngine(
                 catalogue,
                 (track, token) => this.ReadHashAsync(phone.Afc, track, token),
                 cancellationToken);
-
-            if (!options.DryRun && plan.HasChanges)
-            {
-                ValidateWritePlan(
-                    source,
-                    plan,
-                    catalogue,
-                    options.AllowEmptySource);
-
-                await RequireSpaceAsync(phone.Afc, plan.TransferBytes, cancellationToken);
-            }
         }
 
         using var workspace = new SyncWorkspace();
+        var skipped = new List<SkippedSourceFile>();
         await error.WriteLineAsync("Preparing verified local copies and MP3 metadata before changing the iPhone...");
         var prepared = await SourcePreparation.PrepareAsync(
             source,
@@ -82,7 +72,8 @@ public sealed class SyncEngine(
             fileSystem,
             workspace,
             cancellationToken,
-            prompt: this.PromptForGroupName);
+            prompt: this.PromptForGroupName,
+            onSkipped: ReportSkipped);
 
         var missingArtwork = plan.Matches.Where(match => !HasRegisteredArtwork(catalogue, match.Device.Id)).ToArray();
 
@@ -99,7 +90,8 @@ public sealed class SyncEngine(
             fileSystem,
             workspace,
             cancellationToken,
-            artworkOnly: true);
+            artworkOnly: true,
+            onSkipped: ReportSkipped);
 
         var matches = missingArtwork.ToDictionary(match => match.Source.RelativePath, StringComparer.Ordinal);
         var artworkUpdates = repairs
@@ -111,8 +103,38 @@ public sealed class SyncEngine(
             })
             .ToArray();
 
-        plan = plan with { Artwork = [.. artworkUpdates.Select(track => track.Source)] };
+        plan = plan with
+        {
+            Add = [.. prepared.Select(track => track.Source)],
+            Artwork = [.. artworkUpdates.Select(track => track.Source)],
+            Skipped = skipped,
+            DeferredDeletions = skipped.Count == 0 ? [] : plan.Delete,
+            Delete = skipped.Count == 0 ? plan.Delete : []
+        };
+        if (plan.DeferredDeletions.Count != 0)
+        {
+            await error.WriteLineAsync($"Deferred {plan.DeferredDeletions.Count} deletion(s) because source files were skipped.");
+        }
+
         if (options.DryRun || !plan.HasChanges) return new SyncResult(plan, options.DryRun, 0);
+
+        ValidateWritePlan(
+            source,
+            plan,
+            catalogue,
+            options.AllowEmptySource);
+
+        var transferBytes = checked(plan.TransferBytes
+            + prepared.Sum(track => (long)(track.Metadata.Artwork?.Length ?? 0))
+            + artworkUpdates.Sum(track => (long)track.Metadata.Artwork!.Length));
+        await using (var phone = await this.OpenConnection(
+            mux,
+            device,
+            timeout,
+            cancellationToken))
+        {
+            await RequireSpaceAsync(phone.Afc, transferBytes, cancellationToken);
+        }
 
         await error.WriteLineAsync($"Plan: add {plan.Add.Count}, delete {plan.Delete.Count}, "
             + $"repair {artworkUpdates.Length} covers, unchanged {plan.Unchanged}.");
@@ -176,6 +198,13 @@ public sealed class SyncEngine(
         }
 
         return new SyncResult(plan, false, batches);
+
+        void ReportSkipped(SkippedSourceFile file)
+        {
+            skipped.Add(file);
+            var operation = file.ArtworkOnly ? "cover repair" : "source file";
+            error.WriteLine($"Skipped {operation}: {file.RelativePath}: {file.Reason}");
+        }
     }
 
     private async Task<DeviceCatalogue> ExecuteBatchAsync(

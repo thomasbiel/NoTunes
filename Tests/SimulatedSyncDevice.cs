@@ -15,7 +15,7 @@ internal sealed class SimulatedSyncDevice : IDisposable
     private const long ProductId = 1;
     private const string UsbConnectionType = "USB";
     private const string InjectedFailure = "Injected sync interruption.";
-    private const int RequestTimeoutSeconds = 5;
+    internal const int RequestTimeoutSeconds = 5;
     private readonly SimulatedSyncCatalogue catalogue;
     private readonly HashSet<string> directories = new(StringComparer.Ordinal);
     private readonly Dictionary<long, string> audioPaths = [];
@@ -77,15 +77,10 @@ internal sealed class SimulatedSyncDevice : IDisposable
     {
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
             .BuildServiceProvider();
-        var engine = new SyncEngine(
+        var engine = this.CreateEngine(
             services.GetRequiredService<SourceScanner>(),
             services.GetRequiredService<ISourceFileSystem>(),
-            this.CreateTransport(),
-            TextWriter.Null)
-        {
-            OpenConnection = this.OpenAsync,
-            PromptForGroupName = this.PromptForGroupName
-        };
+            TextWriter.Null);
         var options = new SyncOptions
         {
             Folder = source,
@@ -94,6 +89,19 @@ internal sealed class SimulatedSyncDevice : IDisposable
             DryRun = dryRun
         };
         return await engine.RunAsync(options, cancellationToken);
+    }
+
+    public SyncEngine CreateEngine(SourceScanner scanner, ISourceFileSystem fileSystem, TextWriter error)
+    {
+        return new SyncEngine(
+            scanner,
+            fileSystem,
+            this.CreateTransport(),
+            error)
+        {
+            OpenConnection = this.OpenAsync,
+            PromptForGroupName = this.PromptForGroupName
+        };
     }
 
     public async Task<IDeviceSyncConnection> OpenAsync(

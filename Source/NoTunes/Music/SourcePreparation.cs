@@ -20,7 +20,8 @@ internal static class SourcePreparation
         SyncWorkspace workspace,
         CancellationToken cancellationToken,
         bool artworkOnly = false,
-        GroupNamePrompt? prompt = null)
+        GroupNamePrompt? prompt = null,
+        Action<SkippedSourceFile>? onSkipped = null)
     {
         using var session = fileSystem.OpenSource(new DirectoryInfo(library.Root), cancellationToken);
         var artworkCache = new ArtworkCache(workspace.Root);
@@ -76,13 +77,13 @@ internal static class SourcePreparation
                 if (artworkOnly)
                 {
                     await using var guarded = session.OpenRead(new FileInfo(fullPath));
-                    var hasArtwork = Mp3Metadata.HasArtwork(guarded);
+                    var readable = TryReadMetadata(track, () => Mp3Metadata.HasArtwork(guarded), out var hasArtwork);
                     if (guarded.Length != track.Size || File.GetLastWriteTimeUtc(guarded.SafeFileHandle) != track.LastWriteTimeUtc)
                     {
                         throw new IOException($"Source changed while checking artwork: {track.RelativePath}");
                     }
 
-                    if (!hasArtwork) continue;
+                    if (!readable || !hasArtwork) continue;
                 }
 
                 var localPath = Path.Combine(workspace.Root, Guid.NewGuid().ToString("N") + SyncPaths.Mp3Extension);
@@ -114,7 +115,15 @@ internal static class SourcePreparation
                     }
                 }
 
-                var metadata = Mp3Metadata.Read(localPath, track.RelativePath, artworkCache);
+                if (!TryReadMetadata(
+                    track,
+                    () => Mp3Metadata.Read(localPath, track.RelativePath, artworkCache),
+                    out var metadata))
+                {
+                    File.Delete(localPath);
+                    continue;
+                }
+
                 if (artworkOnly && metadata.Artwork is null)
                 {
                     File.Delete(localPath);
@@ -196,7 +205,24 @@ internal static class SourcePreparation
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         return result;
+
+        bool TryReadMetadata<T>(SourceTrack track, Func<T> read, out T metadata)
+        {
+            try
+            {
+                metadata = read();
+                return true;
+            }
+            catch (Exception exception) when (onSkipped is not null
+                && exception is InvalidDataException or TagLib.CorruptFileException or TagLib.UnsupportedFormatException)
+            {
+                onSkipped(new SkippedSourceFile(track.RelativePath, exception.GetBaseException().Message, artworkOnly));
+                metadata = default!;
+                return false;
+            }
+        }
 
         MusicGroupResolver Resolver(
             MusicGroupKind kind,

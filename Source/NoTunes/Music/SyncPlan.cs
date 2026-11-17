@@ -11,6 +11,10 @@ public sealed record SyncPlan(
 
     public IReadOnlyList<SourceTrack> Artwork { get; init; } = [];
 
+    public IReadOnlyList<SkippedSourceFile> Skipped { get; init; } = [];
+
+    public IReadOnlyList<DeviceTrack> DeferredDeletions { get; init; } = [];
+
     public long TransferBytes => this.Add.Sum(track => track.Size);
 
     public bool HasChanges => this.Add.Count != 0 || this.Delete.Count != 0 || this.Artwork.Count != 0;

@@ -217,8 +217,22 @@ Validated JPEGs are also stored in the temporary directory and loaded as needed,
 so allow disk space for these cover files as well. A bounded content cache reuses
 decoding and conversion for identical embedded images while retaining distinct
 track artwork IDs.
-Invalid or changed source files abort before metadata
-is staged. The iPhone must have room for all additions plus a metadata reserve;
+Files with unreadable or unsupported MP3 metadata or invalid embedded covers are
+reported individually and skipped. Valid additions and cover repairs continue.
+If any file is skipped, **all planned deletions are deferred for that run** so an
+older iPhone copy is preserved when its source replacement could not be prepared.
+This also applies when every planned addition is skipped; it never becomes an
+empty-source deletion. The next error-free run can perform the deferred deletions.
+The actual plan excludes skipped additions and repairs and exposes `Skipped`
+(path, reason and whether only a cover repair was affected) and `DeferredDeletions`
+in JSON. Text output includes their counts, with individual diagnostics on stderr.
+Both dry-runs and write runs return exit code 5 when files were skipped, indicating
+a partial result rather than a complete mirror.
+
+Source access failures, files changed after scanning, unresolved group selections,
+cancellation, device/protocol failures and unsuccessful transfer verification
+still stop the run. These errors are not treated as defective MP3 metadata.
+The iPhone must have room for all valid prepared additions and covers plus a metadata reserve;
 pending deletions are not counted as available space.
 
 The catalogue supports at most 50,000 computer-synced local music tracks.
@@ -454,4 +468,5 @@ The iPhone catalogue must be updated through its sync service, never by editing
 | 1 | Source, device, transport or protocol error |
 | 2 | Invalid command-line syntax |
 | 3 | Probe completed, but the iPhone blocks music synchronization |
+| 5 | Partial sync or dry-run: source files skipped; planned deletions deferred |
 | 130 | Cancelled with Ctrl+C |
