@@ -6,6 +6,7 @@ using NoTunes.Platform;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class ArtworkFeaturesTests
 {
     [Test]

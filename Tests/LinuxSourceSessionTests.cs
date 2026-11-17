@@ -7,6 +7,7 @@ namespace NoTunes.Tests;
 
 [Platform("Linux")]
 [SupportedOSPlatform("linux")]
+[TestFixture]
 public sealed class LinuxSourceSessionTests
 {
     private string root = null!;

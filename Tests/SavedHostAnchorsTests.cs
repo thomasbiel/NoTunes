@@ -5,6 +5,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class SavedHostAnchorsTests
 {
     private const int RootBytes = 244;

@@ -21,8 +21,8 @@ internal sealed class CatalogueFixture : IDisposable
         INSERT INTO album_artist VALUES(11,1011,'Artist','Artist, The');
         CREATE TABLE album(album_pid INTEGER,sync_id INTEGER,album TEXT,album_artist_pid INTEGER,sort_album TEXT);
         INSERT INTO album VALUES(12,1012,'Album',11,'Album, The');
-        CREATE TABLE container(sync_id INTEGER);
-        INSERT INTO container VALUES(1002);
+        CREATE TABLE container(sync_id INTEGER,container_pid INTEGER);
+        INSERT INTO container VALUES(1002,1002);
         CREATE TABLE composer(sync_id INTEGER,composer TEXT,sort_composer TEXT);
         INSERT INTO composer VALUES(1014,'Composer','Composer, The');
         CREATE TABLE item_artist(item_artist TEXT,sort_item_artist TEXT);

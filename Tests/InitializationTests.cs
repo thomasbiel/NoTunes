@@ -5,9 +5,76 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class InitializationTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(1);
+
+    [TestCase(0, false)]
+    [TestCase(0, true)]
+    [TestCase(1, false)]
+    [TestCase(1, true)]
+    [TestCase(7, true)]
+    public async Task Reports_An_Existing_Initialization_Only_After_The_First_Revision_And_Primary_Container_Exist(
+        int revision,
+        bool hasPrimaryContainer)
+    {
+        using var state = new SyncWorkspace();
+        using var fixture = Fresh();
+        var before = await CatalogueReader.ReadAsync(
+            fixture.Snapshot(), CancellationToken.None, allowUninitialized: true);
+        var saved = new InitializationState(
+            LibraryPreferences.Create(),
+            2001,
+            2002,
+            SyncOperations.Initialize(2001, 2002, "Test iPhone"),
+            CatalogueCheckpoint.Capture(before));
+        DeviceState.Save(Path.Combine(DeviceState.DirectoryFor(state.Root, "phone"), "initialization.json"), saved);
+        fixture.Execute($"INSERT INTO db_info VALUES({saved.DatabaseId},{saved.ContainerId}); "
+            + $"INSERT INTO _MLDatabaseProperties VALUES('MLSyncClientSyncAnchor','{revision}');");
+        if (hasPrimaryContainer)
+        {
+            fixture.Execute($"INSERT INTO container(sync_id,container_pid) "
+                + $"VALUES({saved.ContainerId},{saved.ContainerId});");
+        }
+
+        var files = new AfcPeer();
+        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        files.Files[SyncPaths.Preferences] = saved.Preferences;
+        files.Files[SyncPaths.PreferencesPlist] = LibraryPreferences.Wrap(saved.Preferences);
+        await using var afc = new AfcClient(files, Timeout);
+        using var peer = new AtcPeer();
+        await using var atc = new AtcClient(peer, Timeout);
+        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
+        var options = new InitOptions { StateFolder = state.Root };
+        if (revision == 0 || !hasPrimaryContainer)
+        {
+            var exception = await Assert.ThrowsAsync<IOException>(() => initializer.InitializeAsync(
+                afc,
+                atc,
+                "Test iPhone",
+                "phone",
+                options,
+                CancellationToken.None));
+            Assert.That(exception!.Message, Does.Contain("incomplete"));
+        }
+        else
+        {
+            var result = await initializer.InitializeAsync(
+                afc,
+                atc,
+                "Test iPhone",
+                "phone",
+                options,
+                CancellationToken.None);
+            Assert.That(result.AlreadyInitialized, Is.True);
+            Assert.That(result.DatabaseId, Is.EqualTo(saved.DatabaseId));
+        }
+
+        Assert.That(files.WritePackets, Is.Empty);
+        Assert.That(files.Files.ContainsKey(SyncPaths.Lock), Is.False);
+        Assert.That(peer.SentMessages(), Is.Empty);
+    }
 
     [Test]
     public void Generates_Compatible_Independent_Library_Preferences()
@@ -155,7 +222,7 @@ public sealed class InitializationTests
                 Assert.That(playlist.Dictionary("container").Flag("is_hidden"), Is.True);
                 var container = playlist.Number(MediaKeys.PersistentId);
                 fixture.Execute($"INSERT INTO db_info VALUES({database},{container}); "
-                    + $"INSERT INTO container(sync_id) VALUES({container}); "
+                    + $"INSERT INTO container(sync_id,container_pid) VALUES({container},{container}); "
                     + "INSERT INTO _MLDatabaseProperties VALUES('MLSyncClientSyncAnchor','1');");
                 files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
                 files.Files.Remove(SyncPaths.Metadata);

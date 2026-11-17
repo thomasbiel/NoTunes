@@ -137,7 +137,9 @@ After building, the equivalent executable is
   and the phone's SQLite database is never edited directly. Existing libraries,
   foreign preferences and saved host catalogues are refused. Run `init` again
   after an interruption: it reuses its saved identities and verifies any partial
-  preference writes before completing them. `--dry-run` sends no sync request
+  preference writes before completing them. A partial catalogue commit without
+  the primary container or first Media revision is refused and requires manual
+  reconciliation. `--dry-run` sends no sync request
   and writes no device files. The initial iOS database must exist; open Music on
   the phone first if iOS has not created it yet.
 - `devices` lists USB devices through Apple's local USB multiplexer; network
@@ -233,6 +235,8 @@ planning new changes: unapplied operations are archived, completed results are
 verified, and only that batch's unfilled insertions are removed through a new signed
 compensating session before the source plan retries them. Interrupted artwork-only
 updates retry their cover registration without deleting the existing track.
+Compensating deletions of incomplete tracks remain recoverable across further
+interruptions, including partially applied cleanup batches.
 Partially applied removals are reconciled against the observed inventory; the
 fresh source plan removes only the entries that are still present.
 An uncertain operation is never blindly replayed. Only staging files equal to the

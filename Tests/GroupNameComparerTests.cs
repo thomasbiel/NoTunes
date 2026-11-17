@@ -3,6 +3,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class GroupNameComparerTests
 {
     [TestCase("Artist", "ARTIST", true)]

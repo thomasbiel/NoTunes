@@ -4,6 +4,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class LibraryIdentityTests
 {
     private const int PreferenceLength = 1232;

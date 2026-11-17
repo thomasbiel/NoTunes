@@ -3,6 +3,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class SyncCatalogueGuardTests
 {
     private const string SwapAlbumAndComposerIds =

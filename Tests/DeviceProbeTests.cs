@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class DeviceProbeTests
 {
     [Test]

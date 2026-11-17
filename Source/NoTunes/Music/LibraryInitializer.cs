@@ -46,6 +46,12 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
             if (saved is null || before.DatabaseId != saved.DatabaseId || before.ContainerId != saved.ContainerId)
                 throw new IOException("This iPhone already belongs to a music library. Use sync; init will not replace it.");
 
+            if (before.Anchor < SyncProtocol.FirstMediaRevision)
+            {
+                throw new IOException("The music library initialization is incomplete: "
+                    + "Media revision 1 has not been committed.");
+            }
+
             await RequirePreferencesAsync(afc, saved, cancellationToken);
             return new InitializationResult(device, options.DryRun, true, before.DatabaseId);
         }

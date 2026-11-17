@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class PlatformServicesTests
 {
     [TestCase(true)]

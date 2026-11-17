@@ -3,6 +3,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class SyncWritePlanTests
 {
     private const int FirstTrackId = 10000;

@@ -3,6 +3,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class ProtectedCatalogueTests
 {
     [TestCase("DELETE FROM item WHERE item_pid=2;")]

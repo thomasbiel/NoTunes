@@ -3,6 +3,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class AtcClientTests
 {
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(2);

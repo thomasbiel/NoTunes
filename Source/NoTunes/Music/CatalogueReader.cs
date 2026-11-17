@@ -22,6 +22,7 @@ internal static class CatalogueReader
     private const int StoreSagaIdColumn = 9;
     private const int DatabaseIdColumn = 0;
     private const int ContainerIdColumn = 1;
+    private const int ContainerRowIdColumn = 1;
     private const int GroupIdColumn = 0;
     private const int GroupNameColumn = 1;
     private const int GroupAlbumArtistColumn = 2;
@@ -37,7 +38,7 @@ internal static class CatalogueReader
     private const string VersionSql = "PRAGMA user_version";
     private const string IdentitySql = "SELECT db_pid,primary_container_pid FROM db_info";
     private const string AnchorSql = "SELECT value FROM _MLDatabaseProperties WHERE key='MLSyncClientSyncAnchor'";
-    private const string ContainersSql = "SELECT sync_id FROM container WHERE sync_id<>0";
+    private const string ContainersSql = "SELECT sync_id,container_pid FROM container";
     private const string OccupiedIdsSql = """
         SELECT sync_id FROM item_store WHERE sync_id<>0
         UNION SELECT sync_id FROM composer WHERE sync_id<>0
@@ -231,10 +232,17 @@ internal static class CatalogueReader
             await using var containers = connection.CreateCommand();
             containers.CommandText = ContainersSql;
             await using var containerRows = containers.ExecuteReader();
+            var hasPrimaryContainer = false;
             while (containerRows.Read())
             {
-                occupied.Add(containerRows.GetInt64(SyncIdColumn));
+                var id = containerRows.GetInt64(SyncIdColumn);
+                if (id != 0) occupied.Add(id);
+
+                hasPrimaryContainer |= containerRows.GetInt64(ContainerRowIdColumn) == containerId;
             }
+
+            if (initialized && !hasPrimaryContainer)
+                throw new IOException("The music library is incomplete: its primary container is missing.");
 
             return ArtworkCatalogue.Read(connection, new DeviceCatalogue(
                 databaseId,

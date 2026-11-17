@@ -3,6 +3,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class CatalogueReadTests
 {
     private const string DatabasePath = "iTunes_Control/iTunes/MediaLibrary.sqlitedb";

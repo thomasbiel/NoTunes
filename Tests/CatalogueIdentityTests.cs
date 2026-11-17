@@ -3,8 +3,34 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class CatalogueIdentityTests
 {
+    [Test]
+    public async Task Rejects_An_Initialized_Library_Without_Its_Primary_Container()
+    {
+        using var fixture = new CatalogueFixture();
+        fixture.Execute("UPDATE container SET container_pid=2002 WHERE sync_id=1002;");
+        var exception = await Assert.ThrowsAsync<IOException>(() => CatalogueReader.ReadAsync(
+            fixture.Snapshot(), CancellationToken.None));
+        Assert.That(exception!.Message, Does.Contain("primary container is missing"));
+    }
+
+    [TestCase(0)]
+    [TestCase(2002)]
+    public async Task Resolves_The_Primary_Container_By_Its_Row_Identity(int syncId)
+    {
+        using var fixture = new CatalogueFixture();
+        fixture.Execute($"UPDATE container SET sync_id={syncId} WHERE container_pid=1002;");
+        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        Assert.That(catalogue.ContainerId, Is.EqualTo(1002));
+        Assert.That(catalogue.OccupiedIds.Contains(0), Is.False);
+        if (syncId != 0)
+        {
+            Assert.That(catalogue.OccupiedIds.Contains(syncId), Is.True);
+        }
+    }
+
     [TestCase("UPDATE item_store SET sync_id=101 WHERE item_pid=3;")]
     [TestCase("UPDATE item_store SET sync_id=101 WHERE item_pid=4;")]
     [TestCase("UPDATE item_store SET sync_id=101 WHERE item_pid=5;")]

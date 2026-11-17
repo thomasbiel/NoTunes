@@ -11,6 +11,7 @@ using Org.BouncyCastle.Tls;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class ManagedTlsTests
 {
     private static readonly Lazy<TlsTestCredentials> Keys = new(() => new TlsTestCredentials());

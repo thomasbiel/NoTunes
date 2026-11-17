@@ -6,6 +6,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class OptionsDispatchTests
 {
     [Test]

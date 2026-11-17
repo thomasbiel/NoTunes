@@ -23,10 +23,13 @@ internal static class SyncRecovery
                 .SequenceEqual(BinaryPlist.Write(rebuilt[MediaKeys.Operations])))
             throw new InvalidDataException("The recovery journal does not match its signed operation.");
 
+        var pendingDeletionIds = pending.Deletions.Select(track => track.Id).ToHashSet();
+        var remainingDeletions = actual.Tracks
+            .Where(track => track.IsIncomplete && pendingDeletionIds.Contains(track.Id)).ToArray();
         if (actual.Anchor == before.Anchor)
         {
             SyncEngine.RequireUnchanged(before, actual);
-            return [];
+            return remainingDeletions;
         }
 
         var expected = additions.ToDictionary(track => track.Id);
@@ -49,6 +52,6 @@ internal static class SyncRecovery
         SyncEngine.VerifyResult(before, projected,
             additions.Where(track => presentIds.Contains(track.Id) && !incompleteIds.Contains(track.Id)).ToArray(),
             appliedDeletions);
-        return incomplete;
+        return [.. incomplete, .. remainingDeletions];
     }
 }

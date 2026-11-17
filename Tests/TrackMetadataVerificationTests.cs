@@ -4,6 +4,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class TrackMetadataVerificationTests
 {
     private const string OtherGroupsSql = """

@@ -4,8 +4,84 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
+[TestFixture]
 public sealed class SyncRecoveryTests
 {
+    [TestCase(false)]
+    [TestCase(true)]
+    public void Retries_Only_The_Incomplete_Deletions_Owned_By_The_Pending_Operation(bool revisionAdvanced)
+    {
+        var owned = new DeviceTrack(2001, "Owned interrupted insertion", null, 0);
+        var unrelated = new DeviceTrack(2002, "Unrelated interrupted insertion", null, 0);
+        var before = SyncPlannerTests.Catalogue([owned, unrelated]);
+        var pending = new PendingSync(
+            2,
+            new LibraryIdentity("id", "binding"),
+            CatalogueCheckpoint.Capture(before),
+            [],
+            [owned],
+            SyncOperations.Serialize(before, [], [owned]),
+            [1, 2]);
+        var actual = before with { Anchor = revisionAdvanced ? before.Anchor + 1 : before.Anchor };
+        Assert.That(SyncRecovery.Assess(pending, actual, []).Select(track => track.Id), Is.EqualTo(new[] { owned.Id }));
+        Assert.Throws<IOException>(() => SyncRecovery.Assess(pending,
+            actual with { Tracks = [owned, unrelated with { Title = "Foreign change" }] }, []));
+    }
+
+    [TestCase(0, false)]
+    [TestCase(0, true)]
+    [TestCase(1, true)]
+    [TestCase(2, true)]
+    public async Task Retains_Unfinished_Compensating_Deletions_Across_Journal_Replacements(
+        int appliedDeletions,
+        bool revisionAdvanced)
+    {
+        using var workspace = new SyncWorkspace();
+        var incomplete = new[]
+        {
+            new DeviceTrack(2001, "First interrupted insertion", null, 0),
+            new DeviceTrack(2002, "Second interrupted insertion", null, 0)
+        };
+        var retained = new DeviceTrack(2003, "Existing track", "existing.mp3", 5);
+        var before = SyncPlannerTests.Catalogue([.. incomplete, retained]);
+        var identity = new LibraryIdentity("id", "binding");
+        using var journal = new SyncJournal(workspace.Root, "phone");
+        await journal.StartBatchAsync(
+            identity,
+            before,
+            SyncBatch.Create(before, [], incomplete),
+            [1, 2],
+            CancellationToken.None);
+        var actual = before with
+        {
+            Anchor = revisionAdvanced ? before.Anchor + 1 : before.Anchor,
+            Tracks = [.. incomplete.Skip(appliedDeletions), retained]
+        };
+        var remaining = SyncRecovery.Assess(journal.ReadPending(), actual, []);
+        Assert.That(remaining.Select(track => track.Id),
+            Is.EqualTo(incomplete.Skip(appliedDeletions).Select(track => track.Id)));
+        if (remaining.Count != 0)
+        {
+            Assert.Throws<IOException>(() => SyncEngine.RequireCompleteAudio(actual));
+            await journal.StartBatchAsync(
+                identity,
+                actual,
+                SyncBatch.Create(actual, [], remaining),
+                [3, 4],
+                CancellationToken.None,
+                replacePending: true);
+            var retried = journal.ReadPending();
+            Assert.That(SyncRecovery.Assess(retried, actual, []).Select(track => track.Id),
+                Is.EqualTo(remaining.Select(track => track.Id)));
+            actual = actual with { Anchor = actual.Anchor + 1, Tracks = [retained] };
+            Assert.That(SyncRecovery.Assess(retried, actual, []), Is.Empty);
+        }
+
+        Assert.DoesNotThrow(() => SyncEngine.RequireCompleteAudio(actual));
+        journal.Complete();
+        Assert.That(journal.HasPending, Is.False);
+    }
+
     [Test]
     public async Task Persists_Metadata_And_Audio_For_Recovery_After_The_Workspace_Is_Gone()
     {

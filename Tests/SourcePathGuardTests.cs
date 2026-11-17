@@ -12,6 +12,7 @@ namespace NoTunes.Tests;
 
 [Platform("Win")]
 [SupportedOSPlatform("windows")]
+[TestFixture]
 public sealed class SourcePathGuardTests
 {
     private string root = null!;
