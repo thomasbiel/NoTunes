@@ -27,7 +27,7 @@ internal static class ArtworkCatalogue
         SELECT s.sync_id,t.artwork_token,
           CASE WHEN EXISTS(SELECT 1 FROM best_artwork_token b
             WHERE b.entity_pid=t.entity_pid AND b.entity_type=t.entity_type
-              AND b.artwork_token=t.artwork_token AND b.artwork_source_type=t.artwork_source_type
+              AND b.available_artwork_token=t.artwork_token
               AND b.artwork_type=t.artwork_type AND b.artwork_variant_type=t.artwork_variant_type)
           THEN a.relative_path ELSE NULL END
         FROM artwork_token t JOIN item_store s ON s.item_pid=t.entity_pid

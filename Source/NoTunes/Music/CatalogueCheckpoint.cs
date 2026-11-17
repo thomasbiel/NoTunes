@@ -16,6 +16,10 @@ internal sealed record CatalogueCheckpoint(
     Dictionary<long, TrackMetadata?> TrackMetadata,
     Dictionary<long, TrackMetadata?> ProtectedMetadata)
 {
+    public CatalogueGroup[]? AlbumGroups { get; init; }
+
+    public CatalogueGroup[]? ArtistGroups { get; init; }
+
     public static CatalogueCheckpoint Capture(DeviceCatalogue catalogue)
     {
         return new CatalogueCheckpoint(
@@ -32,7 +36,11 @@ internal sealed record CatalogueCheckpoint(
             catalogue.ArtworkHighWaterMark,
             new Dictionary<long, ArtworkReference>(catalogue.TrackArtwork),
             catalogue.Tracks.ToDictionary(track => track.Id, track => track.Metadata),
-            catalogue.ProtectedItems.ToDictionary(item => item.ItemId, item => item.Metadata));
+            catalogue.ProtectedItems.ToDictionary(item => item.ItemId, item => item.Metadata))
+        {
+            AlbumGroups = catalogue.AlbumGroups is { } albums ? [.. albums] : null,
+            ArtistGroups = catalogue.ArtistGroups is { } artists ? [.. artists] : null
+        };
     }
 
     public DeviceCatalogue Restore()
@@ -46,6 +54,8 @@ internal sealed record CatalogueCheckpoint(
             new Dictionary<string, long>(this.Artists, GroupNameComparer.Instance),
             this.OccupiedIds.ToHashSet())
         {
+            AlbumGroups = this.AlbumGroups,
+            ArtistGroups = this.ArtistGroups,
             SortNames = new GroupSortNames(
                 new Dictionary<string, string?>(this.SortNames.Albums, GroupNameComparer.Instance),
                 new Dictionary<string, string?>(this.SortNames.AlbumArtists, GroupNameComparer.Instance),

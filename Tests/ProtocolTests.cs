@@ -98,9 +98,8 @@ public sealed class ProtocolTests
         });
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public async Task Lockdown_And_Atc_Use_Their_Respective_Byte_Order(bool atc)
+    [Test]
+    public async Task Lockdown_And_Atc_Use_Their_Respective_Byte_Order([Values] bool atc)
     {
         var input = ProtocolFrames.PlistMessage(atc ? Plist.Dict(("Command", "SyncAllowed")) : Plist.Dict(("Request", "QueryType")), atc);
         await using var stream = new ScriptedStream(input);

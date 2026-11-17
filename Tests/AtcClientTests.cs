@@ -31,9 +31,8 @@ public sealed class AtcClientTests
         Assert.That(peer.ResponsesRead, Is.EqualTo(4));
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public async Task Reports_Blocked_Sync_For_Disabled_Music_Or_Protected_Data(bool protectedData)
+    [Test]
+    public async Task Reports_Blocked_Sync_For_Disabled_Music_Or_Protected_Data([Values] bool protectedData)
     {
         await using var peer = new AtcPeer(Permissions(Plist.Dict(("ManualSync", true), ("DataProtected", protectedData), ("DisabledAssetTypes", protectedData ? Array.Empty<object>() : new object[] { "Music" }))));
         await using var client = new AtcClient(peer, RequestTimeout);
@@ -154,9 +153,8 @@ public sealed class AtcClientTests
         Assert.That(peer.WasDisposed, Is.True);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public async Task Disposing_The_Client_Closes_Its_Stream_After_Success_Or_Failure(bool fail)
+    [Test]
+    public async Task Disposing_The_Client_Closes_Its_Stream_After_Success_Or_Failure([Values] bool fail)
     {
         await using var peer = new AtcPeer(fail ? Plist.Dict(("Command", "SyncFailed")) : Permissions());
         await using (var client = new AtcClient(peer, RequestTimeout))

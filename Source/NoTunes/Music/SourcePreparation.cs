@@ -6,6 +6,10 @@ namespace NoTunes.Music;
 
 internal static class SourcePreparation
 {
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows() 
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+    
     private const long UnusedGroupId = 0;
 
     public static async Task<IReadOnlyList<PreparedTrack>> PrepareAsync(
@@ -29,13 +33,12 @@ internal static class SourcePreparation
         var composerSorts = new Dictionary<string, string?>(catalogue.SortNames.Composers, GroupNameComparer.Instance);
         var rootPrefix = Path.EndsInDirectorySeparator(library.Root)
             ? library.Root : library.Root + Path.DirectorySeparatorChar;
+        
         foreach (var track in plan.Add)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var fullPath = Path.GetFullPath(Path.Combine(library.Root, track.RelativePath));
-            if (!fullPath.StartsWith(rootPrefix,
-                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
-                throw new IOException("Source track escapes the library root.");
+            if (!fullPath.StartsWith(rootPrefix, PathComparison)) throw new IOException("Source track escapes the library root.");
 
             var parents = Path.GetRelativePath(library.Root, Path.GetDirectoryName(fullPath)!).Split(Path.DirectorySeparatorChar);
             var parent = library.Root;
@@ -54,9 +57,10 @@ internal static class SourcePreparation
                 {
                     await using var guarded = session.OpenRead(new FileInfo(fullPath));
                     var hasArtwork = Mp3Metadata.HasArtwork(guarded);
-                    if (guarded.Length != track.Size
-                        || File.GetLastWriteTimeUtc(guarded.SafeFileHandle) != track.LastWriteTimeUtc)
+                    if (guarded.Length != track.Size || File.GetLastWriteTimeUtc(guarded.SafeFileHandle) != track.LastWriteTimeUtc)
+                    {
                         throw new IOException($"Source changed while checking artwork: {track.RelativePath}");
+                    }
 
                     if (!hasArtwork) continue;
                 }
@@ -70,18 +74,24 @@ internal static class SourcePreparation
                     FileShare.None))
                 {
                     if (input.Length != track.Size || File.GetLastWriteTimeUtc(input.SafeFileHandle) != track.LastWriteTimeUtc)
+                    {
                         throw new IOException($"Source changed after scanning: {track.RelativePath}");
+                    }
 
                     await input.CopyToAsync(output, cancellationToken);
                     if (input.Length != track.Size || File.GetLastWriteTimeUtc(input.SafeFileHandle) != track.LastWriteTimeUtc)
+                    {
                         throw new IOException($"Source changed during preparation: {track.RelativePath}");
+                    }
                 }
 
                 await using (var copy = File.OpenRead(localPath))
                 {
                     var actual = Convert.ToHexString(await SHA256.HashDataAsync(copy, cancellationToken));
                     if (copy.Length != track.Size || !StringComparer.Ordinal.Equals(actual, track.Sha256))
+                    {
                         throw new IOException($"Source bytes changed after scanning: {track.RelativePath}");
+                    }
                 }
 
                 var metadata = Mp3Metadata.Read(localPath, track.RelativePath);
@@ -104,23 +114,36 @@ internal static class SourcePreparation
                 var albumId = UnusedGroupId;
                 if (!artworkOnly)
                 {
-                    artistId = GroupId(artists, metadata.AlbumArtist, ids);
-                    albumId = GroupId(albums, CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist), ids);
+                    artistId = GroupId(
+                        artists,
+                        metadata.AlbumArtist,
+                        ids,
+                        catalogue.ArtistGroups);
+                    
+                    albumId = GroupId(
+                        albums,
+                        CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist),
+                        ids,
+                        catalogue.AlbumGroups);
+                    
                     PreserveSortName(
                         albumSorts,
                         CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist),
                         metadata.Item,
                         MediaKeys.SortAlbum);
+                    
                     PreserveSortName(
                         albumArtistSorts,
                         metadata.AlbumArtist,
                         metadata.Item,
                         MediaKeys.SortAlbumArtist);
+                    
                     PreserveSortName(
                         artistSorts,
                         (string)metadata.Item[MediaKeys.Artist],
                         metadata.Item,
                         MediaKeys.SortArtist);
+                    
                     if (metadata.Item.TryGetValue(MediaKeys.Composer, out var composer))
                     {
                         PreserveSortName(
@@ -135,7 +158,7 @@ internal static class SourcePreparation
                     track,
                     localPath,
                     metadata,
-                    NewId(ids),
+                    LibraryPreferences.NewId(ids),
                     albumId,
                     artistId));
             }
@@ -151,14 +174,36 @@ internal static class SourcePreparation
         return result;
     }
 
-    private static long GroupId(Dictionary<string, long> groups, string name, HashSet<long> ids)
+    private static long GroupId(
+        Dictionary<string, long> groups,
+        string name,
+        HashSet<long> ids,
+        IReadOnlyList<CatalogueGroup>? rows)
     {
         if (groups.TryGetValue(name, out var id) && id == 0)
-            throw new InvalidDataException("Ambiguous music group identity: "
-                + name.Replace(CatalogueReader.GroupKeySeparator, '/'));
+        {
+            var candidates = rows ?? [];
+            var conflictingIds = candidates
+                .Where(group => GroupNameComparer.Instance.Equals(group.Key, name))
+                .Select(group => group.SyncId).Where(syncId => syncId != 0)
+                .ToHashSet();
+            
+            var conflicts = candidates
+                .Where(group => conflictingIds.Contains(group.SyncId))
+                .Select(group => $"'{group.DisplayName}' (sync ID {group.SyncId})")
+                .Distinct(StringComparer.Ordinal);
+            
+            var details = string.Join(", ", conflicts);
+            throw new InvalidDataException("Cannot add music using ambiguous group '"
+                + name.Replace(CatalogueReader.GroupKeySeparator, '/')
+                + "'. " + (details.Length == 0 ? "No unique insertion target is available."
+                    : "Conflicting entries: " + details));
+        }
 
         if (!groups.ContainsKey(name))
-            groups[name] = id = NewId(ids);
+        {
+            groups[name] = id = LibraryPreferences.NewId(ids);
+        }
 
         return id;
     }
@@ -175,18 +220,7 @@ internal static class SourcePreparation
             groups.Add(name, sort);
         }
 
-        if (sort is null) throw new InvalidDataException("Ambiguous music group sort name.");
-
-        item[key] = sort;
+        item[key] = sort ?? throw new InvalidDataException("Ambiguous music group sort name.");
     }
 
-    private static long NewId(HashSet<long> ids)
-    {
-        while (true)
-        {
-            var id = BitConverter.ToInt64(RandomNumberGenerator.GetBytes(sizeof(long)));
-            if ((ulong)id >= SyncProtocol.MinimumPersistentId && ids.Add(id))
-                return id;
-        }
-    }
 }

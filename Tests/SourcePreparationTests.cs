@@ -13,7 +13,7 @@ public sealed class SourcePreparationTests
     {
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
-        WriteTrack(
+        SourceTestData.WriteTrack(
             source.Root,
             "one.mp3",
             "Album",
@@ -47,7 +47,7 @@ public sealed class SourcePreparationTests
     {
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
-        WriteTrack(
+        SourceTestData.WriteTrack(
             source.Root,
             "one.mp3",
             "Album",
@@ -80,7 +80,7 @@ public sealed class SourcePreparationTests
     {
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
-        WriteTrack(
+        SourceTestData.WriteTrack(
             source.Root,
             "one.mp3",
             sourceAlbum,
@@ -91,7 +91,7 @@ public sealed class SourcePreparationTests
             Artists = new Dictionary<string, long> { [existingArtist] = 1011 },
             OccupiedIds = new HashSet<long> { 1001, 1002, 1011, 1012 }
         };
-        var tracks = await PrepareAsync(source.Root, catalogue, output);
+        var tracks = await SourceTestData.PrepareAsync(source.Root, catalogue, output);
         Assert.That(tracks[0].AlbumId, Is.EqualTo(1012));
         Assert.That(tracks[0].ArtistId, Is.EqualTo(1011));
     }
@@ -102,7 +102,7 @@ public sealed class SourcePreparationTests
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
         using var fixture = new CatalogueFixture();
-        WriteTrack(
+        SourceTestData.WriteTrack(
             source.Root,
             "one.mp3",
             "ALBUM",
@@ -118,7 +118,7 @@ public sealed class SourcePreparationTests
         }
 
         var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
-        var tracks = await PrepareAsync(source.Root, catalogue, output);
+        var tracks = await SourceTestData.PrepareAsync(source.Root, catalogue, output);
         var item = tracks[0].Metadata.Item;
         Assert.That(item[MediaKeys.SortAlbum], Is.EqualTo("Album, The"));
         Assert.That(item[MediaKeys.SortArtist], Is.EqualTo("Performer, The"));
@@ -131,12 +131,12 @@ public sealed class SourcePreparationTests
     {
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
-        WriteTrack(
+        SourceTestData.WriteTrack(
             source.Root,
             "one.mp3",
             "Sampler",
             "First Artist");
-        WriteTrack(
+        SourceTestData.WriteTrack(
             source.Root,
             "two.mp3",
             "Sampler",
@@ -150,7 +150,7 @@ public sealed class SourcePreparationTests
             file.Save();
         }
 
-        var tracks = await PrepareAsync(source.Root, SyncPlannerTests.Catalogue([]), output);
+        var tracks = await SourceTestData.PrepareAsync(source.Root, SyncPlannerTests.Catalogue([]), output);
         Assert.That(tracks.Select(track => track.AlbumId).Distinct().Count(), Is.EqualTo(1));
         Assert.That(tracks.Select(track => track.ArtistId).Distinct().Count(), Is.EqualTo(1));
         Assert.That(tracks.All(track => (bool)track.Metadata.Item[MediaKeys.IsCompilation]), Is.True);
@@ -163,17 +163,17 @@ public sealed class SourcePreparationTests
     {
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
-        WriteTrack(
+        SourceTestData.WriteTrack(
             source.Root,
             "one.mp3",
             "Album",
             "Artist");
-        WriteTrack(
+        SourceTestData.WriteTrack(
             source.Root,
             "two.mp3",
             album,
             artist);
-        var tracks = await PrepareAsync(source.Root, SyncPlannerTests.Catalogue([]), output);
+        var tracks = await SourceTestData.PrepareAsync(source.Root, SyncPlannerTests.Catalogue([]), output);
         Assert.That(tracks.Select(track => track.AlbumId).Distinct().Count(), Is.EqualTo(matches ? 1 : 2));
         Assert.That(tracks.Select(track => track.ArtistId).Distinct().Count(), Is.EqualTo(matches ? 1 : 2));
     }
@@ -248,37 +248,5 @@ public sealed class SourcePreparationTests
         var path = Path.Combine(source.Root, "fake.mp3");
         File.WriteAllText(path, "Not an MP3");
         Assert.Throws<InvalidDataException>(() => Mp3Metadata.Read(path, "fake.mp3"));
-    }
-
-    private static void WriteTrack(string root, string name, string album, string artist)
-    {
-        var path = Path.Combine(root, name);
-        File.Copy(SyncTestData.FixturePath, path);
-        using var file = TagLib.File.Create(path);
-        file.Tag.Album = album;
-        file.Tag.Performers = [artist];
-        file.Tag.AlbumArtists = [artist];
-        file.Save();
-    }
-
-    private static async Task<IReadOnlyList<PreparedTrack>> PrepareAsync(
-        string root,
-        DeviceCatalogue catalogue,
-        SyncWorkspace output)
-    {
-        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider();
-        var library = await services.GetRequiredService<SourceScanner>().ScanAsync(root, CancellationToken.None);
-        return await SourcePreparation.PrepareAsync(
-            library,
-            new SyncPlan(
-                "phone",
-                catalogue.Anchor,
-                library.Tracks,
-                [],
-                0),
-            catalogue,
-            services.GetRequiredService<ISourceFileSystem>(),
-            output,
-            CancellationToken.None);
     }
 }

@@ -1,8 +1,5 @@
-using Microsoft.Extensions.DependencyInjection;
 using NoTunes.Apple;
-using NoTunes.Cli;
 using NoTunes.Music;
-using NoTunes.Platform;
 using NUnit.Framework;
 
 namespace NoTunes.Tests;
@@ -10,7 +7,6 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class SyncEngineIntegrationTests
 {
-    private const int RequestTimeoutSeconds = 5;
     private const int RunTimeoutSeconds = 90;
     private const string PendingFilePattern = "pending.json";
     private const string VerifiedFilePattern = "verified-*.json";
@@ -60,18 +56,18 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(
             result.Plan.Delete.Select(track => track.Id),
             Is.EqualTo([SimulatedSyncCatalogue.ExistingTrackId]));
-        
+
         Assert.That(result.VerifiedBatches, Is.EqualTo(3));
         Assert.That(
             device.Batches.Select(batch => batch.Length),
             Is.EqualTo([SyncProtocol.MaxTrackChanges, 1, 1]));
-        
+
         Assert.That(device.Batches.Take(2).SelectMany(batch => batch)
             .All(operation => operation.Text(MediaKeys.Operation) == MediaOperations.InsertTrack), Is.True);
         Assert.That(
-            device.Batches.Last().Single().Text(MediaKeys.Operation), 
+            device.Batches.Last().Single().Text(MediaKeys.Operation),
             Is.EqualTo(MediaOperations.DeleteTrack));
-        
+
         Assert.That(after.Anchor, Is.EqualTo(before.Anchor + result.VerifiedBatches));
         Assert.That(after.Tracks, Has.Count.EqualTo(additions));
         Assert.That(after.ProtectedItems, Is.EqualTo(before.ProtectedItems));
@@ -105,7 +101,7 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(
             device.Batches.Single().Single().Text(MediaKeys.Operation),
             Is.EqualTo(MediaOperations.UpdateTrack));
-        
+
         Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
         Assert.That(after.ProtectedItems, Is.EqualTo(before.ProtectedItems));
         Assert.That(device.Files[SimulatedSyncCatalogue.ExistingTrackPath], Is.EqualTo(bytes));
@@ -113,7 +109,7 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(
             device.Files[SyncPaths.ArtworkOriginals + artwork.Path],
             Is.EqualTo(Mp3Metadata.Read(path, Path.GetFileName(path)).Artwork!.Bytes));
-        
+
         AssertSettled(device, state.Root, 1);
     }
 
@@ -137,7 +133,7 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(
             device.Batches.Select(batch => batch.Single().Text(MediaKeys.Operation)),
             Is.EqualTo([MediaOperations.InsertTrack, MediaOperations.UpdateTrack]));
-        
+
         Assert.That(after.Tracks.Single(track => track.Id == SimulatedSyncCatalogue.ExistingTrackId), Is.EqualTo(before.Tracks.Single()));
         Assert.That(after.TrackArtwork.Values.Select(cover => cover.CacheId).Distinct().Count(), Is.EqualTo(2));
         foreach (var track in after.Tracks)
@@ -178,7 +174,7 @@ public sealed class SyncEngineIntegrationTests
             Assert.That(
                 device.Batches.Select(batch => batch.Single().Text(MediaKeys.Operation)),
                 Is.EqualTo([MediaOperations.InsertTrack, MediaOperations.DeleteTrack, MediaOperations.InsertTrack]));
-            
+
             Assert.That(device.Batches[1].Single().Number(MediaKeys.PersistentId), Is.EqualTo(interruptedId));
             Assert.That(after.Tracks.Single().Id, Is.Not.EqualTo(interruptedId));
             Assert.That(result.VerifiedBatches, Is.EqualTo(1));
@@ -223,7 +219,7 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(
             device.Batches.Select(batch => batch.Single().Text(MediaKeys.Operation)),
             Is.EqualTo([MediaOperations.InsertTrack, MediaOperations.DeleteTrack, MediaOperations.InsertTrack]));
-        
+
         Assert.That(after.Tracks, Has.Count.EqualTo(1));
         Assert.That(after.Tracks.Single().Id, Is.Not.EqualTo(insertedId));
         Assert.That(result.VerifiedBatches, Is.EqualTo(1));
@@ -248,7 +244,7 @@ public sealed class SyncEngineIntegrationTests
             source.Root,
             state.Root,
             dryRun: true);
-        
+
         Assert.That(result.DryRun, Is.True);
         Assert.That(result.VerifiedBatches, Is.Zero);
         Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
@@ -286,6 +282,29 @@ public sealed class SyncEngineIntegrationTests
     }
 
     [Test]
+    public async Task Reconciles_A_Committed_Deletion_Without_Starting_Another_Sync_Session()
+    {
+        using var source = new SyncWorkspace();
+        using var state = new SyncWorkspace();
+        using var device = new SimulatedSyncDevice(keepExistingTrack: true)
+        {
+            Interruption = SyncInterruptionPoint.AfterMetadata,
+            InterruptAtBatch = 2
+        };
+        CreateSource(source.Root, 1);
+        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
+        var pending = ReadPending(state.Root);
+        Assert.That(pending.Additions, Is.Empty);
+        Assert.That(pending.Deletions.Single().Id, Is.EqualTo(SimulatedSyncCatalogue.ExistingTrackId));
+        var started = device.StartedSessions;
+        var result = await RunAsync(device, source.Root, state.Root);
+        Assert.That(result.Plan.HasChanges, Is.False);
+        Assert.That(device.StartedSessions, Is.EqualTo(started),
+            "Settling an observed deletion must not request a new media import.");
+        AssertSettled(device, state.Root, 2);
+    }
+
+    [Test]
     public async Task Retains_The_Journal_And_Obsolete_Tracks_When_Permanent_Audio_Verification_Fails()
     {
         using var source = new SyncWorkspace();
@@ -309,25 +328,11 @@ public sealed class SyncEngineIntegrationTests
         bool dryRun = false)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(RunTimeoutSeconds));
-        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider();
-        var engine = new SyncEngine(
-            services.GetRequiredService<SourceScanner>(),
-            services.GetRequiredService<ISourceFileSystem>(),
-            device.CreateTransport(),
-            TextWriter.Null)
-        {
-            OpenConnection = device.OpenAsync
-        };
-
-        var syncOptions = new SyncOptions
-        {
-            Folder = source,
-            StateFolder = state,
-            Timeout = RequestTimeoutSeconds,
-            DryRun = dryRun
-        };
-
-        return await engine.RunAsync(syncOptions, deadline.Token);
+        return await device.RunAsync(
+            source,
+            state,
+            dryRun,
+            deadline.Token);
     }
 
     private static string CreateSource(string root, int count, bool artwork = false)

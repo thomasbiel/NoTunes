@@ -221,13 +221,13 @@ public sealed class SyncEngine(
             cancellationToken,
             replacePending);
 
-        await WriteVerifiedAsync(
+        await DeviceStaging.WriteVerifiedAsync(
             phone.Afc,
             SyncPaths.Metadata,
             operation,
             cancellationToken);
 
-        await WriteVerifiedAsync(
+        await DeviceStaging.WriteVerifiedAsync(
             phone.Afc,
             SyncPaths.Metadata + SyncPaths.SignatureSuffix,
             signature,
@@ -351,8 +351,12 @@ public sealed class SyncEngine(
                 cancellationToken);
 
             await RequireEmptyStagingAsync(phone.Afc, cancellationToken);
-            var session = new AtcSyncSession(phone.Atc, error);
-            using var signer = await session.BeginAsync(pending.Identity, current.Anchor, cancellationToken);
+            if (additions.Length != 0)
+            {
+                var session = new AtcSyncSession(phone.Atc, error);
+                using var signer = await session.BeginAsync(pending.Identity, current.Anchor, cancellationToken);
+            }
+
             RequireUnchanged(current, await ReadCatalogueAsync(phone.Afc, cancellationToken));
             foreach (var track in additions)
             {
@@ -565,24 +569,6 @@ public sealed class SyncEngine(
         }
     }
 
-    private static async Task WriteVerifiedAsync(
-        AfcClient afc,
-        string path,
-        byte[] content,
-        CancellationToken cancellationToken)
-    {
-        using var input = new MemoryStream(content, writable: false);
-        await afc.WriteNewFileAsync(
-            path,
-            input,
-            content.Length,
-            cancellationToken);
-
-        var actual = await afc.ReadFileAsync(path, content.Length, cancellationToken);
-        if (!actual.AsSpan().SequenceEqual(content))
-            throw new IOException("Staged sync metadata failed read-back verification.");
-    }
-
     private static async Task ValidateSavedAnchorsAsync(
         AfcClient afc,
         DeviceCatalogue catalogue,
@@ -598,7 +584,7 @@ public sealed class SyncEngine(
 
     private static async Task<DeviceCatalogue> ReadCatalogueAsync(AfcClient afc, CancellationToken cancellationToken)
     {
-        var snapshot = await CatalogueSnapshot.CaptureAsync(afc, cancellationToken);
+        var snapshot = await CatalogueSnapshot.CaptureWithRetryAsync(afc, cancellationToken);
         var catalogue = await CatalogueReader.ReadAsync(snapshot, cancellationToken);
         return catalogue with
         {

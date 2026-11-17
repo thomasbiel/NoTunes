@@ -13,13 +13,68 @@ public sealed class ArtworkDatabaseTests
     private const int ListBytes = 92;
     private const int ImageBytes = 152;
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public void Reserves_Above_Both_The_Saved_Counter_And_Image_Ids(bool bigEndian)
+    [Test]
+    public void Reserves_Above_Both_The_Saved_Counter_And_Image_Ids([Values] bool bigEndian)
     {
         var bytes = Fixture(bigEndian, 101, 700);
         Assert.That(ArtworkDatabase.Highest(bytes), Is.EqualTo(700));
         Assert.That(ArtworkDatabase.Highest(Fixture(bigEndian, 900, 700)), Is.EqualTo(900));
+    }
+
+    [Test]
+    public void Reads_The_Legacy_ArtworkDb_Version_From_Existing_Host_Libraries([Values] bool bigEndian)
+    {
+        var bytes = Fixture(bigEndian, 101, 700);
+        if (bigEndian)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(16), 2);
+        }
+        else
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16), 2);
+        }
+
+        Assert.That(ArtworkDatabase.Highest(bytes), Is.EqualTo(700));
+    }
+
+    [Test]
+    public void Reserves_Shared_Image_Ids_Once_Across_Several_Track_Records([Values] bool bigEndian)
+    {
+        const int lengthOffset = 8;
+        var first = Fixture(bigEndian, 101, 700);
+        var bytes = new byte[first.Length + ImageBytes];
+        first.CopyTo(bytes, 0);
+        first.AsSpan(RootBytes + SectionBytes + ListBytes, ImageBytes).CopyTo(bytes.AsSpan(first.Length));
+        Number(lengthOffset, (uint)bytes.Length);
+        Number(RootBytes + lengthOffset, (uint)(bytes.Length - RootBytes));
+        Number(RootBytes + SectionBytes + lengthOffset, 2);
+        Assert.That(ArtworkDatabase.Highest(bytes), Is.EqualTo(700));
+
+        void Number(int offset, uint value)
+        {
+            if (bigEndian)
+            {
+                BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(offset), value);
+            }
+            else
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
+            }
+        }
+    }
+
+    [Test]
+    public void Rejects_Unsupported_ArtworkDb_Versions([Values(0U, 1U, 3U, 5U, 7U)] uint version)
+    {
+        var bytes = Fixture(false, 101, 700);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16), version);
+        Assert.Throws<InvalidDataException>(() => ArtworkDatabase.Highest(bytes));
+    }
+
+    [Test]
+    public void Rejects_Zero_Image_Ids()
+    {
+        Assert.Throws<InvalidDataException>(() => ArtworkDatabase.Highest(Fixture(false, 101, 0)));
     }
 
     [Test]

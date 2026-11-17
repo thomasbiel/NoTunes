@@ -6,6 +6,16 @@ namespace NoTunes.Tests;
 
 internal sealed class CatalogueFixture : IDisposable
 {
+    private const string ArtworkSchema = """
+        CREATE TABLE artwork(artwork_token TEXT,artwork_source_type INTEGER,relative_path TEXT,
+            artwork_type INTEGER,artwork_variant_type INTEGER);
+        CREATE TABLE artwork_token(entity_pid INTEGER,artwork_token TEXT,artwork_source_type INTEGER,
+            artwork_type INTEGER,entity_type INTEGER,artwork_variant_type INTEGER);
+        CREATE TABLE best_artwork_token(entity_pid INTEGER,entity_type INTEGER,artwork_type INTEGER,
+            available_artwork_token TEXT,fetchable_artwork_token TEXT,fetchable_artwork_source_type INTEGER,
+            artwork_variant_type INTEGER);
+        """;
+
     private const string Schema = """
         PRAGMA user_version=2410000;
         CREATE TABLE db_info(db_pid INTEGER,primary_container_pid INTEGER);
@@ -73,6 +83,11 @@ internal sealed class CatalogueFixture : IDisposable
         using var command = this.Connection.CreateCommand();
         command.CommandText = sql;
         command.ExecuteNonQuery();
+    }
+
+    public void AddArtworkSchema()
+    {
+        this.Execute(ArtworkSchema);
     }
 
     public void ReplaceLocalTracks(int count)

@@ -193,6 +193,10 @@ hashed on the host. Only files whose size occurs in the source need hashing.
 No device-side file-hash operation is used. Diagnostics go to stderr; `--json`
 prints the plan, dry-run flag and verified batch count to stdout.
 
+Sync catalogue checks retry transient read inconsistencies up to five times.
+Every successful check still requires two matching database/WAL captures and
+stable file attributes. Retries repeat reads, never signed sync operations.
+
 Before writes, all new source files are copied to a private temporary directory,
 checked against the scan hashes and read with TagLibSharp. Source access continues
 to use the platform's directory and file guards. This requires temporary disk
@@ -281,7 +285,9 @@ picture. JPEG bytes are retained; PNG and other formats supported by the managed
 stb decoder are converted to JPEG with transparency flattened onto white. Images
 are bounded to 32 MiB and 16 million pixels and validated before staging. Cache
 IDs are allocated above live local artwork tokens and the saved ArtworkDB counter
-and image IDs. Covers are staged and read back separately, then verified against
+and image IDs. Saved ArtworkDB versions 0.2 and 0.6 are supported, including
+image IDs shared by multiple track records. Covers are staged and read back
+separately, then verified against
 the track's registered token, preferred artwork token and permanent JPEG original.
 The source MP3 is unchanged. The image codecs and their licenses are documented in
 `THIRD-PARTY-NOTICES.md`.
@@ -292,6 +298,17 @@ set the album artist in its MP3 tags first. Existing album, artist and composer
 sort names are preserved when new tracks join their groups. ASCII case variants
 reuse group identities; names containing non-ASCII characters require an exact
 match in each album or artist name.
+
+Existing album and album-artist rows may share a nonzero host sync ID, including
+rows with different name spellings. NoTunes reads those rows separately by their
+internal database IDs and preserves existing track assignments. Unchanged tracks,
+unrelated additions and artwork-only updates remain supported. An audio addition
+that would reuse a shared sync ID or an ambiguous name stops preparation before
+new device changes are staged; the error identifies the conflicting groups.
+NoTunes does not merge or rename existing groups. Journals retain the individual
+group rows so recovery and batch verification can detect identity or membership
+changes. Older checkpoints without that evidence remain usable with unambiguous
+group sync IDs.
 
 ## Device prerequisites
 
@@ -361,6 +378,19 @@ advanced from Media anchor 0 to 1 and then 2, and returned from 1,886 to the sam
 the configured network share has not been run. Regression tests cover the
 phone's missing initial ATC anchor and its older iTunesCDB format 115.
 
+On 17 November 2026 the compatibility changes were tested on that phone's
+existing library, including shared album/album-artist sync IDs, its actual
+`best_artwork_token` schema and saved ArtworkDB version 0.2. One independent
+synthetic MP3 was inserted and verified by SHA-256, then removed. The Media anchor
+advanced from 2 to 3 and 4. A changing catalogue interrupted deletion verification;
+the saved journal was reconciled after stable captures, without replaying the
+deletion or requesting a new media import. The final comparison preserved all
+1,885 original local tracks, 189 protected entries and every original album and
+album-artist row, including their metadata and track assignments. No test title
+or pending test journal remained. No artwork was uploaded in this physical test.
+iOS retained one additional empty album row named `NoTunes USB verification`;
+no track references it. That receiver-managed row was not deleted directly.
+
 Apple pairing certificates may have an empty issuer name. BouncyCastle 2.7
 [rejects that form during ordinary X.509 parsing](https://github.com/bcgit/bc-csharp/blob/release-2.7.0/crypto/src/asn1/x509/TBSCertificateStructure.cs).
 NoTunes uses a compatibility
@@ -372,8 +402,10 @@ authentication, unchanged certificate bytes and rejection of mismatched pins.
 ## Remaining work
 
 Playlist synchronization and detailed MP3 gapless timing remain unimplemented.
-Initialization, recovery and artwork registration have automated simulation tests
-on Windows and Linux; these new paths still require physical-iPhone validation.
+Initialization, compensating recovery and artwork registration have automated
+simulation tests on Windows and Linux; these paths still require physical-iPhone
+validation. Reconciliation of an already committed deletion was exercised on the
+physical device as described above.
 Syncing a NoTunes-initialized library with Apple's host software may replace the
 music that NoTunes transferred, so keep the source music and persistent state.
 

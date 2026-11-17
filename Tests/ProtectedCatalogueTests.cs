@@ -52,9 +52,8 @@ public sealed class ProtectedCatalogueTests
         Assert.Throws<IOException>(() => SyncEngine.RequireUnchanged(before, after));
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public async Task Retains_Protected_Purchases_Without_Complete_Location_Or_Sync_Metadata(bool missingStore)
+    [Test]
+    public async Task Retains_Protected_Purchases_Without_Complete_Location_Or_Sync_Metadata([Values] bool missingStore)
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute("""

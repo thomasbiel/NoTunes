@@ -19,14 +19,21 @@ internal static class CatalogueVerification
             after,
             additions,
             deletedIds);
-        
+
         RequireRetainedArtwork(
             before,
             after,
             additions,
             deletedIds);
 
-        if (!PreservesGroups(before, after, allowRemovedGroups: true)) throw new IOException(MetadataMismatchMessage);
+        if (!PreservesGroups(
+            before,
+            after,
+            allowRemovedGroups: deletions.Count != 0,
+            allowNewGroups: additions.Any(track => !track.IsArtworkOnly)))
+        {
+            throw new IOException(MetadataMismatchMessage);
+        }
 
         var actualTracks = after.Tracks.ToDictionary(track => track.Id);
         RequireRetainedTracks(before.Tracks, actualTracks, deletedIds);
@@ -77,7 +84,7 @@ internal static class CatalogueVerification
             .Where(id => !deletedIds.Contains(id))
             .Concat(additions.Where(track => !track.IsArtworkOnly).Select(track => track.Id))
             .ToHashSet();
-        
+
         if (!expectedIds.SetEquals(after.Tracks.Select(track => track.Id)))
         {
             throw new IOException("The iPhone track inventory differs from the requested changes.");
@@ -172,11 +179,54 @@ internal static class CatalogueVerification
     private static bool PreservesGroups(
         DeviceCatalogue before,
         DeviceCatalogue after,
-        bool allowRemovedGroups)
+        bool allowRemovedGroups,
+        bool allowNewGroups = false)
     {
-        return after.SortNames.Preserves(before.SortNames, allowRemovedGroups)
-            && PreservesGroupIds(before.Albums, after.Albums, allowRemovedGroups)
-            && PreservesGroupIds(before.Artists, after.Artists, allowRemovedGroups);
+        var completeRows = before.AlbumGroups is not null && before.ArtistGroups is not null
+            && after.AlbumGroups is not null && after.ArtistGroups is not null;
+        // Name maps classify insertion targets; collection can change that classification without changing a row.
+        var preservesNames = completeRows
+            ? after.SortNames.PreservesItemGroups(before.SortNames, allowRemovedGroups)
+            : after.SortNames.Preserves(before.SortNames, allowRemovedGroups)
+                && PreservesGroupIds(before.Albums, after.Albums, allowRemovedGroups)
+                && PreservesGroupIds(before.Artists, after.Artists, allowRemovedGroups);
+        return preservesNames
+            && PreservesGroupRows(
+                before.AlbumGroups,
+                after.AlbumGroups,
+                allowRemovedGroups,
+                allowNewGroups)
+            && PreservesGroupRows(
+                before.ArtistGroups,
+                after.ArtistGroups,
+                allowRemovedGroups,
+                allowNewGroups);
+    }
+
+    private static bool PreservesGroupRows(
+        IReadOnlyList<CatalogueGroup>? expected,
+        IReadOnlyList<CatalogueGroup>? actual,
+        bool allowRemovedGroups,
+        bool allowNewGroups)
+    {
+        if (expected is null)
+        {
+            // Older checkpoints predate row snapshots and could not contain shared sync IDs.
+            return actual is null || actual.Where(group => group.SyncId != 0).GroupBy(group => group.SyncId)
+                .All(group => group.Count() == 1);
+        }
+
+        if (actual is null || !allowRemovedGroups && !allowNewGroups && expected.Count != actual.Count) return false;
+
+        var rows = actual.ToDictionary(group => group.RowId);
+        if (!allowNewGroups)
+        {
+            var expectedIds = expected.Select(group => group.RowId).ToHashSet();
+            if (rows.Keys.Any(id => !expectedIds.Contains(id))) return false;
+        }
+
+        return expected.All(group => rows.TryGetValue(group.RowId, out var row)
+            ? group.Matches(row) : allowRemovedGroups);
     }
 
     private static bool PreservesGroupIds(

@@ -6,9 +6,8 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class SyncPlannerTests
 {
-    [TestCase(false)]
-    [TestCase(true)]
-    public async Task Rejects_An_Already_Cancelled_Plan_With_An_Empty_Device_Catalogue(bool hasSource)
+    [Test]
+    public async Task Rejects_An_Already_Cancelled_Plan_With_An_Empty_Device_Catalogue([Values] bool hasSource)
     {
         var source = new SourceLibrary("source", hasSource ? [Track("new.mp3", "A")] : []);
         using var cancellation = new CancellationTokenSource();

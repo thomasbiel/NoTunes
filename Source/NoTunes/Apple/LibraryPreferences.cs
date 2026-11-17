@@ -85,12 +85,12 @@ internal static class LibraryPreferences
         return Plist.ToXml(values);
     }
 
-    public static long NewId()
+    public static long NewId(ISet<long>? occupied = null)
     {
         while (true)
         {
             var id = BitConverter.ToInt64(RandomNumberGenerator.GetBytes(sizeof(long)));
-            if ((ulong)id >= SyncProtocol.MinimumPersistentId) return id;
+            if ((ulong)id >= SyncProtocol.MinimumPersistentId && (occupied is null || occupied.Add(id))) return id;
         }
     }
 }

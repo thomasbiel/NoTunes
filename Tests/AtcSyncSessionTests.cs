@@ -1,4 +1,5 @@
 using NoTunes.Apple;
+using NoTunes.Music;
 using NUnit.Framework;
 
 namespace NoTunes.Tests;
@@ -9,26 +10,12 @@ public sealed class AtcSyncSessionTests
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(1);
     private static readonly LibraryIdentity Identity = new("0011223344556677", "binding");
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public async Task Transfers_Audio_Without_Cover_With_Or_Without_Existing_Airlock(bool airlockExists)
+    [Test]
+    public async Task Transfers_Audio_Without_Cover_With_Or_Without_Existing_Airlock([Values] bool airlockExists)
     {
         var track = SyncTestData.Track();
         Assert.That(track.Metadata.Artwork, Is.Null);
-        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var peer = new AtcPeer(
-            SyncTestData.Capabilities(),
-            SyncTestData.Allowed(),
-            SyncTestData.Ready(),
-            SyncTestData.Message(AtcCommands.AssetManifest, SyncTestData.Manifest(SyncTestData.Asset(track.AssetId))),
-            SyncTestData.Message(AtcCommands.SyncFinished))
-        {
-            BeforeFrameAsync = (frame, token) => frame >= 4 ? completed.Task.WaitAsync(token) : Task.CompletedTask,
-            OnMessageSent = message =>
-            {
-                if (message.Text(AtcKeys.Command) == AtcCommands.FileComplete) completed.TrySetResult();
-            }
-        };
+        var peer = CreateCompletingAudioPeer(track, out _);
         var files = new AfcPeer { AllowWrites = true, RequireParentDirectories = true };
         if (airlockExists)
         {
@@ -169,20 +156,7 @@ public sealed class AtcSyncSessionTests
     public async Task Allows_Atc_Silence_During_Upload_And_Applies_The_Timeout_Afterward()
     {
         var track = SyncTestData.Track();
-        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var peer = new AtcPeer(
-            SyncTestData.Capabilities(),
-            SyncTestData.Allowed(),
-            SyncTestData.Ready(),
-            SyncTestData.Message(AtcCommands.AssetManifest, SyncTestData.Manifest(SyncTestData.Asset(track.AssetId))),
-            SyncTestData.Message(AtcCommands.SyncFinished))
-        {
-            BeforeFrameAsync = (frame, token) => frame >= 4 ? completed.Task.WaitAsync(token) : Task.CompletedTask,
-            OnMessageSent = message =>
-            {
-                if (message.Text(AtcKeys.Command) == AtcCommands.FileComplete) completed.TrySetResult();
-            }
-        };
+        var peer = CreateCompletingAudioPeer(track, out var completed);
         var files = new AfcPeer
         {
             AllowWrites = true,
@@ -199,7 +173,7 @@ public sealed class AtcSyncSessionTests
             [track],
             new HashSet<long>(),
             CancellationToken.None);
-        Assert.That(completed.Task.IsCompletedSuccessfully, Is.True);
+        Assert.That(completed.IsCompletedSuccessfully, Is.True);
     }
 
     [Test]
@@ -424,5 +398,26 @@ public sealed class AtcSyncSessionTests
             new HashSet<long>(),
             CancellationToken.None));
         Assert.That(files.Opens, Is.Zero);
+    }
+
+    private static AtcPeer CreateCompletingAudioPeer(PreparedTrack track, out Task completed)
+    {
+        const int terminalFrameIndex = 4;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        completed = completion.Task;
+        return new AtcPeer(
+            SyncTestData.Capabilities(),
+            SyncTestData.Allowed(),
+            SyncTestData.Ready(),
+            SyncTestData.Message(AtcCommands.AssetManifest, SyncTestData.Manifest(SyncTestData.Asset(track.AssetId))),
+            SyncTestData.Message(AtcCommands.SyncFinished))
+        {
+            BeforeFrameAsync = (frame, token) => frame >= terminalFrameIndex
+                ? completion.Task.WaitAsync(token) : Task.CompletedTask,
+            OnMessageSent = message =>
+            {
+                if (message.Text(AtcKeys.Command) == AtcCommands.FileComplete) completion.TrySetResult();
+            }
+        };
     }
 }

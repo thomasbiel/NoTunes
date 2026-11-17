@@ -26,10 +26,11 @@ internal static class CatalogueReader
     private const int GroupIdColumn = 0;
     private const int GroupNameColumn = 1;
     private const int GroupAlbumArtistColumn = 2;
+    private const int GroupRowIdColumn = 3;
+    private const int GroupSortNameColumn = 4;
+    private const int GroupArtistRowIdColumn = 5;
     private const int SortNameColumn = 0;
-    private const int SortArtistColumn = 1;
-    private const int AlbumSortValueColumn = 2;
-    private const int OtherSortValueColumn = 1;
+    private const int SortValueColumn = 1;
     internal const char GroupKeySeparator = '\0';
     private const long MissingBaseLocationId = 0;
     private const string ConfigureSql = "PRAGMA trusted_schema=OFF; PRAGMA query_only=ON;";
@@ -43,14 +44,14 @@ internal static class CatalogueReader
         SELECT sync_id FROM item_store WHERE sync_id<>0
         UNION SELECT sync_id FROM composer WHERE sync_id<>0
         """;
-    private const string AlbumsSql = "SELECT a.sync_id,a.album,ar.album_artist FROM album a LEFT JOIN album_artist ar USING(album_artist_pid)";
-    private const string ArtistsSql = "SELECT sync_id,album_artist FROM album_artist";
-    private const string AlbumSortsSql = """
-        SELECT a.album,ar.album_artist,COALESCE(a.sort_album,a.album,'')
-        FROM album a LEFT JOIN album_artist ar USING(album_artist_pid)
+    private const string AlbumsSql = """
+        SELECT a.sync_id,a.album,ar.album_artist,a.album_pid,COALESCE(a.sort_album,a.album,''),a.album_artist_pid
+        FROM album a LEFT JOIN album_artist ar USING(album_artist_pid) ORDER BY a.album_pid
         """;
-    private const string AlbumArtistSortsSql =
-        "SELECT album_artist,COALESCE(sort_album_artist,album_artist,'') FROM album_artist";
+    private const string ArtistsSql = """
+        SELECT sync_id,album_artist,NULL,album_artist_pid,COALESCE(sort_album_artist,album_artist,''),NULL
+        FROM album_artist ORDER BY album_artist_pid
+        """;
     private const string ArtistSortsSql = "SELECT item_artist,COALESCE(sort_item_artist,item_artist,'') FROM item_artist";
     private const string ComposerSortsSql = "SELECT composer,COALESCE(sort_composer,composer,'') FROM composer";
     private const string ItemsSql = """
@@ -111,16 +112,23 @@ internal static class CatalogueReader
             Execute(connection, ConfigureSql);
 
             if (!StringComparer.Ordinal.Equals(Scalar(connection, IntegritySql), IntegritySuccess))
+            {
                 throw new InvalidDataException("The captured music catalogue failed SQLite integrity checks.");
+            }
+
             if (long.Parse(Scalar(connection, VersionSql), CultureInfo.InvariantCulture) < MinimumSchemaVersion)
+            {
                 throw new InvalidDataException("Unsupported iPhone music catalogue schema.");
+            }
 
             await using var ids = connection.CreateCommand();
             ids.CommandText = IdentitySql;
             await using var rows = ids.ExecuteReader();
             var initialized = rows.Read();
             if (!initialized && !allowUninitialized)
+            {
                 throw new IOException("The music library has not been initialized. Run 'notunes init' first.");
+            }
 
             var databaseId = initialized ? rows.GetInt64(DatabaseIdColumn) : 0;
             var containerId = initialized ? rows.GetInt64(ContainerIdColumn) : 0;
@@ -175,7 +183,9 @@ internal static class CatalogueReader
                 if (id is { } occupiedId && occupiedId != 0)
                 {
                     if (!trackIds.Add(occupiedId))
+                    {
                         throw new InvalidDataException("Ambiguous track sync identity in the music catalogue.");
+                    }
 
                     occupied.Add(occupiedId);
                 }
@@ -183,7 +193,7 @@ internal static class CatalogueReader
                 // Preserve cloud purchases, videos and other nonlocal/nonmusic rows.
                 if (id is null or 0 || sagaId != 0 || mediaType != MusicMediaType || remoteLocation != 0)
                 {
-                    protectedItems.Add(new ProtectedCatalogueItem(
+                    var item = new ProtectedCatalogueItem(
                         reader.GetInt64(ItemIdColumn),
                         id,
                         sagaId,
@@ -192,10 +202,9 @@ internal static class CatalogueReader
                         OptionalText(reader, TitleColumn),
                         OptionalText(reader, BasePathColumn),
                         OptionalText(reader, FilenameColumn),
-                        OptionalNumber(reader, FileSizeColumn))
-                    {
-                        Metadata = ReadTrackMetadata(reader)
-                    });
+                        OptionalNumber(reader, FileSizeColumn)) { Metadata = ReadTrackMetadata(reader) };
+
+                    protectedItems.Add(item);
                     continue;
                 }
 
@@ -216,17 +225,15 @@ internal static class CatalogueReader
                     }
                 }
 
-                if (size < 0)
-                    throw new InvalidDataException("Unsafe or ambiguous music catalogue entry.");
+                if (size < 0) throw new InvalidDataException("Unsafe or ambiguous music catalogue entry.");
 
-                tracks.Add(new DeviceTrack(
+                var track = new DeviceTrack(
                     id.Value,
                     reader.GetString(TitleColumn),
                     fullPath,
-                    size)
-                {
-                    Metadata = ReadTrackMetadata(reader)
-                });
+                    size) { Metadata = ReadTrackMetadata(reader) };
+
+                tracks.Add(track);
             }
 
             await using var containers = connection.CreateCommand();
@@ -242,21 +249,25 @@ internal static class CatalogueReader
             }
 
             if (initialized && !hasPrimaryContainer)
+            {
                 throw new IOException("The music library is incomplete: its primary container is missing.");
+            }
 
             return ArtworkCatalogue.Read(connection, new DeviceCatalogue(
                 databaseId,
                 containerId,
                 anchor,
                 tracks,
-                albums,
-                artists,
+                albums.Ids,
+                artists.Ids,
                 occupied)
             {
+                AlbumGroups = albums.Rows,
+                ArtistGroups = artists.Rows,
                 ProtectedItems = protectedItems,
                 SortNames = new GroupSortNames(
-                    ReadSortNames(connection, AlbumSortsSql, true),
-                    ReadSortNames(connection, AlbumArtistSortsSql),
+                    ReadSortNames(albums.Rows),
+                    ReadSortNames(artists.Rows),
                     ReadSortNames(connection, ArtistSortsSql),
                     ReadSortNames(connection, ComposerSortsSql))
             });
@@ -275,6 +286,11 @@ internal static class CatalogueReader
     private static string? OptionalText(DbDataReader reader, int column)
     {
         return reader.IsDBNull(column) ? null : reader.GetString(column);
+    }
+
+    private static string TextOrEmpty(DbDataReader reader, int column)
+    {
+        return OptionalText(reader, column) ?? string.Empty;
     }
 
     private static TrackMetadata ReadTrackMetadata(DbDataReader reader)
@@ -327,7 +343,7 @@ internal static class CatalogueReader
         }
     }
 
-    private static Dictionary<string, long> ReadGroups(
+    private static (Dictionary<string, long> Ids, IReadOnlyList<CatalogueGroup> Rows) ReadGroups(
         SQLiteConnection connection,
         string sql,
         HashSet<long> occupied,
@@ -336,27 +352,44 @@ internal static class CatalogueReader
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         using var rows = command.ExecuteReader();
-        var result = new Dictionary<string, long>(GroupNameComparer.Instance);
-        var groupIds = new HashSet<long>();
+        var groups = new List<CatalogueGroup>();
+        var rowIds = new HashSet<long>();
         while (rows.Read())
         {
             var id = rows.GetInt64(GroupIdColumn);
-            if (id == 0) continue;
+            var rowId = rows.GetInt64(GroupRowIdColumn);
+            if (!rowIds.Add(rowId)) throw new InvalidDataException("Ambiguous internal music group identity.");
 
-            if (!groupIds.Add(id))
-                throw new InvalidDataException("Ambiguous group sync identity in the music catalogue.");
+            if (id != 0) occupied.Add(id);
 
-            occupied.Add(id);
-            var name = rows.IsDBNull(GroupNameColumn) ? string.Empty : rows.GetString(GroupNameColumn);
-            var key = album ? GroupKey(name,
-                rows.IsDBNull(GroupAlbumArtistColumn) ? string.Empty : rows.GetString(GroupAlbumArtistColumn)) : name;
-            if (!result.TryAdd(key, id) && result[key] != id)
-            {
-                result[key] = 0; // Duplicate labels need a fresh identity; never choose an arbitrary group.
-            }
+            var name = TextOrEmpty(rows, GroupNameColumn);
+            var artist = album ? TextOrEmpty(rows, GroupAlbumArtistColumn) : null;
+
+            groups.Add(new CatalogueGroup(
+                rowId,
+                id,
+                name,
+                rows.GetString(GroupSortNameColumn),
+                OptionalNumber(rows, GroupArtistRowIdColumn),
+                artist));
         }
 
-        return result;
+        var sharedIds = groups
+            .Where(group => group.SyncId != 0)
+            .GroupBy(group => group.SyncId)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet();
+
+        var result = new Dictionary<string, long>(GroupNameComparer.Instance);
+        foreach (var group in groups.Where(group => group.SyncId != 0))
+        {
+            var id = sharedIds.Contains(group.SyncId) ? 0 : group.SyncId;
+            // Read every row, but never choose an arbitrary target for an insertion.
+            if (!result.TryAdd(group.Key, id)) result[group.Key] = 0;
+        }
+
+        return (result, groups);
     }
 
     internal static string GroupKey(string album, string artist)
@@ -366,7 +399,18 @@ internal static class CatalogueReader
         return albumKey + GroupKeySeparator + artistKey;
     }
 
-    private static Dictionary<string, string?> ReadSortNames(SQLiteConnection connection, string sql, bool album = false)
+    private static Dictionary<string, string?> ReadSortNames(IEnumerable<CatalogueGroup> groups)
+    {
+        var result = new Dictionary<string, string?>(GroupNameComparer.Instance);
+        foreach (var group in groups)
+        {
+            AddSortName(result, group.Key, group.SortName);
+        }
+
+        return result;
+    }
+
+    private static Dictionary<string, string?> ReadSortNames(SQLiteConnection connection, string sql)
     {
         using var command = connection.CreateCommand();
         command.CommandText = sql;
@@ -374,17 +418,19 @@ internal static class CatalogueReader
         var result = new Dictionary<string, string?>(GroupNameComparer.Instance);
         while (rows.Read())
         {
-            var name = rows.IsDBNull(SortNameColumn) ? string.Empty : rows.GetString(SortNameColumn);
-            var key = album ? GroupKey(name,
-                rows.IsDBNull(SortArtistColumn) ? string.Empty : rows.GetString(SortArtistColumn)) : name;
-            var sort = rows.GetString(album ? AlbumSortValueColumn : OtherSortValueColumn);
-            if (!result.TryAdd(key, sort) && !StringComparer.Ordinal.Equals(result[key], sort))
-            {
-                result[key] = null;
-            }
+            var name = TextOrEmpty(rows, SortNameColumn);
+            AddSortName(result, name, rows.GetString(SortValueColumn));
         }
 
         return result;
+    }
+
+    private static void AddSortName(Dictionary<string, string?> names, string key, string sort)
+    {
+        if (!names.TryAdd(key, sort) && !StringComparer.Ordinal.Equals(names[key], sort))
+        {
+            names[key] = null;
+        }
     }
 
     private static string Scalar(SQLiteConnection connection, string sql, string? missing = null)

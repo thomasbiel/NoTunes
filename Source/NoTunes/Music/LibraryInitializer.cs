@@ -97,17 +97,8 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
             }
 
             var ids = before.OccupiedIds.ToHashSet();
-            long Allocate()
-            {
-                while (true)
-                {
-                    var id = LibraryPreferences.NewId();
-                    if (ids.Add(id)) return id;
-                }
-            }
-
-            var database = Allocate();
-            var container = Allocate();
+            var database = LibraryPreferences.NewId(ids);
+            var container = LibraryPreferences.NewId(ids);
             saved = new InitializationState(
                 LibraryPreferences.Create(),
                 database,

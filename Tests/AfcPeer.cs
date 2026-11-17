@@ -48,6 +48,8 @@ internal sealed class AfcPeer : Stream
 
     public Action? OnClose { get; set; }
 
+    public Action<string>? OnFileClosed { get; set; }
+
     public Func<CancellationToken, Task>? BeforeFileWriteReplyAsync { get; init; }
 
     public Func<CancellationToken, Task>? BeforeFileReadReplyAsync { get; init; }
@@ -221,8 +223,9 @@ internal sealed class AfcPeer : Stream
                 return;
             case AfcOperation.FileClose:
                 this.Closes++;
-                Assert.That(this.handles.Remove(BinaryPrimitives.ReadUInt64LittleEndian(body)), Is.True);
+                Assert.That(this.handles.Remove(BinaryPrimitives.ReadUInt64LittleEndian(body), out var closed), Is.True);
                 this.OnClose?.Invoke();
+                this.OnFileClosed?.Invoke(closed.Path);
                 if (this.StallClose)
                 {
                     this.closePending = true;

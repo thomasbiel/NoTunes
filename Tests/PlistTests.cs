@@ -8,9 +8,8 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class PlistTests
 {
-    [TestCase(false)]
-    [TestCase(true)]
-    public void Handles_Nested_Values_Unicode_And_Long_Binary_Data(bool binary)
+    [Test]
+    public void Handles_Nested_Values_Unicode_And_Long_Binary_Data([Values] bool binary)
     {
         var data = Enumerable.Range(0, 257).Select(i => (byte)i).ToArray();
         var original = Plist.Dict(

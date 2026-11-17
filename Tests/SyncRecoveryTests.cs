@@ -7,9 +7,8 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class SyncRecoveryTests
 {
-    [TestCase(false)]
-    [TestCase(true)]
-    public void Retries_Only_The_Incomplete_Deletions_Owned_By_The_Pending_Operation(bool revisionAdvanced)
+    [Test]
+    public void Retries_Only_The_Incomplete_Deletions_Owned_By_The_Pending_Operation([Values] bool revisionAdvanced)
     {
         var owned = new DeviceTrack(2001, "Owned interrupted insertion", null, 0);
         var unrelated = new DeviceTrack(2002, "Unrelated interrupted insertion", null, 0);
@@ -111,9 +110,8 @@ public sealed class SyncRecoveryTests
         Assert.DoesNotThrow(() => SyncRecovery.Assess(pending, before, [recovered]));
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public void Distinguishes_Completed_And_Unfilled_Insertions_Without_Replaying_Them(bool incomplete)
+    [Test]
+    public void Distinguishes_Completed_And_Unfilled_Insertions_Without_Replaying_Them([Values] bool incomplete)
     {
         var before = SyncPlannerTests.Catalogue([]);
         var addition = SyncTestData.Track();
@@ -143,9 +141,8 @@ public sealed class SyncRecoveryTests
         Assert.Throws<IOException>(() => SyncRecovery.Assess(pending, after with { Anchor = after.Anchor + 1 }, [addition]));
     }
 
-    [TestCase(true)]
-    [TestCase(false)]
-    public async Task Cleans_Only_The_Recorded_Staging_Prefix_And_Refuses_Foreign_Data(bool owned)
+    [Test]
+    public async Task Cleans_Only_The_Recorded_Staging_Prefix_And_Refuses_Foreign_Data([Values] bool owned)
     {
         var files = new AfcPeer { AllowWrites = true };
         files.Files[SyncPaths.Metadata] = owned ? [1, 2] : [2, 1];

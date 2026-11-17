@@ -19,8 +19,8 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
 
     private static readonly IEqualityComparer<KeyValuePair<string, string>> AttributeComparer =
         EqualityComparer<KeyValuePair<string, string>>.Create(
-            (left, right) => 
-                StringComparer.Ordinal.Equals(left.Key, right.Key) && 
+            (left, right) =>
+                StringComparer.Ordinal.Equals(left.Key, right.Key) &&
                 StringComparer.Ordinal.Equals(left.Value, right.Value),
             pair => HashCode.Combine(pair.Key, pair.Value));
 
@@ -98,23 +98,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         }
         finally
         {
-            // Even a locally canceled read must not leave a file handle open on a usable connection.
-            if (!this.IsBroken)
-            {
-                using var closeDeadline = new CancellationTokenSource(CloseTimeout);
-                try
-                {
-                    await this.CloseFileAsync(handle, closeDeadline.Token);
-                }
-                catch (OperationCanceledException e) when (success && closeDeadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                {
-                    throw new IOException("Timed out closing the iPhone file.", e);
-                }
-                catch when (!success)
-                {
-                    /* Keep the original failure; the close path discards a broken socket. */
-                }
-            }
+            await this.CloseAfterOperationAsync(handle, success, cancellationToken);
         }
 
         var after = await this.GetFileInfoAsync(path, cancellationToken);
@@ -227,22 +211,27 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         }
         finally
         {
-            if (!this.IsBroken)
-            {
-                using var deadline = new CancellationTokenSource(CloseTimeout);
-                try
-                {
-                    await this.CloseFileAsync(handle, deadline.Token);
-                }
-                catch (OperationCanceledException e) when (success && deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                {
-                    throw new IOException("Timed out closing the iPhone file.", e);
-                }
-                catch when (!success)
-                {
-                    // Preserve the transfer failure; a broken socket cannot be reused.
-                }
-            }
+            await this.CloseAfterOperationAsync(handle, success, cancellationToken);
+        }
+    }
+
+    private async ValueTask CloseAfterOperationAsync(ulong handle, bool success, CancellationToken cancellationToken)
+    {
+        if (this.IsBroken) return;
+
+        using var deadline = new CancellationTokenSource(CloseTimeout);
+        try
+        {
+            await this.CloseFileAsync(handle, deadline.Token);
+        }
+        catch (OperationCanceledException exception) when (
+            success && deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new IOException("Timed out closing the iPhone file.", exception);
+        }
+        catch when (!success)
+        {
+            // Cleanup must preserve the original operation failure, including caller cancellation.
         }
     }
 

@@ -12,9 +12,8 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class PlatformServicesTests
 {
-    [TestCase(true)]
-    [TestCase(false)]
-    public void Registers_Platform_Services_Without_Opening_Native_Resources(bool windows)
+    [Test]
+    public void Registers_Platform_Services_Without_Opening_Native_Resources([Values] bool windows)
     {
         var registrations = new ServiceCollection();
         if (windows)

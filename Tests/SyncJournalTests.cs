@@ -7,9 +7,8 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class SyncJournalTests
 {
-    [TestCase(false)]
-    [TestCase(true)]
-    public async Task Removes_Unjournaled_Copies_After_A_Copy_Failure_And_Preserves_Pending_Assets(bool replacing)
+    [Test]
+    public async Task Removes_Unjournaled_Copies_After_A_Copy_Failure_And_Preserves_Pending_Assets([Values] bool replacing)
     {
         using var workspace = new SyncWorkspace();
         using var state = new SyncWorkspace();

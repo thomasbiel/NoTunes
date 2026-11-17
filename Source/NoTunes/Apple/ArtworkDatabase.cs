@@ -23,6 +23,7 @@ internal static class ArtworkDatabase
     private const int MinorVersionOffset = 16;
     private const uint SupportedMajorVersion = 0;
     private const uint SupportedMinorVersion = 6;
+    private const uint LegacyMinorVersion = 2;
     private const int SectionCountOffset = 20;
     private const int CacheCounterOffset = 28;
     private const int SectionKindOffset = 12;
@@ -72,7 +73,8 @@ internal static class ArtworkDatabase
         }
 
         if (Record(0, RootMagic, RootHeader, bytes.Length) != bytes.Length
-            || Number(MajorVersionOffset) != SupportedMajorVersion || Number(MinorVersionOffset) != SupportedMinorVersion)
+            || Number(MajorVersionOffset) != SupportedMajorVersion
+            || Number(MinorVersionOffset) is not (SupportedMinorVersion or LegacyMinorVersion))
             throw new InvalidDataException("Unsupported ArtworkDB version or size.");
 
         var maximum = Number(CacheCounterOffset);
@@ -84,7 +86,6 @@ internal static class ArtworkDatabase
 
         var offset = checked((int)Number(HeaderLengthOffset));
         var kinds = new HashSet<uint>();
-        var ids = new HashSet<uint>();
         for (var section = 0; section < sections; section++)
         {
             var end = Record(offset, SectionMagic, SectionHeader, bytes.Length);
@@ -111,7 +112,7 @@ internal static class ArtworkDatabase
                 {
                     var next = Record(image, ImageMagic, ImageHeader, end);
                     var id = Number(image + ImageIdOffset);
-                    if (id == 0 || !ids.Add(id)) throw new InvalidDataException("Ambiguous artwork image ID.");
+                    if (id == 0) throw new InvalidDataException("Invalid artwork image ID.");
 
                     maximum = Math.Max(maximum, id);
                     image = next;

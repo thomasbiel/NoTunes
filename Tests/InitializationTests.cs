@@ -251,9 +251,8 @@ public sealed class InitializationTests
         Assert.That(LibraryIdentity.Parse(raw), Is.Not.EqualTo(LibraryIdentity.Parse(LibraryPreferences.Create())));
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public async Task Initializes_Only_A_New_Library_And_Verifies_The_Committed_Result(bool dryRun)
+    [Test]
+    public async Task Initializes_Only_A_New_Library_And_Verifies_The_Committed_Result([Values] bool dryRun)
     {
         using var state = new SyncWorkspace();
         using var fixture = Fresh();
@@ -332,9 +331,8 @@ public sealed class InitializationTests
         Assert.That(retry.Files[SyncPaths.Preferences], Is.EqualTo(saved.Preferences));
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public async Task Refuses_Existing_Libraries_And_Foreign_Preferences_Without_Writing(bool preferencesOnly)
+    [Test]
+    public async Task Refuses_Existing_Libraries_And_Foreign_Preferences_Without_Writing([Values] bool preferencesOnly)
     {
         using var state = new SyncWorkspace();
         using var fixture = preferencesOnly ? Fresh() : new CatalogueFixture();

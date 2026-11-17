@@ -6,9 +6,27 @@ public sealed record CatalogueSnapshot(byte[] Database, byte[]? Wal)
     private const string WalPath = DatabasePath + SyncPaths.WalSuffix;
     private const string SharedMemoryPath = DatabasePath + "-shm";
     private const int MinimumSqliteHeaderBytes = 100;
+    private const int MaximumCaptureAttempts = 5;
+    private static readonly TimeSpan CaptureRetryDelay = TimeSpan.FromMilliseconds(500);
     private static readonly string[] Paths = [DatabasePath, WalPath, SharedMemoryPath];
 
     private static ReadOnlySpan<byte> SqliteSignature => "SQLite format 3\0"u8;
+
+    internal static async Task<CatalogueSnapshot> CaptureWithRetryAsync(AfcClient afc, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await CaptureAsync(afc, cancellationToken);
+            }
+            catch (IOException exception) when (attempt < MaximumCaptureAttempts && !afc.IsBroken
+                && exception is not (AfcException or FileNotFoundException))
+            {
+                await Task.Delay(CaptureRetryDelay, cancellationToken);
+            }
+        }
+    }
 
     public static async Task<CatalogueSnapshot> CaptureAsync(AfcClient afc, CancellationToken cancellationToken)
     {
@@ -36,13 +54,13 @@ public sealed record CatalogueSnapshot(byte[] Database, byte[]? Wal)
         var wal = before[WalPath] is null
             ? null
             : await afc.ReadFileAsync(WalPath, SyncProtocol.MaxCatalogueBytes, cancellationToken);
-        
+
         var after = await StatAll(afc, cancellationToken);
         if (!SameFileAttributes(before, after))
         {
             throw new IOException("The iPhone music catalogue changed during capture. Try again after it settles.");
         }
-        
+
         if (database.Length < MinimumSqliteHeaderBytes || !database.AsSpan().StartsWith(SqliteSignature))
         {
             throw new InvalidDataException("The iPhone music catalogue is not a valid SQLite database.");

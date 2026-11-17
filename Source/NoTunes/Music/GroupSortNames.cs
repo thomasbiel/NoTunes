@@ -16,7 +16,12 @@ internal sealed record GroupSortNames(
     {
         return Preserves(this.Albums, expected.Albums, allowRemovedGroups)
             && Preserves(this.AlbumArtists, expected.AlbumArtists, allowRemovedGroups)
-            && Preserves(this.Artists, expected.Artists, allowRemovedGroups)
+            && this.PreservesItemGroups(expected, allowRemovedGroups);
+    }
+
+    public bool PreservesItemGroups(GroupSortNames expected, bool allowRemovedGroups = false)
+    {
+        return Preserves(this.Artists, expected.Artists, allowRemovedGroups)
             && Preserves(this.Composers, expected.Composers, allowRemovedGroups);
     }
 

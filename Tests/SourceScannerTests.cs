@@ -49,9 +49,8 @@ public sealed class SourceScannerTests
         Assert.That(before.Tracks[0].Sha256, Is.Not.EqualTo(after.Tracks[0].Sha256));
     }
 
-    [TestCase(true)]
-    [TestCase(false)]
-    public async Task Rejects_Files_Changed_During_Hashing(bool changeLength)
+    [Test]
+    public async Task Rejects_Files_Changed_During_Hashing([Values] bool changeLength)
     {
         var file = Path.Combine(this.root, "track.mp3");
         await File.WriteAllTextAsync(file, "abc");

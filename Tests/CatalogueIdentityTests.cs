@@ -48,12 +48,15 @@ public sealed class CatalogueIdentityTests
     [TestCase("INSERT INTO album VALUES(13,1012,'Album',11,'Album, The');")]
     [TestCase("INSERT INTO album_artist VALUES(22,1011,'Other artist','Other sort');")]
     [TestCase("INSERT INTO album_artist VALUES(22,1011,'Artist','Artist, The');")]
-    public async Task Rejects_Duplicate_Group_Ids_Even_When_Labels_Agree(string mutation)
+    public async Task Reads_Duplicate_Group_Sync_Ids_Without_Offering_Them_For_Insertion(string mutation)
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(mutation);
-        await Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(
-            fixture.Snapshot(), CancellationToken.None));
+        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var album = mutation.Contains("INSERT INTO album VALUES", StringComparison.Ordinal);
+        var groups = album ? catalogue.Albums : catalogue.Artists;
+        Assert.That(groups.Values, Is.All.Zero);
+        Assert.That(album ? catalogue.AlbumGroups : catalogue.ArtistGroups, Has.Count.EqualTo(2));
     }
 
     [Test]

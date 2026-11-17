@@ -41,9 +41,8 @@ public sealed class LinuxSourceSessionTests
         Assert.That(await reader.ReadToEndAsync(), Is.EqualTo("original"));
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public void Rejects_Links_Inserted_After_Enumeration(bool directory)
+    [Test]
+    public void Rejects_Links_Inserted_After_Enumeration([Values] bool directory)
     {
         var path = Path.Combine(this.source, directory ? "album" : "original.mp3");
         if (directory)

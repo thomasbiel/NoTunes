@@ -1,5 +1,7 @@
 using System.Globalization;
+using Microsoft.Extensions.DependencyInjection;
 using NoTunes.Apple;
+using NoTunes.Cli;
 using NoTunes.Music;
 using NoTunes.Platform;
 using NUnit.Framework;
@@ -13,6 +15,7 @@ internal sealed class SimulatedSyncDevice : IDisposable
     private const long ProductId = 1;
     private const string UsbConnectionType = "USB";
     private const string InjectedFailure = "Injected sync interruption.";
+    private const int RequestTimeoutSeconds = 5;
     private readonly SimulatedSyncCatalogue catalogue;
     private readonly HashSet<string> directories = new(StringComparer.Ordinal);
     private readonly Dictionary<long, string> audioPaths = [];
@@ -29,7 +32,11 @@ internal sealed class SimulatedSyncDevice : IDisposable
 
     public int InterruptAtBatch { get; set; } = 1;
 
+    public int StartedSessions { get; private set; }
+
     public bool CorruptUploadedAudio { get; init; }
+
+    public Action<AfcPeer>? ConfigureFileConnection { get; init; }
 
     public uint Anchor => this.catalogue.Anchor;
 
@@ -60,6 +67,32 @@ internal sealed class SimulatedSyncDevice : IDisposable
         return new ReplyUsbMuxTransport(new ScriptedStream(ProtocolFrames.UsbMux(1, reply)));
     }
 
+    public async Task<SyncResult> RunAsync(
+        string source,
+        string state,
+        bool dryRun = false,
+        CancellationToken cancellationToken = default)
+    {
+        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
+            .BuildServiceProvider();
+        var engine = new SyncEngine(
+            services.GetRequiredService<SourceScanner>(),
+            services.GetRequiredService<ISourceFileSystem>(),
+            this.CreateTransport(),
+            TextWriter.Null)
+        {
+            OpenConnection = this.OpenAsync
+        };
+        var options = new SyncOptions
+        {
+            Folder = source,
+            StateFolder = state,
+            Timeout = RequestTimeoutSeconds,
+            DryRun = dryRun
+        };
+        return await engine.RunAsync(options, cancellationToken);
+    }
+
     public async Task<IDeviceSyncConnection> OpenAsync(
         UsbMuxClient mux,
         UsbDevice device,
@@ -82,6 +115,9 @@ internal sealed class SimulatedSyncDevice : IDisposable
             {
                 switch (message.Text(AtcKeys.Command))
                 {
+                    case AtcCommands.RequestingSync:
+                        this.StartedSessions++;
+                        break;
                     case AtcCommands.FinishedMetadata:
                         var document = Plist.Parse(this.Files[SyncPaths.Metadata]).AsDict();
                         using (var signer = new GrappaSigner(GrappaSignerTests.Reply()))
@@ -151,6 +187,7 @@ internal sealed class SimulatedSyncDevice : IDisposable
             Directories = this.directories,
             ReadFragmentBytes = SourceFileDefaults.ReadBufferBytes
         };
+        this.ConfigureFileConnection?.Invoke(files);
         var connection = new SimulatedSyncConnection(files, peer, timeout);
         this.Connections.Add(connection);
         this.FileConnections.Add(files);

@@ -12,6 +12,8 @@
 
 - Separate words in test method names with underscores, for example
   `Rejects_Invalid_Arguments`. Use the same convention for explicit test case names.
+- For Boolean variations, use `[Test]` and `[Values]` on the Boolean parameter
+  instead of separate `[TestCase(false)]` and `[TestCase(true)]` attributes.
 
 ## Code style
 

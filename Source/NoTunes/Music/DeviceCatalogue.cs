@@ -11,6 +11,10 @@ public sealed record DeviceCatalogue(
     IReadOnlyDictionary<string, long> Artists,
     IReadOnlySet<long> OccupiedIds)
 {
+    internal IReadOnlyList<CatalogueGroup>? AlbumGroups { get; init; }
+
+    internal IReadOnlyList<CatalogueGroup>? ArtistGroups { get; init; }
+
     internal GroupSortNames SortNames { get; init; } = GroupSortNames.Empty;
 
     internal IReadOnlyList<ProtectedCatalogueItem> ProtectedItems { get; init; } = [];

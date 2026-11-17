@@ -32,13 +32,7 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
 
     public SimulatedSyncCatalogue(bool keepExistingTrack)
     {
-        this.fixture.Execute("""
-            CREATE TABLE artwork(artwork_token TEXT,artwork_source_type INTEGER,artwork_type INTEGER,
-              artwork_variant_type INTEGER,relative_path TEXT);
-            CREATE TABLE artwork_token(entity_pid INTEGER,artwork_token TEXT,artwork_source_type INTEGER,
-              artwork_type INTEGER,entity_type INTEGER,artwork_variant_type INTEGER);
-            CREATE TABLE best_artwork_token AS SELECT * FROM artwork_token WHERE 0;
-            """);
+        this.fixture.AddArtworkSchema();
         if (!keepExistingTrack) this.Delete(ExistingTrackId);
     }
 
@@ -111,15 +105,25 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
         foreach (var table in new[] { "artwork_token", "best_artwork_token" })
         {
             this.Execute($"DELETE FROM {table} WHERE entity_pid=$id", ("id", itemId));
-            this.Insert(
-                table,
-                ("entity_pid", itemId),
-                ("artwork_token", token),
-                ("artwork_source_type", LocalArtworkSource),
-                ("artwork_type", TrackArtworkType),
-                ("entity_type", TrackEntityType),
-                ("artwork_variant_type", DefaultArtworkVariant));
         }
+
+        this.Insert(
+            "artwork_token",
+            ("entity_pid", itemId),
+            ("artwork_token", token),
+            ("artwork_source_type", LocalArtworkSource),
+            ("artwork_type", TrackArtworkType),
+            ("entity_type", TrackEntityType),
+            ("artwork_variant_type", DefaultArtworkVariant));
+        this.Insert(
+            "best_artwork_token",
+            ("entity_pid", itemId),
+            ("available_artwork_token", token),
+            ("fetchable_artwork_token", string.Empty),
+            ("fetchable_artwork_source_type", 0),
+            ("artwork_type", TrackArtworkType),
+            ("entity_type", TrackEntityType),
+            ("artwork_variant_type", DefaultArtworkVariant));
 
         return path;
     }

@@ -9,9 +9,8 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class ArtworkFeaturesTests
 {
-    [TestCase(true)]
-    [TestCase(false)]
-    public async Task Repairs_Covers_Without_Resolving_Ambiguous_Group_Identities_Or_Sort_Names(bool ambiguousIds)
+    [Test]
+    public async Task Repairs_Covers_Without_Resolving_Ambiguous_Group_Identities_Or_Sort_Names([Values] bool ambiguousIds)
     {
         const string album = "Album";
         const string artist = "Artist";
@@ -145,14 +144,16 @@ public sealed class ArtworkFeaturesTests
     public async Task Reads_Live_Artwork_Ids_And_Verifies_The_Permanent_Original()
     {
         using var fixture = new CatalogueFixture();
+        fixture.AddArtworkSchema();
         fixture.Execute("""
-            CREATE TABLE artwork(artwork_token TEXT,artwork_source_type INTEGER,artwork_type INTEGER,
-              artwork_variant_type INTEGER,relative_path TEXT);
-            CREATE TABLE artwork_token(entity_pid INTEGER,artwork_token TEXT,artwork_source_type INTEGER,
-              artwork_type INTEGER,entity_type INTEGER,artwork_variant_type INTEGER);
-            INSERT INTO artwork VALUES('101',300,1,0,'aa/cover.jpg'),('501',300,6,0,'aa/old.jpg');
-            INSERT INTO artwork_token VALUES(1,'101',300,1,0,0),(12,'601',300,6,4,0);
-            CREATE TABLE best_artwork_token AS SELECT * FROM artwork_token WHERE entity_pid=1;
+            INSERT INTO artwork(artwork_token,artwork_source_type,artwork_type,artwork_variant_type,relative_path)
+                VALUES('101',300,1,0,'aa/cover.jpg'),('501',300,6,0,'aa/old.jpg');
+            INSERT INTO artwork_token(entity_pid,artwork_token,artwork_source_type,artwork_type,entity_type,
+                artwork_variant_type) VALUES(1,'101',300,1,0,0),(12,'601',300,6,4,0);
+            INSERT INTO best_artwork_token(entity_pid,entity_type,artwork_type,available_artwork_token,
+                artwork_variant_type)
+                SELECT entity_pid,entity_type,artwork_type,artwork_token,artwork_variant_type
+                FROM artwork_token WHERE entity_pid=1;
             """);
         var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
         Assert.That(catalogue.ArtworkAvailable, Is.True);
