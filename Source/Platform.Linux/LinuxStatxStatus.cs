@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace NoTunes.Platform.Linux;
 
-[StructLayout(LayoutKind.Explicit, Size = LinuxStatxStatus.StatxBufferBytes)]
+[StructLayout(LayoutKind.Explicit, Size = StatxBufferBytes)]
 internal struct LinuxStatxStatus
 {
     internal const int StatxBufferBytes = 256;

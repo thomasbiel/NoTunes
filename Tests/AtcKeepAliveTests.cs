@@ -26,7 +26,7 @@ public sealed class AtcKeepAliveTests
     public async Task Keeps_The_Current_Session_Alive_Before_Metadata_Is_Finished()
     {
         var ping = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var peer = new AtcPeer(SyncTestData.Capabilities(), SyncTestData.Allowed(), SyncTestData.Ready())
+        var peer = new AtcPeer(SyncTestData.SessionMessages())
         {
             OnMessageSent = message =>
             {
@@ -57,12 +57,9 @@ public sealed class AtcKeepAliveTests
         var readbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var readbackPing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var complete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var peer = new AtcPeer(
-            SyncTestData.Capabilities(),
-            SyncTestData.Allowed(),
-            SyncTestData.Ready(),
+        var peer = new AtcPeer(SyncTestData.SessionMessages(
             SyncTestData.Message(AtcCommands.AssetManifest, SyncTestData.Manifest(SyncTestData.Asset(track.AssetId))),
-            SyncTestData.Message(AtcCommands.SyncFinished))
+            SyncTestData.Message(AtcCommands.SyncFinished)))
         {
             BeforeFrameAsync = (frame, token) => frame >= 4 ? complete.Task.WaitAsync(token) : Task.CompletedTask,
             OnMessageSent = message =>

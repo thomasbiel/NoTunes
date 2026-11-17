@@ -48,7 +48,7 @@ public sealed class SyncJournalTests
         }
         else
         {
-            Assert.That(directories, Is.EqualTo(new[] { journal.Assets(previous) }));
+            Assert.That(directories, Is.EqualTo([journal.Assets(previous)]));
             Assert.That(await File.ReadAllBytesAsync(Path.Combine(journal.DirectoryPath, "pending.json")), Is.EqualTo(previousRecord));
             var restored = previous.Additions.Single().Restore(journal.Assets(previous));
             Assert.That(await File.ReadAllBytesAsync(restored.LocalPath), Is.EqualTo(await File.ReadAllBytesAsync(first.LocalPath)));

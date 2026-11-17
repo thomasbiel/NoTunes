@@ -37,9 +37,16 @@ internal static class CatalogueVerification
 
         var actualTracks = after.Tracks.ToDictionary(track => track.Id);
         RequireRetainedTracks(before.Tracks, actualTracks, deletedIds);
+        var albums = after.AlbumGroups?.ToLookup(group => group.Key, GroupNameComparer.Instance);
+        var artists = after.ArtistGroups?.ToLookup(group => group.Key, GroupNameComparer.Instance);
         foreach (var track in additions.Where(track => !track.IsArtworkOnly))
         {
-            if (!MatchesAddition(actualTracks[track.Id], track, after))
+            if (!MatchesAddition(
+                actualTracks[track.Id],
+                track,
+                after,
+                albums,
+                artists))
             {
                 throw new IOException(MetadataMismatchMessage);
             }
@@ -123,7 +130,12 @@ internal static class CatalogueVerification
         }
     }
 
-    private static bool MatchesAddition(DeviceTrack actual, PreparedTrack expected, DeviceCatalogue catalogue)
+    private static bool MatchesAddition(
+        DeviceTrack actual,
+        PreparedTrack expected,
+        DeviceCatalogue catalogue,
+        ILookup<string, CatalogueGroup>? albums,
+        ILookup<string, CatalogueGroup>? artists)
     {
         var sameAudio = actual.Path == expected.DevicePath && actual.Size == expected.Source.Size;
         var sameTitle = actual.Title == (string)expected.Metadata.Item[MediaKeys.Title];
@@ -132,9 +144,32 @@ internal static class CatalogueVerification
         if (actual.Metadata is not { } metadata || !metadata.Matches(expected)) return false;
 
         var albumKey = CatalogueReader.GroupKey(expected.Metadata.Album, expected.Metadata.AlbumArtist);
-        var sameAlbum = catalogue.Albums.TryGetValue(albumKey, out var albumId) && albumId == expected.AlbumId;
-        var sameArtist = catalogue.Artists.TryGetValue(expected.Metadata.AlbumArtist, out var artistId) && artistId == expected.ArtistId;
+        var sameAlbum = MatchesGroup(
+            albums,
+            catalogue.Albums,
+            albumKey,
+            expected.AlbumId,
+            actual.Metadata.AlbumRowId);
+        var sameArtist = MatchesGroup(
+            artists,
+            catalogue.Artists,
+            expected.Metadata.AlbumArtist,
+            expected.ArtistId,
+            actual.Metadata.AlbumArtistRowId);
         return sameAlbum && sameArtist;
+    }
+
+    private static bool MatchesGroup(
+        ILookup<string, CatalogueGroup>? rows,
+        IReadOnlyDictionary<string, long> legacyIds,
+        string key,
+        long expectedId,
+        long? actualRowId)
+    {
+        if (rows is null) return legacyIds.TryGetValue(key, out var id) && id == expectedId;
+
+        var matches = rows[key].Take(2).ToArray();
+        return matches.Length == 1 && matches[0].SyncId == expectedId && matches[0].RowId == actualRowId;
     }
 
     private static bool HasSameIdentity(DeviceCatalogue expected, DeviceCatalogue actual)

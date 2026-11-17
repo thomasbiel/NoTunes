@@ -12,7 +12,7 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
     private const long Mpeg1Layer3 = 301;
     private const long Mpeg2Layer3 = 302;
     private const long Mpeg25Layer3 = 303;
-    private const int MaximumTextLength = 4096;
+    internal const int MaximumTextLength = 4096;
     private const string UnknownArtist = "Unknown Artist";
     private const string UnknownAlbum = "Unknown Album";
     internal const string LocationKind = "MPEG audio file";

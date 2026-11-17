@@ -12,6 +12,8 @@ public sealed class SyncEngine(
 {
     internal SyncConnectionFactory OpenConnection { get; init; } = OpenDeviceConnectionAsync;
 
+    internal GroupNamePrompt? PromptForGroupName { get; init; }
+
     private static async Task<IDeviceSyncConnection> OpenDeviceConnectionAsync(
         UsbMuxClient mux,
         UsbDevice device,
@@ -79,7 +81,8 @@ public sealed class SyncEngine(
             catalogue,
             fileSystem,
             workspace,
-            cancellationToken);
+            cancellationToken,
+            prompt: this.PromptForGroupName);
 
         var missingArtwork = plan.Matches.Where(match => !HasRegisteredArtwork(catalogue, match.Device.Id)).ToArray();
 

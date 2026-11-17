@@ -3,7 +3,7 @@ using NoTunes.Platform;
 
 namespace NoTunes.Music;
 
-public sealed class SourceScanner(ISourceFileSystem fileSystem)
+public sealed class SourceScanner(ISourceFileSystem fileSystem, SourceHashCache? hashCache = null)
 {
     private const string Mp3Extension = ".mp3";
 
@@ -11,6 +11,7 @@ public sealed class SourceScanner(ISourceFileSystem fileSystem)
     {
         var root = GetSourceDirectory(folder);
         using var paths = fileSystem.OpenSource(root, cancellationToken);
+        var cached = hashCache?.Load(root.FullName);
         var tracks = new List<SourceTrack>();
         var directories = new Stack<(DirectoryInfo Directory, IEnumerator<SourceEntry> Entries)>();
         directories.Push((root, paths.EnumerateDirectory(root).GetEnumerator()));
@@ -47,6 +48,7 @@ public sealed class SourceScanner(ISourceFileSystem fileSystem)
                     paths,
                     root,
                     fullName,
+                    cached,
                     cancellationToken));
             }
         }
@@ -59,13 +61,16 @@ public sealed class SourceScanner(ISourceFileSystem fileSystem)
         }
 
         tracks.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.RelativePath, b.RelativePath));
-        return new SourceLibrary(root.FullName, tracks);
+        cancellationToken.ThrowIfCancellationRequested();
+        var library = new SourceLibrary(root.FullName, tracks);
+        hashCache?.Save(library);
+        return library;
     }
 
     private static DirectoryInfo GetSourceDirectory(string folder)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
-        var root = new DirectoryInfo(Path.GetFullPath(folder));
+        var root = new DirectoryInfo(Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)));
         FileAttributes attributes;
         try
         {
@@ -84,19 +89,36 @@ public sealed class SourceScanner(ISourceFileSystem fileSystem)
         return root;
     }
 
-    private static async Task<SourceTrack> ReadTrackAsync(ISourceSession paths, DirectoryInfo root, string fullName, CancellationToken cancellationToken)
+    private static async Task<SourceTrack> ReadTrackAsync(
+        ISourceSession paths,
+        DirectoryInfo root,
+        string fullName,
+        IReadOnlyDictionary<string, SourceTrack>? cached,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         await using var stream = paths.OpenRead(new FileInfo(fullName));
         var size = stream.Length;
         var modified = File.GetLastWriteTimeUtc(stream.SafeFileHandle);
-        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+        var relativePath = Path.GetRelativePath(root.FullName, fullName);
+        string hash;
+        if (cached is not null && cached.TryGetValue(relativePath, out var previous)
+            && previous.Size == size && previous.LastWriteTimeUtc == modified)
+        {
+            hash = previous.Sha256;
+        }
+        else
+        {
+            hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+        }
+
         if (stream.Length != size || File.GetLastWriteTimeUtc(stream.SafeFileHandle) != modified)
             throw new IOException($"File changed during the scan: {fullName}");
 
         return new SourceTrack(
-            Path.GetRelativePath(root.FullName, fullName),
+            relativePath,
             size,
             modified,
-            Convert.ToHexString(hash));
+            hash);
     }
 }

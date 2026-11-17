@@ -38,6 +38,16 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
 
     public CatalogueSnapshot Snapshot() => this.fixture.Snapshot();
 
+    public void AddAlbumArtist(long rowId, long syncId, string name, string sortName)
+    {
+        this.Insert(
+            "album_artist",
+            ("album_artist_pid", rowId),
+            ("sync_id", syncId),
+            ("album_artist", name),
+            ("sort_album_artist", sortName));
+    }
+
     public void SetExistingAudioSize(int size)
     {
         this.Execute("UPDATE item_extra SET file_size=$size WHERE item_pid=$id",

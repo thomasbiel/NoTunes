@@ -7,6 +7,59 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class SyncEngineIntegrationTests
 {
+    [Test]
+    public async Task Synchronizes_After_Automatic_Or_Interactive_Group_Resolution([Values] bool ask)
+    {
+        using var source = new SyncWorkspace();
+        using var state = new SyncWorkspace();
+        var prompts = 0;
+
+        using var device = new SimulatedSyncDevice
+        {
+            PromptForGroupName = (_, _) =>
+            {
+                prompts++;
+                return ValueTask.FromResult<string?>("Artist");
+            }
+        };
+
+        device.AddAlbumArtist(
+            21,
+            ask ? 1021 : 1011,
+            "Ambiguous Artist",
+            "First Sort");
+
+        if (ask)
+        {
+            device.AddAlbumArtist(
+                22,
+                1022,
+                "Ambiguous Artist",
+                "Second Sort");
+        }
+
+        var path = CreateSource(source.Root, 1);
+        if (ask)
+        {
+            using var file = TagLib.File.Create(path);
+            file.Tag.AlbumArtists = ["Ambiguous Artist"];
+            file.Save();
+        }
+
+        var bytes = await File.ReadAllBytesAsync(path);
+        var before = await device.ReadCatalogueAsync();
+        var result = await RunAsync(device, source.Root, state.Root);
+        var after = await device.ReadCatalogueAsync();
+        Assert.That(prompts, Is.EqualTo(ask ? 1 : 0));
+        Assert.That(result.VerifiedBatches, Is.EqualTo(1));
+        Assert.That(after.Tracks.Single().Metadata!.AlbumArtistRowId, Is.EqualTo(11));
+        Assert.That(after.ProtectedItems, Is.EqualTo(before.ProtectedItems));
+        Assert.That(after.ArtistGroups, Is.EqualTo(before.ArtistGroups));
+        Assert.That(device.Files[after.Tracks.Single().Path!], Is.EqualTo(bytes));
+        Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
+        AssertSettled(device, state.Root, 1);
+    }
+
     private const int RunTimeoutSeconds = 90;
     private const string PendingFilePattern = "pending.json";
     private const string VerifiedFilePattern = "verified-*.json";
@@ -19,6 +72,7 @@ public sealed class SyncEngineIntegrationTests
         using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
         CreateSource(source.Root, 1);
+
         var before = await device.ReadCatalogueAsync();
         var result = await RunAsync(
             device,
@@ -28,8 +82,10 @@ public sealed class SyncEngineIntegrationTests
 
         Assert.That(result.DryRun, Is.True);
         Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
-        Assert.That(result.Plan.Delete.Select(track => track.Id),
+        Assert.That(
+            result.Plan.Delete.Select(track => track.Id),
             Is.EqualTo([SimulatedSyncCatalogue.ExistingTrackId]));
+
         Assert.That(result.VerifiedBatches, Is.Zero);
         Assert.That(device.Batches, Is.Empty);
         Assert.That(device.FileConnections.SelectMany(connection => connection.WritePackets), Is.Empty);
@@ -46,6 +102,7 @@ public sealed class SyncEngineIntegrationTests
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
+
         var path = CreateSource(source.Root, additions);
         var before = await device.ReadCatalogueAsync();
         var bytes = await File.ReadAllBytesAsync(path);
@@ -86,6 +143,7 @@ public sealed class SyncEngineIntegrationTests
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
+
         var path = CreateSource(source.Root, 1, artwork: true);
         var bytes = await File.ReadAllBytesAsync(path);
         device.SetExistingAudio(bytes);
@@ -119,6 +177,7 @@ public sealed class SyncEngineIntegrationTests
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
+
         var path = CreateSource(source.Root, 2, artwork: true);
         var bytes = await File.ReadAllBytesAsync(path);
         device.SetExistingAudio(bytes);
@@ -155,6 +214,7 @@ public sealed class SyncEngineIntegrationTests
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice { Interruption = interruption };
+
         var path = CreateSource(source.Root, 1, artwork);
         var before = await device.ReadCatalogueAsync();
         await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
@@ -204,6 +264,7 @@ public sealed class SyncEngineIntegrationTests
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice { Interruption = SyncInterruptionPoint.AfterMetadata };
+
         CreateSource(source.Root, 1);
         await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
         var insertedId = ReadPending(state.Root).Additions.Single().Id;
@@ -232,6 +293,7 @@ public sealed class SyncEngineIntegrationTests
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice { Interruption = SyncInterruptionPoint.AfterMetadata };
+
         CreateSource(source.Root, 1);
         await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
         var record = Directory.GetFiles(state.Root, PendingFilePattern, SearchOption.AllDirectories).Single();
@@ -263,6 +325,7 @@ public sealed class SyncEngineIntegrationTests
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true) { Interruption = interruption };
+
         var path = CreateSource(source.Root, 1, artwork: true);
         device.SetExistingAudio(await File.ReadAllBytesAsync(path));
         var before = await device.ReadCatalogueAsync();
@@ -289,10 +352,8 @@ public sealed class SyncEngineIntegrationTests
     {
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
-        using var device = new SimulatedSyncDevice(keepExistingTrack: true)
-        {
-            Interruption = SyncInterruptionPoint.AfterMetadata
-        };
+        using var device = new SimulatedSyncDevice(keepExistingTrack: true) { Interruption = SyncInterruptionPoint.AfterMetadata };
+
         var path = CreateSource(source.Root, 1, artwork: true);
         device.SetExistingAudio(await File.ReadAllBytesAsync(path));
         var before = await device.ReadCatalogueAsync();
@@ -313,9 +374,12 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(device.Batches, Has.Count.EqualTo(3));
         Assert.That(device.Batches.SelectMany(batch => batch)
             .All(operation => operation.Text(MediaKeys.Operation) == MediaOperations.UpdateTrack), Is.True);
+
         var artwork = after.TrackArtwork[SimulatedSyncCatalogue.ExistingTrackId];
-        Assert.That(device.Files[SyncPaths.ArtworkOriginals + artwork.Path],
+        Assert.That(
+            device.Files[SyncPaths.ArtworkOriginals + artwork.Path],
             Is.EqualTo(Mp3Metadata.Read(path, Path.GetFileName(path)).Artwork!.Bytes));
+
         AssertSettled(device, state.Root, 1);
     }
 
@@ -329,6 +393,7 @@ public sealed class SyncEngineIntegrationTests
             Interruption = SyncInterruptionPoint.AfterMetadata,
             InterruptAtBatch = 2
         };
+
         CreateSource(source.Root, 1);
         await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
         var pending = ReadPending(state.Root);
@@ -337,8 +402,11 @@ public sealed class SyncEngineIntegrationTests
         var started = device.StartedSessions;
         var result = await RunAsync(device, source.Root, state.Root);
         Assert.That(result.Plan.HasChanges, Is.False);
-        Assert.That(device.StartedSessions, Is.EqualTo(started),
+        Assert.That(
+            device.StartedSessions,
+            Is.EqualTo(started),
             "Settling an observed deletion must not request a new media import.");
+
         AssertSettled(device, state.Root, 2);
     }
 
@@ -348,6 +416,7 @@ public sealed class SyncEngineIntegrationTests
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true) { CorruptUploadedAudio = true };
+
         CreateSource(source.Root, 1);
         var exception = await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
 
@@ -375,27 +444,20 @@ public sealed class SyncEngineIntegrationTests
 
     private static string CreateSource(string root, int count, bool artwork = false)
     {
-        var path = Path.Combine(root, "0000.mp3");
-        File.Copy(SyncTestData.FixturePath, path);
-        using (var file = TagLib.File.Create(path))
-        {
-            file.Tag.Album = "Album";
-            file.Tag.AlbumArtists = ["Artist"];
-            file.Tag.Performers = ["Artist"];
-            file.Tag.Composers = ["Composer"];
-            file.Tag.Genres = ["Genre"];
-            if (artwork)
+        var path = SourceTestData.WriteTrack(
+            root,
+            "0000.mp3",
+            "Album",
+            "Artist",
+            file =>
             {
-                file.Tag.Pictures = [new TagLib.Picture
+                file.Tag.Composers = ["Composer"];
+                file.Tag.Genres = ["Genre"];
+                if (artwork)
                 {
-                    Data = [.. FeatureTestData.Png()],
-                    MimeType = "image/png",
-                    Type = TagLib.PictureType.FrontCover
-                }];
-            }
-
-            file.Save();
-        }
+                    file.Tag.Pictures = [FeatureTestData.FrontCover()];
+                }
+            });
 
         for (var index = 1; index < count; index++)
         {

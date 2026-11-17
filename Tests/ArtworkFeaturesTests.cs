@@ -16,21 +16,12 @@ public sealed class ArtworkFeaturesTests
         const string artist = "Artist";
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
-        var path = Path.Combine(source.Root, "covered.mp3");
-        File.Copy(SyncTestData.FixturePath, path);
-        using (var file = TagLib.File.Create(path))
-        {
-            file.Tag.Album = album;
-            file.Tag.Performers = [artist];
-            file.Tag.AlbumArtists = [artist];
-            file.Tag.Pictures = [new TagLib.Picture
-            {
-                Data = [.. FeatureTestData.Png()],
-                MimeType = "image/png",
-                Type = TagLib.PictureType.FrontCover
-            }];
-            file.Save();
-        }
+        SourceTestData.WriteTrack(
+            source.Root,
+            "covered.mp3",
+            album,
+            artist,
+            file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
 
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
             .BuildServiceProvider();
@@ -99,12 +90,9 @@ public sealed class ArtworkFeaturesTests
         var track = FeatureTestData.Covered(artworkOnly);
         var complete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var files = new AfcPeer { AllowWrites = true };
-        var peer = new AtcPeer(
-            SyncTestData.Capabilities(),
-            SyncTestData.Allowed(),
-            SyncTestData.Ready(),
+        var peer = new AtcPeer(SyncTestData.SessionMessages(
             SyncTestData.Message(AtcCommands.AssetManifest, SyncTestData.Manifest(SyncTestData.Asset(track.AssetId, parts))),
-            SyncTestData.Message(AtcCommands.SyncFinished))
+            SyncTestData.Message(AtcCommands.SyncFinished)))
         {
             BeforeFrameAsync = (frame, token) => frame >= 4 ? complete.Task.WaitAsync(token) : Task.CompletedTask,
             OnMessageSent = message =>
@@ -180,38 +168,17 @@ public sealed class ArtworkFeaturesTests
     {
         using var source = new SyncWorkspace();
         using var prepared = new SyncWorkspace();
-        var path = Path.Combine(source.Root, "covered.mp3");
-        File.Copy(SyncTestData.FixturePath, path);
+        var path = SourceTestData.WriteTrack(source.Root, "covered.mp3",
+            file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
         File.Copy(SyncTestData.FixturePath, Path.Combine(source.Root, "plain.mp3"));
-        using (var file = TagLib.File.Create(path))
-        {
-            file.Tag.Pictures = [new TagLib.Picture
-            {
-                Data = [.. FeatureTestData.Png()],
-                MimeType = "image/png",
-                Type = TagLib.PictureType.FrontCover
-            }];
-            file.Save();
-        }
 
         var original = await File.ReadAllBytesAsync(path);
         File.Copy(path, Path.Combine(source.Root, "second-covered.mp3"));
-        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
-            .BuildServiceProvider();
-        var library = await services.GetRequiredService<SourceScanner>().ScanAsync(source.Root, CancellationToken.None);
         var catalogue = SyncPlannerTests.Catalogue([]) with { ArtworkAvailable = true, ArtworkHighWaterMark = 601 };
-        var result = await SourcePreparation.PrepareAsync(
-            library,
-            new SyncPlan(
-                "phone",
-                7,
-                library.Tracks,
-                [],
-                0),
+        var result = await SourceTestData.PrepareAsync(
+            source.Root,
             catalogue,
-            services.GetRequiredService<ISourceFileSystem>(),
             prepared,
-            CancellationToken.None,
             artworkOnly: true);
         Assert.That(result, Has.Count.EqualTo(2));
         Assert.That(result[0].Metadata.Artwork!.CacheId, Is.EqualTo(602));

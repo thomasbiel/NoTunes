@@ -15,7 +15,7 @@ public sealed class OptionsDispatchTests
         using var source = new SyncWorkspace();
         await using var output = new StringWriter();
         await using var services = new ServiceCollection().AddNoTunes(output, TextWriter.Null).BuildServiceProvider();
-        using var parser = new CommandLine.Parser(settings => settings.HelpWriter = null);
+        using var parser = new Parser(settings => settings.HelpWriter = null);
         var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions>(
             ["scan", source.Root]);
         var code = await result.MapResult(
@@ -33,7 +33,7 @@ public sealed class OptionsDispatchTests
     {
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
             .BuildServiceProvider();
-        using var parser = new CommandLine.Parser(settings => settings.HelpWriter = null);
+        using var parser = new Parser(settings => settings.HelpWriter = null);
         var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions>(
             [verb, "--timeout", "0"]);
         await Assert.ThrowsAsync<InvalidArgumentsException>(() => result.MapResult(

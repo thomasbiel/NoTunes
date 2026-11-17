@@ -6,10 +6,10 @@ namespace NoTunes.Music;
 
 internal static class SourcePreparation
 {
-    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows() 
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase
         : StringComparison.Ordinal;
-    
+
     private const long UnusedGroupId = 0;
 
     public static async Task<IReadOnlyList<PreparedTrack>> PrepareAsync(
@@ -19,22 +19,41 @@ internal static class SourcePreparation
         ISourceFileSystem fileSystem,
         SyncWorkspace workspace,
         CancellationToken cancellationToken,
-        bool artworkOnly = false)
+        bool artworkOnly = false,
+        GroupNamePrompt? prompt = null)
     {
         using var session = fileSystem.OpenSource(new DirectoryInfo(library.Root), cancellationToken);
         var artworkCache = new ArtworkCache(workspace.Root);
         var result = new List<PreparedTrack>();
         var ids = catalogue.OccupiedIds.ToHashSet();
         var artworkId = catalogue.ArtworkHighWaterMark;
-        var albums = new Dictionary<string, long>(catalogue.Albums, GroupNameComparer.Instance);
-        var artists = new Dictionary<string, long>(catalogue.Artists, GroupNameComparer.Instance);
-        var albumSorts = new Dictionary<string, string?>(catalogue.SortNames.Albums, GroupNameComparer.Instance);
-        var albumArtistSorts = new Dictionary<string, string?>(catalogue.SortNames.AlbumArtists, GroupNameComparer.Instance);
-        var artistSorts = new Dictionary<string, string?>(catalogue.SortNames.Artists, GroupNameComparer.Instance);
-        var composerSorts = new Dictionary<string, string?>(catalogue.SortNames.Composers, GroupNameComparer.Instance);
-        var rootPrefix = Path.EndsInDirectorySeparator(library.Root)
-            ? library.Root : library.Root + Path.DirectorySeparatorChar;
-        
+
+        var artists = Resolver(
+            MusicGroupKind.AlbumArtist,
+            catalogue.ArtistGroups,
+            catalogue.Artists,
+            catalogue.SortNames.AlbumArtists);
+
+        var albums = Resolver(
+            MusicGroupKind.Album,
+            catalogue.AlbumGroups,
+            catalogue.Albums,
+            catalogue.SortNames.Albums);
+
+        var performers = Resolver(
+            MusicGroupKind.Artist,
+            null,
+            null,
+            catalogue.SortNames.Artists);
+
+        var composers = Resolver(
+            MusicGroupKind.Composer,
+            null,
+            null,
+            catalogue.SortNames.Composers);
+
+        var rootPrefix = Path.EndsInDirectorySeparator(library.Root) ? library.Root : library.Root + Path.DirectorySeparatorChar;
+
         foreach (var track in plan.Add)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -115,43 +134,48 @@ internal static class SourcePreparation
                 var albumId = UnusedGroupId;
                 if (!artworkOnly)
                 {
-                    artistId = GroupId(
-                        artists,
+                    var artist = await artists.ResolveAsync(
                         metadata.AlbumArtist,
-                        ids,
-                        catalogue.ArtistGroups);
-                    
-                    albumId = GroupId(
-                        albums,
-                        CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist),
-                        ids,
-                        catalogue.AlbumGroups);
-                    
-                    PreserveSortName(
-                        albumSorts,
-                        CatalogueReader.GroupKey(metadata.Album, metadata.AlbumArtist),
-                        metadata.Item,
-                        MediaKeys.SortAlbum);
-                    
-                    PreserveSortName(
-                        albumArtistSorts,
-                        metadata.AlbumArtist,
-                        metadata.Item,
-                        MediaKeys.SortAlbumArtist);
-                    
-                    PreserveSortName(
-                        artistSorts,
+                        (string)metadata.Item[MediaKeys.SortAlbumArtist],
+                        track.RelativePath,
+                        null,
+                        cancellationToken);
+
+                    var album = await albums.ResolveAsync(
+                        metadata.Album,
+                        (string)metadata.Item[MediaKeys.SortAlbum],
+                        track.RelativePath,
+                        artist.Name,
+                        cancellationToken);
+
+                    var performer = await performers.ResolveAsync(
                         (string)metadata.Item[MediaKeys.Artist],
-                        metadata.Item,
-                        MediaKeys.SortArtist);
-                    
+                        (string)metadata.Item[MediaKeys.SortArtist],
+                        track.RelativePath,
+                        null,
+                        cancellationToken);
+
+                    metadata = metadata with { Album = album.Name, AlbumArtist = artist.Name };
+                    metadata.Item[MediaKeys.Album] = album.Name;
+                    metadata.Item[MediaKeys.AlbumArtist] = artist.Name;
+                    metadata.Item[MediaKeys.SortAlbum] = album.SortName;
+                    metadata.Item[MediaKeys.SortAlbumArtist] = artist.SortName;
+                    metadata.Item[MediaKeys.Artist] = performer.Name;
+                    metadata.Item[MediaKeys.SortArtist] = performer.SortName;
+                    artistId = artist.Id;
+                    albumId = album.Id;
+
                     if (metadata.Item.TryGetValue(MediaKeys.Composer, out var composer))
                     {
-                        PreserveSortName(
-                            composerSorts,
+                        var resolvedComposer = await composers.ResolveAsync(
                             (string)composer,
-                            metadata.Item,
-                            MediaKeys.SortComposer);
+                            (string)metadata.Item[MediaKeys.SortComposer],
+                            track.RelativePath,
+                            null,
+                            cancellationToken);
+
+                        metadata.Item[MediaKeys.Composer] = resolvedComposer.Name;
+                        metadata.Item[MediaKeys.SortComposer] = resolvedComposer.SortName;
                     }
                 }
 
@@ -173,55 +197,20 @@ internal static class SourcePreparation
         }
 
         return result;
-    }
 
-    private static long GroupId(
-        Dictionary<string, long> groups,
-        string name,
-        HashSet<long> ids,
-        IReadOnlyList<CatalogueGroup>? rows)
-    {
-        if (groups.TryGetValue(name, out var id) && id == 0)
+        MusicGroupResolver Resolver(
+            MusicGroupKind kind,
+            IReadOnlyList<CatalogueGroup>? rows,
+            IReadOnlyDictionary<string, long>? existingIds,
+            IReadOnlyDictionary<string, string?> sorts)
         {
-            var candidates = rows ?? [];
-            var conflictingIds = candidates
-                .Where(group => GroupNameComparer.Instance.Equals(group.Key, name))
-                .Select(group => group.SyncId).Where(syncId => syncId != 0)
-                .ToHashSet();
-            
-            var conflicts = candidates
-                .Where(group => conflictingIds.Contains(group.SyncId))
-                .Select(group => $"'{group.DisplayName}' (sync ID {group.SyncId})")
-                .Distinct(StringComparer.Ordinal);
-            
-            var details = string.Join(", ", conflicts);
-            throw new InvalidDataException("Cannot add music using ambiguous group '"
-                + name.Replace(CatalogueReader.GroupKeySeparator, '/')
-                + "'. " + (details.Length == 0 ? "No unique insertion target is available."
-                    : "Conflicting entries: " + details));
+            return new MusicGroupResolver(
+                kind,
+                rows,
+                existingIds,
+                sorts,
+                ids,
+                prompt);
         }
-
-        if (!groups.ContainsKey(name))
-        {
-            groups[name] = id = LibraryPreferences.NewId(ids);
-        }
-
-        return id;
     }
-
-    private static void PreserveSortName(
-        Dictionary<string, string?> groups,
-        string name,
-        Dictionary<string, object> item,
-        string key)
-    {
-        if (!groups.TryGetValue(name, out var sort))
-        {
-            sort = (string)item[key];
-            groups.Add(name, sort);
-        }
-
-        item[key] = sort ?? throw new InvalidDataException("Ambiguous music group sort name.");
-    }
-
 }

@@ -38,6 +38,8 @@ internal sealed class SimulatedSyncDevice : IDisposable
 
     public Action<AfcPeer>? ConfigureFileConnection { get; init; }
 
+    public GroupNamePrompt? PromptForGroupName { get; init; }
+
     public uint Anchor => this.catalogue.Anchor;
 
     public SimulatedSyncDevice(bool keepExistingTrack = false)
@@ -81,7 +83,8 @@ internal sealed class SimulatedSyncDevice : IDisposable
             this.CreateTransport(),
             TextWriter.Null)
         {
-            OpenConnection = this.OpenAsync
+            OpenConnection = this.OpenAsync,
+            PromptForGroupName = this.PromptForGroupName
         };
         var options = new SyncOptions
         {
@@ -206,6 +209,16 @@ internal sealed class SimulatedSyncDevice : IDisposable
     public Task<DeviceCatalogue> ReadCatalogueAsync()
     {
         return CatalogueReader.ReadAsync(this.catalogue.Snapshot(), CancellationToken.None);
+    }
+
+    public void AddAlbumArtist(long rowId, long syncId, string name, string sortName)
+    {
+        this.catalogue.AddAlbumArtist(
+            rowId,
+            syncId,
+            name,
+            sortName);
+        this.RefreshCatalogue();
     }
 
     private void CompleteAsset(string assetId, Dictionary<string, object> operation, string path)

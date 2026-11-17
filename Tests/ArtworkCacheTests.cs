@@ -13,7 +13,7 @@ public sealed class ArtworkCacheTests
         var cache = new ArtworkCache(workspace.Root);
         var source = jpeg ? ArtworkImage.Read(FeatureTestData.Png()).Bytes : FeatureTestData.Png();
         var first = cache.Read(source) with { CacheId = 101 };
-        var second = cache.Read(source.ToArray()) with { CacheId = 102 };
+        var second = cache.Read([.. source]) with { CacheId = 102 };
         Assert.That(first.LocalPath, Is.Not.Null);
         Assert.That(second.LocalPath, Is.EqualTo(first.LocalPath));
         Assert.That(second.Bytes, Is.EqualTo(first.Bytes));

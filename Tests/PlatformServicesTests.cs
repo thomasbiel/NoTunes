@@ -26,6 +26,8 @@ public sealed class PlatformServicesTests
         Assert.That(services.GetRequiredService<ISourceFileSystem>(), windows ? Is.TypeOf<WindowsSourceFileSystem>() : Is.TypeOf<LinuxSourceFileSystem>());
         Assert.That(services.GetRequiredService<CommandContext>(), Is.Not.Null);
         Assert.That(services.GetRequiredService<SyncEngine>(), Is.Not.Null);
+        Assert.That(services.GetRequiredService<SourceHashCache>().DirectoryPath, Is.EqualTo(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NoTunes", "hash-cache")));
     }
 
     [Test]

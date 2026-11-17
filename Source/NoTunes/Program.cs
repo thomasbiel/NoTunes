@@ -1,7 +1,7 @@
 namespace NoTunes;
 
 using CommandLine;
-using NoTunes.Cli;
+using Cli;
 using System.Globalization;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -36,7 +36,11 @@ internal static class Program
         try
         {
             var serviceProviderOptions = new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true };
-            await using var services = new ServiceCollection().AddNoTunes(output, error).BuildServiceProvider(serviceProviderOptions);
+            var input = Console.IsInputRedirected ? null : Console.In;
+            await using var services = new ServiceCollection()
+                .AddNoTunes(output, error, input)
+                .BuildServiceProvider(serviceProviderOptions);
+
             var context = services.GetRequiredService<CommandContext>();
             await using var parserOutput = new StringWriter(CultureInfo.InvariantCulture);
             using var parser = new Parser(settings => settings.HelpWriter = parserOutput);
@@ -50,7 +54,7 @@ internal static class Program
                     var exitCode = errors.All(e => e is HelpRequestedError or HelpVerbRequestedError or VersionRequestedError)
                         ? ExitCodes.Success
                         : ExitCodes.InvalidArguments;
-                    
+
                     await (exitCode == ExitCodes.Success ? output : error).WriteAsync(parserOutput.ToString());
                     return exitCode;
                 });
@@ -97,8 +101,8 @@ internal static class Program
                 continue;
             }
 
-            if (index + 1 >= arguments.Count || 
-                string.IsNullOrWhiteSpace(arguments[index + 1]) || 
+            if (index + 1 >= arguments.Count ||
+                string.IsNullOrWhiteSpace(arguments[index + 1]) ||
                 arguments[index + 1].StartsWith(LongOptionPrefix, StringComparison.Ordinal))
             {
                 throw new InvalidArgumentsException($"{option} requires a value.");

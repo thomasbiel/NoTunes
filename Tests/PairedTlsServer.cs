@@ -34,12 +34,12 @@ internal sealed class PairedTlsServer : DefaultTlsServer
             crypto,
             this.credentials.DeviceKeys.Private,
             new Certificate([crypto.CreateCertificate(this.identity.DeviceCertificate)]),
-            SignatureAndHashAlgorithm.GetInstance(Org.BouncyCastle.Tls.HashAlgorithm.sha256, SignatureAlgorithm.rsa));
+            SignatureAndHashAlgorithm.GetInstance(HashAlgorithm.sha256, SignatureAlgorithm.rsa));
     }
 
     public override CertificateRequest GetCertificateRequest()
     {
-        return new([ClientCertificateType.rsa_sign], [SignatureAndHashAlgorithm.GetInstance(Org.BouncyCastle.Tls.HashAlgorithm.sha256, SignatureAlgorithm.rsa)], []);
+        return new([ClientCertificateType.rsa_sign], [SignatureAndHashAlgorithm.GetInstance(HashAlgorithm.sha256, SignatureAlgorithm.rsa)], []);
     }
 
     public override void NotifyClientCertificate(Certificate certificate)

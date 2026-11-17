@@ -10,11 +10,8 @@ public sealed class InitializationTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(1);
 
-    [TestCase(false, false)]
-    [TestCase(false, true)]
-    [TestCase(true, false)]
-    [TestCase(true, true)]
-    public async Task Clears_Own_Staging_After_A_Committed_Initialization_Unless_Dry_Run(bool dryRun, bool partial)
+    [Test, Combinatorial]
+    public async Task Clears_Own_Staging_After_A_Committed_Initialization_Unless_Dry_Run([Values] bool dryRun, [Values] bool partial)
     {
         using var state = new SyncWorkspace();
         using var fixture = Fresh();
@@ -33,14 +30,10 @@ public sealed class InitializationTests
         await using var afc = new AfcClient(files, Timeout);
         await using var peer = new AtcPeer();
         await using var atc = new AtcClient(peer, Timeout);
-        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
-        var result = await initializer.InitializeAsync(
+        var result = await InitializeAsync(
             afc,
             atc,
-            "Test iPhone",
-            "phone",
-            new InitOptions { StateFolder = state.Root, DryRun = dryRun },
-            CancellationToken.None);
+            new InitOptions { StateFolder = state.Root, DryRun = dryRun });
 
         Assert.That(result.AlreadyInitialized, Is.True);
         Assert.That(result.DryRun, Is.EqualTo(dryRun));
@@ -68,7 +61,8 @@ public sealed class InitializationTests
         using var fixture = Fresh();
         var saved = await SaveStateAsync(fixture, state.Root);
         CommitInitialization(fixture, saved);
-        var foreign = new byte[] { 90, 91, 92 };
+
+        var foreign = "Z[\\"u8.ToArray();
         var files = new AfcPeer { AllowWrites = true };
         files.Directories.Add(SyncPaths.MetadataDirectory);
         files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
@@ -77,28 +71,24 @@ public sealed class InitializationTests
         files.Files[SyncPaths.Metadata] = saved.Operation;
         files.Files[SyncPaths.Metadata + SyncPaths.SignatureSuffix] = saved.Signature!;
         files.Files[foreignPath] = foreign;
+
         await using var afc = new AfcClient(files, Timeout);
         await using var peer = new AtcPeer();
         await using var atc = new AtcClient(peer, Timeout);
-        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
-        await Assert.ThrowsAsync<IOException>(() => initializer.InitializeAsync(
+        await Assert.ThrowsAsync<IOException>(() => InitializeAsync(
             afc,
             atc,
-            "Test iPhone",
-            "phone",
-            new InitOptions { StateFolder = state.Root },
-            CancellationToken.None));
+            new InitOptions { StateFolder = state.Root }));
+
         Assert.That(files.Files[foreignPath], Is.EqualTo(foreign));
         Assert.That(peer.SentMessages(), Is.Empty);
     }
 
-    [TestCase(false, SyncPaths.Metadata)]
-    [TestCase(false, SyncPaths.Metadata + SyncPaths.SignatureSuffix)]
-    [TestCase(false, SyncPaths.MetadataDirectory + "/Sync_00000001.plist")]
-    [TestCase(true, SyncPaths.Metadata)]
-    [TestCase(true, SyncPaths.Metadata + SyncPaths.SignatureSuffix)]
-    [TestCase(true, SyncPaths.MetadataDirectory + "/Sync_00000001.plist")]
-    public async Task Preserves_Foreign_Staging_Before_The_Receiver_Prepares_A_Session(bool recovering, string foreignPath)
+    [Test]
+    public async Task Preserves_Foreign_Staging_Before_The_Receiver_Prepares_A_Session(
+        [Values] bool recovering,
+        [Values(SyncPaths.Metadata, SyncPaths.Metadata + SyncPaths.SignatureSuffix,
+            SyncPaths.MetadataDirectory + "/Sync_00000001.plist")] string foreignPath)
     {
         using var state = new SyncWorkspace();
         using var fixture = Fresh();
@@ -108,7 +98,7 @@ public sealed class InitializationTests
             File.Delete(Path.Combine(DeviceState.DirectoryFor(state.Root, "phone"), "initialization.json"));
         }
 
-        var foreign = new byte[] { 90, 91, 92 };
+        var foreign = "Z[\\"u8.ToArray();
         var files = new AfcPeer { AllowWrites = true };
         files.Directories.Add(SyncPaths.MetadataDirectory);
         files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
@@ -134,14 +124,11 @@ public sealed class InitializationTests
         await using var afc = new AfcClient(files, Timeout);
         await using var atc = new AtcClient(peer, Timeout);
         await atc.ReadSyncStatusAsync(CancellationToken.None);
-        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
-        await Assert.ThrowsAsync<IOException>(() => initializer.InitializeAsync(
+        await Assert.ThrowsAsync<IOException>(() => InitializeAsync(
             afc,
             atc,
-            "Test iPhone",
-            "phone",
-            new InitOptions { StateFolder = state.Root },
-            CancellationToken.None));
+            new InitOptions { StateFolder = state.Root }));
+
         Assert.That(started, Is.False);
         Assert.That(files.Files[foreignPath], Is.EqualTo(foreign));
     }
@@ -162,17 +149,15 @@ public sealed class InitializationTests
             Assert.That(files.Files.ContainsKey(SyncPaths.Metadata), Is.False);
             Assert.That(files.Files.ContainsKey(SyncPaths.Metadata + SyncPaths.SignatureSuffix), Is.False);
         });
+
         await using var afc = new AfcClient(files, Timeout);
         await using var atc = new AtcClient(peer, Timeout);
         await atc.ReadSyncStatusAsync(CancellationToken.None);
-        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
-        var result = await initializer.InitializeAsync(
+        var result = await InitializeAsync(
             afc,
             atc,
-            "Test iPhone",
-            "phone",
-            new InitOptions { StateFolder = state.Root },
-            CancellationToken.None);
+            new InitOptions { StateFolder = state.Root });
+
         Assert.That(result.DatabaseId, Is.EqualTo(saved.DatabaseId));
     }
 
@@ -187,21 +172,22 @@ public sealed class InitializationTests
     {
         using var state = new SyncWorkspace();
         using var fixture = Fresh();
-        var before = await CatalogueReader.ReadAsync(
-            fixture.Snapshot(), CancellationToken.None, allowUninitialized: true);
+        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None, allowUninitialized: true);
+
         var saved = new InitializationState(
             LibraryPreferences.Create(),
             2001,
             2002,
             SyncOperations.Initialize(2001, 2002, "Test iPhone"),
             CatalogueCheckpoint.Capture(before));
+
         DeviceState.Save(Path.Combine(DeviceState.DirectoryFor(state.Root, "phone"), "initialization.json"), saved);
         fixture.Execute($"INSERT INTO db_info VALUES({saved.DatabaseId},{saved.ContainerId}); "
             + $"INSERT INTO _MLDatabaseProperties VALUES('MLSyncClientSyncAnchor','{revision}');");
+
         if (hasPrimaryContainer)
         {
-            fixture.Execute($"INSERT INTO container(sync_id,container_pid) "
-                + $"VALUES({saved.ContainerId},{saved.ContainerId});");
+            fixture.Execute($"INSERT INTO container(sync_id,container_pid) VALUES({saved.ContainerId},{saved.ContainerId});");
         }
 
         var files = new AfcPeer();
@@ -211,28 +197,23 @@ public sealed class InitializationTests
         await using var afc = new AfcClient(files, Timeout);
         await using var peer = new AtcPeer();
         await using var atc = new AtcClient(peer, Timeout);
-        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
         var options = new InitOptions { StateFolder = state.Root };
         if (revision == 0 || !hasPrimaryContainer)
         {
-            var exception = await Assert.ThrowsAsync<IOException>(() => initializer.InitializeAsync(
+            var exception = await Assert.ThrowsAsync<IOException>(() => InitializeAsync(
                 afc,
                 atc,
-                "Test iPhone",
-                "phone",
-                options,
-                CancellationToken.None));
+                options));
+
             Assert.That(exception!.Message, Does.Contain("incomplete"));
         }
         else
         {
-            var result = await initializer.InitializeAsync(
+            var result = await InitializeAsync(
                 afc,
                 atc,
-                "Test iPhone",
-                "phone",
-                options,
-                CancellationToken.None);
+                options);
+
             Assert.That(result.AlreadyInitialized, Is.True);
             Assert.That(result.DatabaseId, Is.EqualTo(saved.DatabaseId));
         }
@@ -262,15 +243,13 @@ public sealed class InitializationTests
         await using var afc = new AfcClient(files, Timeout);
         await using var atc = new AtcClient(peer, Timeout);
         await atc.ReadSyncStatusAsync(CancellationToken.None);
-        var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
+
         var options = new InitOptions { StateFolder = state.Root, DryRun = dryRun };
-        var result = await initializer.InitializeAsync(
+        var result = await InitializeAsync(
             afc,
             atc,
-            "Test iPhone",
-            "phone",
-            options,
-            CancellationToken.None);
+            options);
+
         Assert.That(result.DryRun, Is.EqualTo(dryRun));
         Assert.That(files.Files.ContainsKey(SyncPaths.Preferences), Is.EqualTo(!dryRun));
         if (dryRun)
@@ -327,6 +306,7 @@ public sealed class InitializationTests
             "phone",
             options,
             CancellationToken.None);
+
         Assert.That(result.DatabaseId, Is.EqualTo(saved.DatabaseId));
         Assert.That(retry.Files[SyncPaths.Preferences], Is.EqualTo(saved.Preferences));
     }
@@ -343,16 +323,25 @@ public sealed class InitializationTests
         await using var afc = new AfcClient(files, Timeout);
         await using var atc = new AtcClient(Peer(files, fixture), Timeout);
         await atc.ReadSyncStatusAsync(CancellationToken.None);
+        await Assert.ThrowsAsync<IOException>(() => InitializeAsync(
+            afc,
+            atc,
+            new InitOptions { StateFolder = state.Root }));
+
+        Assert.That(files.WritePackets, Is.Empty);
+        Assert.That(files.Files.ContainsKey(SyncPaths.Lock), Is.False);
+    }
+
+    private static Task<InitializationResult> InitializeAsync(AfcClient afc, AtcClient atc, InitOptions options)
+    {
         var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
-        await Assert.ThrowsAsync<IOException>(() => initializer.InitializeAsync(
+        return initializer.InitializeAsync(
             afc,
             atc,
             "Test iPhone",
             "phone",
-            new InitOptions { StateFolder = state.Root },
-            CancellationToken.None));
-        Assert.That(files.WritePackets, Is.Empty);
-        Assert.That(files.Files.ContainsKey(SyncPaths.Lock), Is.False);
+            options,
+            CancellationToken.None);
     }
 
     private static void CommitInitialization(CatalogueFixture fixture, InitializationState saved)
@@ -384,6 +373,7 @@ public sealed class InitializationTests
             SyncOperations.Initialize(2001, 2002, "Test iPhone"),
             CatalogueCheckpoint.Capture(before),
             [1, 2, 3]);
+
         DeviceState.Save(Path.Combine(DeviceState.DirectoryFor(root, "phone"), "initialization.json"), saved);
         return saved;
     }
@@ -408,14 +398,17 @@ public sealed class InitializationTests
                 var document = Plist.Parse(files.Files[SyncPaths.Metadata]).AsDict();
                 var operations = (object[])document[MediaKeys.Operations];
                 Assert.That(operations, Has.Length.EqualTo(2));
+
                 var database = operations[0].AsDict().Number(MediaKeys.PersistentId);
                 var playlist = operations[1].AsDict();
                 Assert.That(playlist.Text(MediaKeys.Operation), Is.EqualTo("insert_playlist"));
                 Assert.That(playlist.Dictionary("container").Flag("is_hidden"), Is.True);
+
                 var container = playlist.Number(MediaKeys.PersistentId);
                 fixture.Execute($"INSERT INTO db_info VALUES({database},{container}); "
                     + $"INSERT INTO container(sync_id,container_pid) VALUES({container},{container}); "
                     + "INSERT INTO _MLDatabaseProperties VALUES('MLSyncClientSyncAnchor','1');");
+
                 files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
                 files.Files.Remove(SyncPaths.Metadata);
                 files.Files.Remove(SyncPaths.Metadata + SyncPaths.SignatureSuffix);

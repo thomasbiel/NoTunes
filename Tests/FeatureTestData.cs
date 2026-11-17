@@ -5,6 +5,16 @@ namespace NoTunes.Tests;
 
 internal static class FeatureTestData
 {
+    public static TagLib.Picture FrontCover()
+    {
+        return new TagLib.Picture
+        {
+            Data = [.. Png()],
+            MimeType = "image/png",
+            Type = TagLib.PictureType.FrontCover
+        };
+    }
+
     public static byte[] Png()
     {
         using var output = new MemoryStream();

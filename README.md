@@ -163,6 +163,17 @@ After building, the equivalent executable is
   that both contents and file attributes agree. These captures stay in memory.
 - `scan` recursively enumerates `.mp3` files, including `.MP3`, and hashes their
   complete bytes using SHA-256. This is an inventory, not MP3 audio validation.
+  `scan` and `sync` persist source hashes in the user's local NoTunes data folder:
+  `%LOCALAPPDATA%\NoTunes\hash-cache` on Windows and
+  `$XDG_DATA_HOME/NoTunes/hash-cache` (normally `~/.local/share/NoTunes/hash-cache`)
+  on Linux. The .NET local application data API resolves the platform-specific path.
+  Subsequent runs reuse hashes when the source root, relative path, size and UTC
+  modification time match, avoiding full reads of unchanged source files over the
+  network. Replacing bytes while preserving both size and modification time is
+  assumed not to occur. Delete the cache folder to force a full source hash scan.
+  Cache files are replaced atomically after successful scans; unreadable or corrupt
+  caches are rebuilt, and cache write failures produce diagnostics without aborting
+  the scan. `--state-folder` controls recovery journals, not this source cache.
   An inaccessible folder, locked file, detected file change, symlink or junction
   aborts the scan. It does not silently treat unreadable data as a deleted track.
   Safe scanning requires read access to the source's parent folders.
@@ -188,9 +199,9 @@ arbitrarily. Errors go to stderr. JSON results go to stdout.
 
 ### Synchronization and recovery
 
-The first comparison can take time: candidate device files are read over USB and
+Each comparison can take time: candidate device files are read over USB and
 hashed on the host. Only files whose size occurs in the source need hashing.
-No device-side file-hash operation is used. Diagnostics go to stderr; `--json`
+Device hashes are not cached. No device-side file-hash operation is used. Diagnostics go to stderr; `--json`
 prints the plan, dry-run flag and verified batch count to stdout.
 
 Sync catalogue checks retry transient read inconsistencies up to five times.
@@ -305,14 +316,25 @@ match in each album or artist name.
 
 Existing album and album-artist rows may share a nonzero host sync ID, including
 rows with different name spellings. NoTunes reads those rows separately by their
-internal database IDs and preserves existing track assignments. Unchanged tracks,
-unrelated additions and artwork-only updates remain supported. An audio addition
-that would reuse a shared sync ID or an ambiguous name stops preparation before
-new device changes are staged; the error identifies the conflicting groups.
-NoTunes does not merge or rename existing groups. Journals retain the individual
-group rows so recovery and batch verification can detect identity or membership
-changes. Older checkpoints without that evidence remain usable with unambiguous
-group sync IDs.
+internal database IDs and preserves existing track assignments. Audio additions
+automatically reuse an existing group when its name uniquely identifies a row;
+albums also require the album artist to match. For example, `Boney M` and
+`Boney M.` remain distinguishable even with a shared sync ID. Verification checks
+the new track's internal group rows as well as names and sync IDs.
+
+If a name identifies multiple rows or the sort name is ambiguous, an interactive
+run asks for an unambiguous existing target name or a distinct name for a new
+group. The question includes the affected source file and conflicting entries.
+The answer applies to that source group for the current run. Empty input cancels;
+Ctrl+C also cancels while waiting for an answer. With redirected standard input,
+the CLI reports the conflict instead of waiting for interactive input. Questions
+go to stderr, so `--json` results remain valid JSON. Dry-run performs the same
+resolution without staging device changes. Choices affect the inserted metadata,
+not the source file's tags or existing track assignments. NoTunes does not merge,
+rename or re-key existing groups. Journals retain individual group rows so
+recovery and batch verification can detect identity or membership changes.
+Older checkpoints without that evidence remain usable with unambiguous group
+sync IDs. Artwork-only updates do not require resolving audio insertion groups.
 
 ## Device prerequisites
 

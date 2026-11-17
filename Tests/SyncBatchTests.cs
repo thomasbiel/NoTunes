@@ -23,7 +23,7 @@ public sealed class SyncBatchTests
         Assert.That(batch.Operation.Length, Is.LessThanOrEqualTo(SyncProtocol.MaxOperationBytes));
         Assert.That(SyncOperations.SerializeWithinLimit(
             catalogue,
-            tracks.Take(batch.Additions.Count + 1).ToArray(),
+            [.. tracks.Take(batch.Additions.Count + 1)],
             []), Is.Null);
         Assert.That(BinaryPlist.Read(batch.Operation).AsDict()[MediaKeys.Operations],
             Has.Length.EqualTo(batch.Additions.Count + 1));

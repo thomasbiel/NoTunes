@@ -53,7 +53,7 @@ public sealed class CatalogueGroupCompatibilityTests
 
     [TestCase(ArtistName)]
     [TestCase(ArtistAlias)]
-    public async Task Refuses_Additions_Using_A_Shared_Artist_Sync_Id_With_The_Conflicting_Names(string artist)
+    public async Task Resolves_A_Shared_Artist_Sync_Id_By_Its_Unique_Name(string artist)
     {
         using var fixture = CreateSharedGroups();
         var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
@@ -65,9 +65,9 @@ public sealed class CatalogueGroupCompatibilityTests
             "Independent Album",
             artist);
 
-        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => SourceTestData.PrepareAsync(source.Root, catalogue, output));
-        Assert.That(exception!.Message, Does.Contain(ArtistName).And.Contain(ArtistAlias));
-        Assert.That(exception.Message, Does.Contain(SharedArtistId.ToString()));
+        var prepared = await SourceTestData.PrepareAsync(source.Root, catalogue, output);
+        Assert.That(prepared.Single().ArtistId, Is.EqualTo(SharedArtistId));
+        Assert.That(prepared.Single().Metadata.AlbumArtist, Is.EqualTo(artist));
     }
 
     [Test]
@@ -96,7 +96,7 @@ public sealed class CatalogueGroupCompatibilityTests
 
     [TestCase(AlbumName)]
     [TestCase("Other Album")]
-    public async Task Refuses_Additions_Using_A_Shared_Album_Sync_Id(string album)
+    public async Task Resolves_A_Shared_Album_Sync_Id_By_Its_Qualified_Name(string album)
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute("INSERT INTO album VALUES(13,1012,'Other Album',11,'Other Sort');");
@@ -109,9 +109,73 @@ public sealed class CatalogueGroupCompatibilityTests
             album,
             ArtistName);
 
-        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => SourceTestData.PrepareAsync(source.Root, catalogue, output));
-        Assert.That(exception!.Message, Does.Contain(AlbumName).And.Contain("Other Album"));
-        Assert.That(exception.Message, Does.Contain(SharedAlbumId.ToString()));
+        var prepared = await SourceTestData.PrepareAsync(source.Root, catalogue, output);
+        Assert.That(prepared.Single().AlbumId, Is.EqualTo(SharedAlbumId));
+        Assert.That(prepared.Single().Metadata.Album, Is.EqualTo(album));
+    }
+
+    [Test]
+    public async Task Verifies_The_Actual_Group_Row_When_Sync_Ids_Are_Shared([Values] bool album)
+    {
+        using var fixture = CreateSharedGroups();
+        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        using var source = new SyncWorkspace();
+        using var output = new SyncWorkspace();
+        SourceTestData.WriteTrack(
+            source.Root,
+            "new.mp3",
+            AlbumName,
+            ArtistAlias);
+        var addition = (await SourceTestData.PrepareAsync(source.Root, before, output)).Single();
+        var stored = FeatureTestData.Stored(addition);
+        stored = stored with
+        {
+            Metadata = stored.Metadata! with { AlbumRowId = 13, AlbumArtistRowId = 22 }
+        };
+        var after = before with { Anchor = before.Anchor + 1, Tracks = [.. before.Tracks, stored] };
+        Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
+            before,
+            after,
+            [addition],
+            []));
+
+        var wrong = stored with
+        {
+            Metadata = album ? stored.Metadata! with { AlbumRowId = 12 }
+                : stored.Metadata! with { AlbumArtistRowId = 11 }
+        };
+        Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
+            before,
+            after with { Tracks = [.. before.Tracks, wrong] },
+            [addition],
+            []));
+    }
+
+    [Test]
+    public async Task Cancels_Group_Selection_Before_Any_Device_Write(
+        [Values] bool dryRun,
+        [Values] bool endOfInput)
+    {
+        using var fixture = CreateSharedGroups();
+        fixture.Execute("UPDATE album_artist SET album_artist='Other Artist' WHERE album_artist_pid=11;");
+        using var source = new SyncWorkspace();
+        using var state = new SyncWorkspace();
+        using var device = new SimulatedSyncDevice
+        {
+            PromptForGroupName = (_, _) => ValueTask.FromResult<string?>(endOfInput ? null : string.Empty)
+        };
+        device.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        SourceTestData.WriteTrack(
+            source.Root,
+            "affected.mp3",
+            AlbumName,
+            ArtistAlias);
+        var failure = await Assert.CatchAsync<Exception>(() => device.RunAsync(source.Root, state.Root, dryRun));
+        Assert.That(failure, endOfInput ? Is.TypeOf<InvalidDataException>() : Is.TypeOf<OperationCanceledException>());
+        Assert.That(device.Batches, Is.Empty);
+        Assert.That(device.FileConnections.SelectMany(connection => connection.WritePackets), Is.Empty);
+        Assert.That(device.Files.ContainsKey(SyncPaths.Lock), Is.False);
+        Assert.That(Directory.GetFiles(state.Root, "pending.json", SearchOption.AllDirectories), Is.Empty);
     }
 
     [Test]
@@ -261,6 +325,7 @@ public sealed class CatalogueGroupCompatibilityTests
     public async Task Refuses_Ambiguous_Additions_Before_Any_Device_Write_Even_In_Dry_Run([Values] bool dryRun)
     {
         using var fixture = CreateSharedGroups();
+        fixture.Execute("UPDATE album_artist SET album_artist='Other Artist' WHERE album_artist_pid=11;");
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice();
@@ -278,7 +343,7 @@ public sealed class CatalogueGroupCompatibilityTests
     }
 
     [Test]
-    public async Task Previews_Unrelated_Changes_With_Shared_Groups_Without_Writing_Device_Or_State()
+    public async Task Previews_Changes_With_Shared_Groups_Without_Writing_Device_Or_State([Values] bool shared)
     {
         using var fixture = CreateSharedGroups();
         using var source = new SyncWorkspace();
@@ -288,8 +353,8 @@ public sealed class CatalogueGroupCompatibilityTests
         SourceTestData.WriteTrack(
             source.Root,
             "new.mp3",
-            "Independent Album",
-            "Independent Artist");
+            shared ? AlbumName : "Independent Album",
+            shared ? ArtistAlias : "Independent Artist");
         var result = await device.RunAsync(source.Root, state.Root, dryRun: true);
         Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
         Assert.That(result.Plan.Delete.Select(track => track.Id), Is.EqualTo([101]));

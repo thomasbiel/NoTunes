@@ -10,6 +10,7 @@ namespace NoTunes.Tests;
 public sealed class SourceScannerTests
 {
     private string root = null!;
+    private string cacheDirectory = null!;
     private SourceScanner scanner = null!;
 
     [SetUp]
@@ -17,8 +18,9 @@ public sealed class SourceScannerTests
     {
         this.root = Path.Combine(Path.GetTempPath(), "NoTunes-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(this.root);
+        this.cacheDirectory = Path.Combine(this.root, "cache");
         ISourceFileSystem fileSystem = OperatingSystem.IsWindows() ? new WindowsSourceFileSystem() : new LinuxSourceFileSystem();
-        this.scanner = new SourceScanner(fileSystem);
+        this.scanner = new SourceScanner(fileSystem, new SourceHashCache(this.cacheDirectory, TextWriter.Null));
     }
 
     [Test]
@@ -38,15 +40,34 @@ public sealed class SourceScannerTests
     }
 
     [Test]
-    public async Task Hashes_Content_Changes_Between_Scans_Even_When_Size_And_Timestamp_Stay_The_Same()
+    public async Task Reuses_Persisted_Hashes_Without_Reading_Unchanged_File_Contents()
     {
         var file = Path.Combine(this.root, "track.mp3");
         await File.WriteAllTextAsync(file, "abc");
         var before = await this.scanner.ScanAsync(this.root, CancellationToken.None);
-        await File.WriteAllTextAsync(file, "xyz");
-        File.SetLastWriteTimeUtc(file, before.Tracks[0].LastWriteTimeUtc);
+        var fileSystem = new MutatingSourceFileSystem(file, () => Assert.Fail("Cached contents must not be read."));
+        var scanner = new SourceScanner(fileSystem, new SourceHashCache(this.cacheDirectory, TextWriter.Null));
+        var after = await scanner.ScanAsync(this.root + Path.DirectorySeparatorChar, CancellationToken.None);
+        Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
+        Assert.That(fileSystem.Session.OpenedStream, Is.Not.Null, "File guards must also run on cache hits.");
+        Assert.That(fileSystem.Session.OpenedStream!.MutationPerformed, Is.False);
+        Assert.That(fileSystem.Session.Disposed, Is.True);
+    }
+
+    [Test]
+    public async Task Rehashes_When_Size_Or_Timestamp_Changes([Values] bool changeLength)
+    {
+        var file = Path.Combine(this.root, "track.mp3");
+        await File.WriteAllTextAsync(file, "abc");
+        var before = await this.scanner.ScanAsync(this.root, CancellationToken.None);
+        await File.WriteAllTextAsync(file, changeLength ? "abcd" : "xyz");
+        File.SetLastWriteTimeUtc(file, changeLength
+            ? before.Tracks[0].LastWriteTimeUtc
+            : before.Tracks[0].LastWriteTimeUtc.AddMinutes(1));
         var after = await this.scanner.ScanAsync(this.root, CancellationToken.None);
         Assert.That(before.Tracks[0].Sha256, Is.Not.EqualTo(after.Tracks[0].Sha256));
+        Assert.That(after.Tracks[0].Sha256, Is.EqualTo(Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(file)))));
     }
 
     [Test]
@@ -100,6 +121,18 @@ public sealed class SourceScannerTests
             FileAccess.ReadWrite,
             FileShare.None);
         await Assert.ThrowsAsync<IOException>(() => this.scanner.ScanAsync(this.root, CancellationToken.None));
+    }
+
+    [Test]
+    public async Task Cached_Files_Still_Require_Access_Through_The_File_Guards()
+    {
+        var file = Path.Combine(this.root, "track.mp3");
+        await File.WriteAllTextAsync(file, "abc");
+        await this.scanner.ScanAsync(this.root, CancellationToken.None);
+        var scanner = new SourceScanner(
+            new BudgetSourceFileSystem { FailRead = true },
+            new SourceHashCache(this.cacheDirectory, TextWriter.Null));
+        await Assert.ThrowsAsync<IOException>(() => scanner.ScanAsync(this.root, CancellationToken.None));
     }
 
     [Test]

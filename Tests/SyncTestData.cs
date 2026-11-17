@@ -51,6 +51,11 @@ internal static class SyncTestData
             (AtcKeys.DeviceInfo, Plist.Dict((AtcKeys.Grappa, GrappaSignerTests.Reply())))));
     }
 
+    public static Dictionary<string, object>[] SessionMessages(params Dictionary<string, object>[] messages)
+    {
+        return [Capabilities(), Allowed(), Ready(), .. messages];
+    }
+
     public static Dictionary<string, object> Asset(string id, long parts = SyncProtocol.AudioPart)
     {
         return Plist.Dict(

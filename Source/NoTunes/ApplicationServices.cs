@@ -10,7 +10,7 @@ public static class ApplicationServices
 {
     extension(IServiceCollection services)
     {
-        public IServiceCollection AddNoTunes(TextWriter output, TextWriter error)
+        public IServiceCollection AddNoTunes(TextWriter output, TextWriter error, TextReader? input = null)
         {
             if (OperatingSystem.IsWindows())
                 services.AddWindowsPlatform();
@@ -19,25 +19,31 @@ public static class ApplicationServices
             else
                 throw new PlatformNotSupportedException("NoTunes currently provides platform services for Windows and Linux.");
         
-            return services.AddApplication(output, error);
+            return services.AddApplication(output, error, input);
         }
 
-        internal IServiceCollection AddApplication(TextWriter output, TextWriter error)
+        internal IServiceCollection AddApplication(TextWriter output, TextWriter error, TextReader? input = null)
         {
             ArgumentNullException.ThrowIfNull(output);
             ArgumentNullException.ThrowIfNull(error);
+            services.AddSingleton(new GroupResolutionPrompt(input ?? TextReader.Null, error));
+            services.AddSingleton(_ => new SourceHashCache(
+                Path.Combine(DeviceState.Root(null), SourceHashCache.DirectoryName), error));
             services.AddTransient<SourceScanner>();
             services.AddTransient(provider => new LibraryInitializer(
-                provider.GetRequiredService<NoTunes.Platform.IUsbMuxTransport>(), error));
+                provider.GetRequiredService<Platform.IUsbMuxTransport>(), error));
             services.AddTransient(provider => new SyncEngine(
                 provider.GetRequiredService<SourceScanner>(),
-                provider.GetRequiredService<NoTunes.Platform.ISourceFileSystem>(),
-                provider.GetRequiredService<NoTunes.Platform.IUsbMuxTransport>(),
-                error));
+                provider.GetRequiredService<Platform.ISourceFileSystem>(),
+                provider.GetRequiredService<Platform.IUsbMuxTransport>(),
+                error)
+            {
+                PromptForGroupName = provider.GetRequiredService<GroupResolutionPrompt>().ReadAsync
+            });
         
             services.AddTransient(provider => new CommandContext(
                 provider.GetRequiredService<SourceScanner>(),
-                provider.GetRequiredService<NoTunes.Platform.IUsbMuxTransport>(),
+                provider.GetRequiredService<Platform.IUsbMuxTransport>(),
                 provider.GetRequiredService<SyncEngine>(),
                 provider.GetRequiredService<LibraryInitializer>(),
                 output));
