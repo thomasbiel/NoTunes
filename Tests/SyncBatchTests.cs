@@ -8,6 +8,28 @@ namespace NoTunes.Tests;
 public sealed class SyncBatchTests
 {
     [Test]
+    public void Chooses_The_Largest_Fitting_Prefix_For_Long_Metadata([Values] bool unicode)
+    {
+        const int textLength = 4096;
+        var template = SyncTestData.Track();
+        template.Metadata.Item[MediaKeys.Title] = new string(unicode ? '界' : 't', textLength);
+        template.Metadata.Item[MediaKeys.SortTitle] = template.Metadata.Item[MediaKeys.Title];
+        template.Metadata.Item[MediaKeys.Comment] = new string('c', textLength);
+        var tracks = Enumerable.Range(0, SyncProtocol.MaxTrackChanges)
+            .Select(index => template with { Id = template.Id - index }).ToArray();
+        var catalogue = SyncPlannerTests.Catalogue([]);
+        var batch = SyncBatch.Create(catalogue, tracks, []);
+        Assert.That(batch.Additions.Count, Is.InRange(1, tracks.Length - 1));
+        Assert.That(batch.Operation.Length, Is.LessThanOrEqualTo(SyncProtocol.MaxOperationBytes));
+        Assert.That(SyncOperations.SerializeWithinLimit(
+            catalogue,
+            tracks.Take(batch.Additions.Count + 1).ToArray(),
+            []), Is.Null);
+        Assert.That(BinaryPlist.Read(batch.Operation).AsDict()[MediaKeys.Operations],
+            Has.Length.EqualTo(batch.Additions.Count + 1));
+    }
+
+    [Test]
     public void Splits_Large_Metadata_Into_Signable_Batches_Without_Losing_Changes()
     {
         const int trackCount = 499;

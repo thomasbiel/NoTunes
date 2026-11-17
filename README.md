@@ -202,6 +202,10 @@ checked against the scan hashes and read with TagLibSharp. Source access continu
 to use the platform's directory and file guards. This requires temporary disk
 space for the additions and any missing-cover repairs. Tracks without embedded
 covers are checked through a guarded read-only tag stream without making a copy.
+Validated JPEGs are also stored in the temporary directory and loaded as needed,
+so allow disk space for these cover files as well. A bounded content cache reuses
+decoding and conversion for identical embedded images while retaining distinct
+track artwork IDs.
 Invalid or changed source files abort before metadata
 is staged. The iPhone must have room for all additions plus a metadata reserve;
 pending deletions are not counted as available space.

@@ -140,10 +140,11 @@ public sealed class AfcWriteTests
     }
 
     [Test]
-    public async Task Writes_In_Bounded_Chunks_With_A_Separate_Protocol_Header_And_Verifies_Exact_Bytes()
+    public async Task Writes_In_Bounded_Chunks_With_A_Separate_Protocol_Header_And_Verifies_Exact_Bytes(
+        [Values] bool deferWrites)
     {
         var bytes = Enumerable.Range(0, 1024 * 1024 + 17).Select(i => (byte)i).ToArray();
-        var peer = new AfcPeer { AllowWrites = true };
+        var peer = new AfcPeer { AllowWrites = true, DeferWrites = deferWrites };
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(1));
         using var input = new MemoryStream(bytes);
         await afc.WriteNewFileAsync(
@@ -155,7 +156,10 @@ public sealed class AfcWriteTests
         Assert.That(peer.WritePackets, Has.Count.EqualTo(2));
         foreach (var packet in peer.WritePackets)
         {
-            Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(packet.AsSpan(16)), Is.EqualTo(48UL));
+            Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(packet.AsSpan(ProtocolFrames.AfcTotalLengthOffset)),
+                Is.EqualTo((ulong)packet.Length));
+            Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(packet.AsSpan(ProtocolFrames.AfcThisLengthOffset)),
+                Is.EqualTo((ulong)(ProtocolFrames.AfcHeaderBytes + sizeof(ulong))));
         }
 
         Assert.That(peer.OpenHandles, Is.Zero);

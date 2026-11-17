@@ -202,7 +202,7 @@ public sealed class SyncEngine(
 
         await ValidateSavedAnchorsAsync(phone.Afc, before, cancellationToken);
         var transferBytes = additions.Sum(track => (track.IsArtworkOnly ? 0 : track.Source.Size)
-            + (track.Metadata.Artwork?.Bytes.Length ?? 0));
+            + (track.Metadata.Artwork?.Length ?? 0));
         await RequireSpaceAsync(phone.Afc, transferBytes, cancellationToken);
 
         await RequireEmptyStagingAsync(phone.Afc, cancellationToken);
@@ -220,6 +220,12 @@ public sealed class SyncEngine(
             signature,
             cancellationToken,
             replacePending);
+
+        if (replacePending)
+        {
+            var pending = journal.ReadPending();
+            additions = [.. pending.Additions.Select(track => track.Restore(journal.Assets(pending)))];
+        }
 
         await DeviceStaging.WriteVerifiedAsync(
             phone.Afc,
@@ -450,7 +456,7 @@ public sealed class SyncEngine(
         }
 
         var path = SyncPaths.ArtworkOriginals + artwork.Path;
-        var hash = await afc.HashFileAsync(path, expected.Bytes.Length, cancellationToken);
+        var hash = await afc.HashFileAsync(path, expected.Length, cancellationToken);
         if (hash != expected.Sha256) throw new IOException("Permanent artwork differs from the prepared JPEG.");
     }
 

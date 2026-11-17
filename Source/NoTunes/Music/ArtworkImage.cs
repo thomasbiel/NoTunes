@@ -5,8 +5,10 @@ using StbImageWriteSharp;
 
 namespace NoTunes.Music;
 
-internal sealed record ArtworkImage(byte[] Bytes, uint CacheId = 0)
+internal sealed record ArtworkImage
 {
+    private readonly byte[]? bytes;
+    private readonly ArtworkFile? file;
     internal const int MaximumBytes = 32 * 1024 * 1024;
     private const long MaximumPixels = 16 * 1024 * 1024;
     private const int JpegQuality = 90;
@@ -21,9 +23,34 @@ internal sealed record ArtworkImage(byte[] Bytes, uint CacheId = 0)
 
     private static ReadOnlySpan<byte> JpegEndMarker => [0xff, 0xd9];
 
-    public uint Checksum => checked((uint)this.Bytes.Length + SinglePictureCount);
+    public byte[] Bytes => this.bytes ?? this.file!.ReadBytes();
 
-    public string Sha256 => Convert.ToHexString(SHA256.HashData(this.Bytes));
+    public uint CacheId { get; init; }
+
+    public int Length => this.bytes?.Length ?? this.file!.Length;
+
+    public string? LocalPath => this.file?.Path;
+
+    public uint Checksum => checked((uint)this.Length + SinglePictureCount);
+
+    public string Sha256 => this.file?.Sha256 ?? Convert.ToHexString(SHA256.HashData(this.bytes!));
+
+    public ArtworkImage(byte[] bytes, uint cacheId = 0)
+    {
+        this.bytes = bytes;
+        this.CacheId = cacheId;
+    }
+
+    internal ArtworkImage(ArtworkFile file, uint cacheId = 0)
+    {
+        this.file = file;
+        this.CacheId = cacheId;
+    }
+
+    public ArtworkImage Store(string path)
+    {
+        return new ArtworkImage(ArtworkFile.Save(path, this.Bytes), this.CacheId);
+    }
 
     public static uint Allocate(ref uint highest)
     {

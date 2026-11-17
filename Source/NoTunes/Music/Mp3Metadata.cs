@@ -17,7 +17,7 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
     private const string UnknownAlbum = "Unknown Album";
     internal const string LocationKind = "MPEG audio file";
 
-    public static Mp3Metadata Read(string path, string relativePath)
+    public static Mp3Metadata Read(string path, string relativePath, ArtworkCache? artworkCache = null)
     {
         try
         {
@@ -90,7 +90,7 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
                 album,
                 albumArtist)
             {
-                Artwork = ReadArtwork(tag)
+                Artwork = ReadArtwork(tag, artworkCache)
             };
         }
         catch (Exception e) when (e is TagLib.CorruptFileException or TagLib.UnsupportedFormatException)
@@ -105,11 +105,14 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
         return file.Tag.Pictures.Length != 0;
     }
 
-    private static ArtworkImage? ReadArtwork(TagLib.Tag tag)
+    private static ArtworkImage? ReadArtwork(TagLib.Tag tag, ArtworkCache? artworkCache)
     {
         var picture = tag.Pictures.FirstOrDefault(value => value.Type == TagLib.PictureType.FrontCover)
             ?? tag.Pictures.FirstOrDefault();
-        return picture is null ? null : ArtworkImage.Read(picture.Data.Data);
+        if (picture is null) return null;
+
+        var bytes = picture.Data.Data;
+        return artworkCache is null ? ArtworkImage.Read(bytes) : artworkCache.Read(bytes);
     }
 
     private static string Text(string? value, string fallback)

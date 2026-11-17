@@ -22,6 +22,7 @@ internal static class SourcePreparation
         bool artworkOnly = false)
     {
         using var session = fileSystem.OpenSource(new DirectoryInfo(library.Root), cancellationToken);
+        var artworkCache = new ArtworkCache(workspace.Root);
         var result = new List<PreparedTrack>();
         var ids = catalogue.OccupiedIds.ToHashSet();
         var artworkId = catalogue.ArtworkHighWaterMark;
@@ -94,7 +95,7 @@ internal static class SourcePreparation
                     }
                 }
 
-                var metadata = Mp3Metadata.Read(localPath, track.RelativePath);
+                var metadata = Mp3Metadata.Read(localPath, track.RelativePath, artworkCache);
                 if (artworkOnly && metadata.Artwork is null)
                 {
                     File.Delete(localPath);

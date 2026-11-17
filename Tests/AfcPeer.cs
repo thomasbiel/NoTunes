@@ -20,6 +20,8 @@ internal sealed class AfcPeer : Stream
 
     public bool AllowWrites { get; init; }
 
+    public bool DeferWrites { get; init; }
+
     public bool RequireParentDirectories { get; init; }
 
     public bool FailWrite { get; init; }
@@ -98,6 +100,8 @@ internal sealed class AfcPeer : Stream
 
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
+        if (this.DeferWrites) await Task.Yield();
+
         cancellationToken.ThrowIfCancellationRequested();
         this.Handle(buffer.ToArray());
         if (this.BeforeFileWriteReplyAsync is not null

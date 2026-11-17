@@ -22,6 +22,16 @@ internal static class BinaryPlistFormat
 
     internal static ReadOnlySpan<byte> Signature => "bplist00"u8;
 
+    internal static bool IsAscii(string value)
+    {
+        return value.AsSpan().IndexOfAnyInRange((char)AsciiCharacterLimit, char.MaxValue) < 0;
+    }
+
+    internal static int Width(ulong number)
+    {
+        return number <= byte.MaxValue ? 1 : number <= ushort.MaxValue ? 2 : number <= uint.MaxValue ? 4 : 8;
+    }
+
     internal static readonly DateTime Epoch = new(
         2001,
         1,

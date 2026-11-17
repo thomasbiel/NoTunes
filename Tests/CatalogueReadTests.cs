@@ -9,6 +9,45 @@ public sealed class CatalogueReadTests
     private const string DatabasePath = "iTunes_Control/iTunes/MediaLibrary.sqlitedb";
 
     [Test]
+    public async Task Reads_An_Empty_File_Without_Requesting_Data()
+    {
+        await using var peer = new AfcPeer();
+        peer.Files["empty"] = [];
+        await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(2));
+        Assert.That(await afc.ReadFileAsync("empty", 0, CancellationToken.None), Is.Empty);
+        Assert.That(peer.Reads, Is.Zero);
+        Assert.That(peer.Closes, Is.EqualTo(1));
+        Assert.That(peer.OpenHandles, Is.Zero);
+    }
+
+    [Test]
+    public async Task Rejects_A_Size_Change_After_Reading_The_Declared_Bytes([Values] bool buffered)
+    {
+        await using var peer = new AfcPeer();
+        peer.Files["track"] = [1, 2, 3];
+        peer.OnClose = () => peer.Files["track"] = [1, 2, 3, 4];
+        await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(2));
+        using var output = new MemoryStream();
+        await Assert.ThrowsAsync<IOException>(async () =>
+        {
+            if (buffered)
+            {
+                await afc.ReadFileAsync("track", 3, CancellationToken.None);
+            }
+            else
+            {
+                await afc.CopyFileToAsync(
+                    "track",
+                    output,
+                    3,
+                    CancellationToken.None);
+            }
+        });
+        Assert.That(peer.Closes, Is.EqualTo(1));
+        Assert.That(peer.OpenHandles, Is.Zero);
+    }
+
+    [Test]
     public async Task Reads_Partial_Chunks_And_Explicitly_Closes_The_File()
     {
         await using var peer = new AfcPeer

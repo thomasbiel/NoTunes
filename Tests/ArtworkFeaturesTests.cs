@@ -195,22 +195,32 @@ public sealed class ArtworkFeaturesTests
         }
 
         var original = await File.ReadAllBytesAsync(path);
+        File.Copy(path, Path.Combine(source.Root, "second-covered.mp3"));
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
             .BuildServiceProvider();
         var library = await services.GetRequiredService<SourceScanner>().ScanAsync(source.Root, CancellationToken.None);
         var catalogue = SyncPlannerTests.Catalogue([]) with { ArtworkAvailable = true, ArtworkHighWaterMark = 601 };
         var result = await SourcePreparation.PrepareAsync(
             library,
-            new SyncPlan("phone", 7, library.Tracks, [], 0),
+            new SyncPlan(
+                "phone",
+                7,
+                library.Tracks,
+                [],
+                0),
             catalogue,
             services.GetRequiredService<ISourceFileSystem>(),
             prepared,
             CancellationToken.None,
             artworkOnly: true);
-        Assert.That(result, Has.Count.EqualTo(1));
+        Assert.That(result, Has.Count.EqualTo(2));
         Assert.That(result[0].Metadata.Artwork!.CacheId, Is.EqualTo(602));
+        Assert.That(result[1].Metadata.Artwork!.CacheId, Is.EqualTo(603));
+        Assert.That(result[0].Metadata.Artwork!.LocalPath, Is.Not.Null);
+        Assert.That(result[1].Metadata.Artwork!.LocalPath, Is.EqualTo(result[0].Metadata.Artwork!.LocalPath));
         Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
         Assert.That(await File.ReadAllBytesAsync(result[0].LocalPath), Is.EqualTo(original));
-        Assert.That(Directory.GetFiles(prepared.Root), Has.Length.EqualTo(1));
+        Assert.That(Directory.GetFiles(prepared.Root, "*.mp3"), Has.Length.EqualTo(2));
+        Assert.That(Directory.GetFiles(prepared.Root, "*.jpg"), Has.Length.EqualTo(1));
     }
 }

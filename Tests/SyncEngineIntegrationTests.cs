@@ -278,6 +278,44 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(result.Plan.HasChanges, Is.False);
         Assert.That(result.VerifiedBatches, Is.Zero);
         Assert.That(after.TrackArtwork[SimulatedSyncCatalogue.ExistingTrackId].Path, Is.Not.Null);
+        var artwork = after.TrackArtwork[SimulatedSyncCatalogue.ExistingTrackId];
+        Assert.That(device.Files[SyncPaths.ArtworkOriginals + artwork.Path],
+            Is.EqualTo(Mp3Metadata.Read(path, Path.GetFileName(path)).Artwork!.Bytes));
+        AssertSettled(device, state.Root, 1);
+    }
+
+    [Test]
+    public async Task Resumes_A_Cover_Recovery_After_Replacing_Its_Durable_Assets()
+    {
+        using var source = new SyncWorkspace();
+        using var state = new SyncWorkspace();
+        using var device = new SimulatedSyncDevice(keepExistingTrack: true)
+        {
+            Interruption = SyncInterruptionPoint.AfterMetadata
+        };
+        var path = CreateSource(source.Root, 1, artwork: true);
+        device.SetExistingAudio(await File.ReadAllBytesAsync(path));
+        var before = await device.ReadCatalogueAsync();
+        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
+        var previousCover = Directory.GetFiles(state.Root, "*.jpg", SearchOption.AllDirectories).Single();
+
+        device.Interruption = SyncInterruptionPoint.AfterMetadata;
+        device.InterruptAtBatch = 2;
+        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
+        Assert.That(File.Exists(previousCover), Is.False);
+        var replacement = Directory.GetFiles(state.Root, "*.jpg", SearchOption.AllDirectories).Single();
+        Assert.That(replacement, Is.Not.EqualTo(previousCover));
+        Assert.That(ReadPending(state.Root).Additions.Single().IsArtworkOnly, Is.True);
+
+        await RunAsync(device, source.Root, state.Root);
+        var after = await device.ReadCatalogueAsync();
+        Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
+        Assert.That(device.Batches, Has.Count.EqualTo(3));
+        Assert.That(device.Batches.SelectMany(batch => batch)
+            .All(operation => operation.Text(MediaKeys.Operation) == MediaOperations.UpdateTrack), Is.True);
+        var artwork = after.TrackArtwork[SimulatedSyncCatalogue.ExistingTrackId];
+        Assert.That(device.Files[SyncPaths.ArtworkOriginals + artwork.Path],
+            Is.EqualTo(Mp3Metadata.Read(path, Path.GetFileName(path)).Artwork!.Bytes));
         AssertSettled(device, state.Root, 1);
     }
 

@@ -44,7 +44,7 @@ public static class BinaryPlist
                     WriteNumber(stream, unchecked((ulong)BitConverter.DoubleToInt64Bits((date.ToUniversalTime() - Epoch).TotalSeconds)), sizeof(ulong));
                     break;
                 case string text:
-                    var ascii = text.All(c => c < AsciiCharacterLimit);
+                    var ascii = IsAscii(text);
                     WriteLength(stream, (int)(ascii ? BinaryPlistObjectType.AsciiString : BinaryPlistObjectType.UnicodeString) << TypeShift, text.Length);
                     stream.Write((ascii ? Encoding.ASCII : Encoding.BigEndianUnicode).GetBytes(text));
                     break;
@@ -122,11 +122,6 @@ public static class BinaryPlist
         var width = number < 0 ? sizeof(long) : Width((ulong)number);
         stream.WriteByte((byte)(((int)BinaryPlistObjectType.Integer << TypeShift) | (width == 1 ? 0 : width == 2 ? 1 : width == 4 ? 2 : 3)));
         WriteNumber(stream, unchecked((ulong)number), width);
-    }
-
-    private static int Width(ulong number)
-    {
-        return number <= byte.MaxValue ? 1 : number <= ushort.MaxValue ? 2 : number <= uint.MaxValue ? 4 : 8;
     }
 
     private static void WriteNumber(Stream stream, ulong number, int width)

@@ -55,7 +55,7 @@ internal static class SyncOperations
         return BinaryPlist.WriteWithinLimit(CreateDocument(catalogue, additions, deletions), SyncProtocol.MaxOperationBytes);
     }
 
-    private static Dictionary<string, object> CreateDocument(
+    internal static Dictionary<string, object> CreateDocument(
         DeviceCatalogue catalogue,
         IReadOnlyList<PreparedTrack> additions,
         IReadOnlyList<DeviceTrack> deletions)

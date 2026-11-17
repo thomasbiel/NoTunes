@@ -14,36 +14,60 @@ internal sealed record SyncBatch(
     {
         var low = 1;
         var high = Math.Min(SyncProtocol.MaxTrackChanges, additions.Count + deletions.Count);
-        var full = CreateCandidate(high);
-        if (full is not null) return full;
+        var (allAdditions, allDeletions) = Changes(high);
+        var document = SyncOperations.CreateDocument(catalogue, allAdditions, allDeletions);
+        var operations = (object[])document[MediaKeys.Operations];
+        var size = new BinaryPlistSize();
+        if (Fits(high)) return CreateBatch(high);
 
         high--;
-        SyncBatch? best = null;
+        var best = 0;
         while (low <= high)
         {
             var count = low + (high - low) / 2;
-            var candidate = CreateCandidate(count);
-            if (candidate is null)
+            if (!Fits(count))
             {
                 high = count - 1;
             }
 
             else
             {
-                best = candidate;
+                best = count;
                 low = count + 1;
             }
         }
 
-        return best ?? throw new InvalidDataException("No track change fits within the sync operation size limit.");
+        return best == 0
+            ? throw new InvalidDataException("No track change fits within the sync operation size limit.")
+            : CreateBatch(best);
 
-        SyncBatch? CreateCandidate(int count)
+        bool Fits(int count)
+        {
+            SelectOperations(count);
+            return size.GetSize(document) <= SyncProtocol.MaxOperationBytes;
+        }
+
+        SyncBatch CreateBatch(int count)
+        {
+            var (add, delete) = Changes(count);
+            SelectOperations(count);
+            var operation = BinaryPlist.WriteWithinLimit(document, SyncProtocol.MaxOperationBytes)
+                ?? throw new InvalidDataException("Sync operation size changed during serialization.");
+            return new SyncBatch(add, delete, operation);
+        }
+
+        (PreparedTrack[] Add, DeviceTrack[] Delete) Changes(int count)
         {
             var addCount = Math.Min(count, additions.Count);
             var add = additions.Take(addCount).ToArray();
             var delete = deletions.Take(count - addCount).ToArray();
-            var operation = SyncOperations.SerializeWithinLimit(catalogue, add, delete);
-            return operation is null ? null : new SyncBatch(add, delete, operation);
+            return (add, delete);
+        }
+
+        void SelectOperations(int count)
+        {
+            var operationCount = count + 1;
+            document[MediaKeys.Operations] = operationCount == operations.Length ? operations : operations[..operationCount];
         }
     }
 }

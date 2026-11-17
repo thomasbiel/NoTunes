@@ -12,8 +12,8 @@ internal static class ProtocolFrames
     private const uint UsbMuxVersion = 1;
     private const uint UsbMuxPlistMessageType = 8;
     private const int PlistHeaderBytes = sizeof(int);
-    private const int AfcTotalLengthOffset = 8;
-    private const int AfcThisLengthOffset = 16;
+    internal const int AfcTotalLengthOffset = 8;
+    internal const int AfcThisLengthOffset = 16;
     internal const int AfcHeaderBytes = 40;
     internal const int AfcSequenceOffset = 24;
     internal const int AfcOperationOffset = 32;

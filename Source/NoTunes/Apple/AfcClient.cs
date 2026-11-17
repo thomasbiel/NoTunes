@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using System.Security.Cryptography;
@@ -32,7 +33,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
 
     public async Task<IReadOnlyDictionary<string, string>> GetDeviceInfoAsync(CancellationToken cancellationToken)
     {
-        return ParseFields(await this.RequestAsync(AfcOperation.GetDeviceInfo, [], cancellationToken));
+        return ParseFields(await this.RequestAsync(AfcOperation.GetDeviceInfo, ReadOnlyMemory<byte>.Empty, cancellationToken));
     }
 
     public async Task<IReadOnlyDictionary<string, string>?> GetFileInfoAsync(string path, CancellationToken cancellationToken)
@@ -50,17 +51,34 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
 
     public async Task<byte[]> ReadFileAsync(string path, int maxBytes, CancellationToken cancellationToken)
     {
-        using var output = new MemoryStream();
+        var (before, size) = await this.ReadFileInfoAsync(path, maxBytes, cancellationToken);
+        var bytes = new byte[checked((int)size)];
+        using var output = new MemoryStream(bytes, writable: true);
         await this.CopyFileToAsync(
             path,
             output,
-            maxBytes,
+            before,
+            size,
             cancellationToken);
 
-        return output.ToArray();
+        return bytes;
     }
 
     public async Task CopyFileToAsync(string path, Stream output, long maxBytes, CancellationToken cancellationToken)
+    {
+        var (before, size) = await this.ReadFileInfoAsync(path, maxBytes, cancellationToken);
+        await this.CopyFileToAsync(
+            path,
+            output,
+            before,
+            size,
+            cancellationToken);
+    }
+
+    private async Task<(IReadOnlyDictionary<string, string> Attributes, long Size)> ReadFileInfoAsync(
+        string path,
+        long maxBytes,
+        CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
         var before = await this.GetFileInfoAsync(path, cancellationToken)
@@ -73,6 +91,16 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
             throw new IOException($"iPhone file is not a regular file within the {maxBytes}-byte read limit: {path}");
         }
 
+        return (before, size);
+    }
+
+    private async Task CopyFileToAsync(
+        string path,
+        Stream output,
+        IReadOnlyDictionary<string, string> before,
+        long size,
+        CancellationToken cancellationToken)
+    {
         var handle = await this.OpenFileAsync(path, AfcOpenMode.ReadOnly, cancellationToken);
         var success = false;
         try
@@ -177,9 +205,10 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
 
         var handle = await this.OpenFileAsync(path, AfcOpenMode.WriteTruncate, cancellationToken);
         var success = false;
+        byte[]? buffer = null;
         try
         {
-            var buffer = new byte[sizeof(ulong) + MaxReadChunkBytes];
+            buffer = ArrayPool<byte>.Shared.Rent(sizeof(ulong) + (int)Math.Min(size, MaxReadChunkBytes));
             BinaryPrimitives.WriteUInt64LittleEndian(buffer, handle);
             var remaining = size;
             while (remaining > 0)
@@ -190,7 +219,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
 
                 await this.RequestAsync(
                     AfcOperation.FileWrite,
-                    buffer[..(sizeof(ulong) + count)],
+                    buffer.AsMemory(0, sizeof(ulong) + count),
                     cancellationToken,
                     AfcOperation.Status,
                     sizeof(ulong));
@@ -211,6 +240,8 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         }
         finally
         {
+            if (buffer is not null) ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+
             await this.CloseAfterOperationAsync(handle, success, cancellationToken);
         }
     }
@@ -353,7 +384,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
 
     private async Task<byte[]> RequestAsync(
         AfcOperation operation,
-        byte[] body,
+        ReadOnlyMemory<byte> body,
         CancellationToken cancellationToken,
         AfcOperation expectedOperation = AfcOperation.Data,
         int? headerBodyBytes = null)
@@ -365,16 +396,24 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         var id = ++this.sequence;
         try
         {
-            var packet = new byte[HeaderBytes + body.Length];
-            Magic.CopyTo(packet);
-            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(TotalLengthOffset), (ulong)packet.Length);
-            var thisLength = (ulong)(HeaderBytes + (headerBodyBytes ?? body.Length));
-            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(ThisLengthOffset), thisLength);
-            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(SequenceOffset), id);
-            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(OperationOffset), (ulong)operation);
-            body.CopyTo(packet, HeaderBytes);
+            var packetLength = HeaderBytes + body.Length;
+            var packet = ArrayPool<byte>.Shared.Rent(packetLength);
+            try
+            {
+                Magic.CopyTo(packet);
+                BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(TotalLengthOffset), (ulong)packetLength);
+                var thisLength = (ulong)(HeaderBytes + (headerBodyBytes ?? body.Length));
+                BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(ThisLengthOffset), thisLength);
+                BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(SequenceOffset), id);
+                BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(OperationOffset), (ulong)operation);
+                body.CopyTo(packet.AsMemory(HeaderBytes));
+                await stream.WriteAsync(packet.AsMemory(0, packetLength), deadline.Token);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(packet, clearArray: true);
+            }
 
-            await stream.WriteAsync(packet, deadline.Token);
             var header = new byte[HeaderBytes];
             await stream.ReadExactlyAsync(header, deadline.Token);
 
