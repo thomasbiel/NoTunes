@@ -17,6 +17,9 @@ public sealed class SyncOptions : DeviceOptions
     [Option(CliSyntax.Debug, HelpText = "Include per-track comparison and transfer diagnostics.")]
     public bool Debug { get; set; }
 
+    [Option(CliSyntax.FullReadback, HelpText = "Read all comparison candidates from the iPhone and refresh cached hashes.")]
+    public bool FullReadback { get; set; }
+
     [Option(CliSyntax.AllowEmptySource, HelpText = "Allow an empty source to remove all computer-synced music.")]
     public bool AllowEmptySource { get; set; }
 

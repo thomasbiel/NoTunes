@@ -12,6 +12,8 @@ public sealed class SyncEngine(
 {
     private TextWriter debug = TextWriter.Null;
 
+    internal string? DeviceHashCacheDirectory { get; init; }
+
     internal SyncConnectionFactory OpenConnection { get; init; } = OpenDeviceConnectionAsync;
 
     internal GroupNamePrompt? PromptForGroupName { get; init; }
@@ -57,13 +59,32 @@ public sealed class SyncEngine(
             await ValidateSavedAnchorsAsync(phone.Afc, catalogue, cancellationToken);
             await error.WriteLineAsync($"Comparing {source.Tracks.Count} source tracks "
                 + $"with {catalogue.Tracks.Count} local iPhone tracks...");
+            
+            var hashes = DeviceHashCache.Open(
+                this.DeviceHashCacheDirectory,
+                device.Udid,
+                identity,
+                catalogue,
+                options.FullReadback,
+                error);
+            
+            hashes.Debug = this.debug;
+            if (this.DeviceHashCacheDirectory is not null)
+            {
+                await hashes.PrefetchAsync(phone.Afc, source, catalogue, cancellationToken);
+            }
+
             plan = await SyncPlanner.CreateAsync(
                 device.Udid,
                 source,
                 catalogue,
-                (track, token) => this.ReadHashAsync(phone.Afc, track, token),
+                (track, token) => hashes.ReadAsync(phone.Afc, track, token),
                 cancellationToken,
                 error);
+            
+            cancellationToken.ThrowIfCancellationRequested();
+            hashes.Save();
+            await error.WriteLineAsync($"Device hashes: {hashes.Hits} cached, {hashes.Reads} read from iPhone.");
         }
 
         using var workspace = new SyncWorkspace();
@@ -117,6 +138,7 @@ public sealed class SyncEngine(
             DeferredDeletions = skipped.Count == 0 ? [] : plan.Delete,
             Delete = skipped.Count == 0 ? plan.Delete : []
         };
+        
         if (plan.DeferredDeletions.Count != 0)
         {
             await error.WriteLineAsync($"Deferred {plan.DeferredDeletions.Count} deletion(s) because source files were skipped.");
@@ -133,6 +155,7 @@ public sealed class SyncEngine(
         var transferBytes = checked(plan.TransferBytes
             + prepared.Sum(track => (long)(track.Metadata.Artwork?.Length ?? 0))
             + artworkUpdates.Sum(track => (long)track.Metadata.Artwork!.Length));
+        
         await using (var phone = await this.OpenConnection(
             mux,
             device,
@@ -315,6 +338,7 @@ public sealed class SyncEngine(
         deletionProgress.Report(deletions.Count);
         await error.WriteLineAsync($"Verified Media revision {after.Anchor}: "
             + $"{additions.Count} added, {deletions.Count} removed.");
+        
         return after;
     }
 
@@ -327,10 +351,12 @@ public sealed class SyncEngine(
     {
         var pending = journal.ReadPending();
         var additions = pending.Additions.Select(track => track.Restore(journal.Assets(pending))).ToArray();
+        
         DeviceCatalogue current;
         var remove = new List<DeviceTrack>();
         var retryArtwork = new List<PreparedTrack>();
         await error.WriteLineAsync("Reconciling the interrupted sync before planning new changes...");
+        
         await using (var phone = await this.OpenConnection(mux, device, timeout, cancellationToken))
         {
             await using var syncLock = await phone.Afc.AcquireSyncLockAsync(cancellationToken);
@@ -355,8 +381,7 @@ public sealed class SyncEngine(
                     {
                         if (await phone.Afc.GetFileInfoAsync(track.DevicePath, cancellationToken) is not null)
                         {
-                            throw new IOException(
-                                "A recovery identity has orphaned permanent audio; retain the journal.");
+                            throw new IOException("A recovery identity has orphaned permanent audio; retain the journal.");
                         }
 
                         continue;
@@ -399,6 +424,7 @@ public sealed class SyncEngine(
                 SyncPaths.Metadata,
                 pending.Operation,
                 cancellationToken);
+            
             await DeviceStaging.RemoveMatchingAsync(
                 phone.Afc,
                 SyncPaths.Metadata + SyncPaths.SignatureSuffix,
@@ -558,23 +584,6 @@ public sealed class SyncEngine(
         {
             journal.Complete();
         }
-    }
-
-    private async Task<string?> ReadHashAsync(AfcClient afc, DeviceTrack track, CancellationToken cancellationToken)
-    {
-        if (track.Path is not { } path) return null;
-
-        var info = await afc.GetFileInfoAsync(path, cancellationToken);
-        if (info is null) return null;
-
-        var fileSize = info.GetValueOrDefault(AfcKeys.FileSize);
-        if (!ProtocolNumbers.TryParseNonNegativeInt64(fileSize, out var size) || size != track.Size)
-        {
-            throw new IOException($"The catalogue file size disagrees with the iPhone file: {track.Title}");
-        }
-
-        await this.debug.WriteLineAsync($"Compare: {track.Title}");
-        return await afc.HashFileAsync(path, track.Size, cancellationToken);
     }
 
     internal static void ValidateWritePlan(

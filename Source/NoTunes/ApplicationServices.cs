@@ -42,7 +42,8 @@ public static class ApplicationServices
                 provider.GetRequiredService<Platform.IUsbMuxTransport>(),
                 error)
             {
-                PromptForGroupName = provider.GetRequiredService<GroupResolutionPrompt>().ReadAsync
+                PromptForGroupName = provider.GetRequiredService<GroupResolutionPrompt>().ReadAsync,
+                DeviceHashCacheDirectory = Path.Combine(DeviceState.Root(null), DeviceHashCache.DirectoryName)
             });
         
             services.AddTransient(provider => new CommandContext(

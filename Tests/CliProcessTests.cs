@@ -8,6 +8,21 @@ namespace NoTunes.Tests;
 public sealed class CliProcessTests
 {
     [Test]
+    public async Task Accepts_Full_Readback_For_A_Dry_Run_Before_Opening_The_Device()
+    {
+        using var source = new Music.SyncWorkspace();
+        var result = await RunAsync(
+            "sync",
+            Path.Combine(source.Root, "missing"),
+            "--full-readback",
+            "--dry-run",
+            "--json");
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Error));
+        Assert.That(result.Error, Does.Contain("Source folder not found"));
+        Assert.That(result.Output, Is.Empty);
+    }
+
+    [Test]
     public async Task Reports_Scan_Progress_On_Standard_Error_And_Preserves_Json_Output()
     {
         using var source = new Music.SyncWorkspace();

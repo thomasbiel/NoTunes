@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using System.Security.Cryptography;
+using System.Runtime.ExceptionServices;
 
 namespace NoTunes.Apple;
 
@@ -14,6 +15,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
     private const int SequenceOffset = 3 * sizeof(ulong);
     private const int OperationOffset = 4 * sizeof(ulong);
     private const int MaxReadChunkBytes = 1024 * 1024;
+    internal const int MaximumFileInfoBatch = 64;
     private const string RegularFileType = "S_IFREG";
 
     internal static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(3);
@@ -47,6 +49,59 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         {
             return null;
         }
+    }
+
+    internal async Task<IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>?>> GetFileInfosAsync(
+        IReadOnlyList<string> paths,
+        CancellationToken cancellationToken,
+        Action<long>? onProgress = null)
+    {
+        foreach (var path in paths)
+        {
+            ValidatePath(path);
+        }
+
+        var result = new Dictionary<string, IReadOnlyDictionary<string, string>?>(StringComparer.Ordinal);
+        for (var offset = 0; offset < paths.Count; offset += MaximumFileInfoBatch)
+        {
+            var count = Math.Min(MaximumFileInfoBatch, paths.Count - offset);
+            await this.WithDeadlineAsync(async token =>
+            {
+                var ids = new ulong[count];
+                for (var index = 0; index < count; index++)
+                {
+                    ids[index] = await this.SendRequestAsync(
+                        AfcOperation.GetFileInfo,
+                        Encoding.UTF8.GetBytes(paths[offset + index] + '\0'),
+                        token);
+                }
+
+                ExceptionDispatchInfo? failure = null;
+                for (var index = 0; index < count; index++)
+                {
+                    try
+                    {
+                        result[paths[offset + index]] = ParseFields(
+                            await this.ReceiveResponseAsync(ids[index], AfcOperation.Data, token));
+                    }
+                    catch (AfcException exception)
+                    {
+                        result[paths[offset + index]] = null;
+                        if (exception.Code != (ulong)AfcStatusCode.ObjectNotFound)
+                        {
+                            failure ??= ExceptionDispatchInfo.Capture(exception);
+                        }
+                    }
+                }
+
+                failure?.Throw();
+                return true;
+            }, cancellationToken);
+            onProgress?.Invoke(offset + count);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return result;
     }
 
     public async Task<byte[]> ReadFileAsync(string path, int maxBytes, CancellationToken cancellationToken)
@@ -84,14 +139,22 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         var before = await this.GetFileInfoAsync(path, cancellationToken)
             ?? throw new FileNotFoundException($"iPhone file not found: {path}");
 
-        if (before.GetValueOrDefault(AfcKeys.FileType) != RegularFileType
-            || !ProtocolNumbers.TryParseNonNegativeInt64(before.GetValueOrDefault(AfcKeys.FileSize), out var size)
+        return (before, ValidateFileInfo(path, before, maxBytes));
+    }
+
+    internal static long ValidateFileInfo(
+        string path,
+        IReadOnlyDictionary<string, string> attributes,
+        long maxBytes)
+    {
+        if (attributes.GetValueOrDefault(AfcKeys.FileType) != RegularFileType
+            || !ProtocolNumbers.TryParseNonNegativeInt64(attributes.GetValueOrDefault(AfcKeys.FileSize), out var size)
             || size > maxBytes)
         {
             throw new IOException($"iPhone file is not a regular file within the {maxBytes}-byte read limit: {path}");
         }
 
-        return (before, size);
+        return size;
     }
 
     private async Task CopyFileToAsync(
@@ -347,8 +410,20 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         if (invalidCharacters || invalidComponents) throw new InvalidDataException("Unsafe AFC path.");
     }
 
-    internal async Task<string> HashFileAsync(string path, long size, CancellationToken cancellationToken)
+    internal async Task<string> HashFileAsync(
+        string path,
+        long size,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? attributes = null)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(size);
+
+        attributes ??= (await this.ReadFileInfoAsync(path, size, cancellationToken)).Attributes;
+        if (ValidateFileInfo(path, attributes, size) != size)
+        {
+            throw new IOException($"The iPhone file size differs from its expected size: {path}");
+        }
+
         using var hash = SHA256.Create();
         await using var sink = new CryptoStream(
             Stream.Null,
@@ -359,6 +434,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         await this.CopyFileToAsync(
             path,
             sink,
+            attributes,
             size,
             cancellationToken);
 
@@ -389,57 +465,89 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         AfcOperation expectedOperation = AfcOperation.Data,
         int? headerBodyBytes = null)
     {
+        return await this.WithDeadlineAsync(async token =>
+        {
+            var id = await this.SendRequestAsync(
+                operation,
+                body,
+                token,
+                headerBodyBytes);
+            return await this.ReceiveResponseAsync(id, expectedOperation, token);
+        }, cancellationToken);
+    }
+
+    private async Task<ulong> SendRequestAsync(
+        AfcOperation operation,
+        ReadOnlyMemory<byte> body,
+        CancellationToken cancellationToken,
+        int? headerBodyBytes = null)
+    {
+        var id = ++this.sequence;
+        var packetLength = HeaderBytes + body.Length;
+        var packet = ArrayPool<byte>.Shared.Rent(packetLength);
+        try
+        {
+            Magic.CopyTo(packet);
+            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(TotalLengthOffset), (ulong)packetLength);
+            var thisLength = (ulong)(HeaderBytes + (headerBodyBytes ?? body.Length));
+            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(ThisLengthOffset), thisLength);
+            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(SequenceOffset), id);
+            BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(OperationOffset), (ulong)operation);
+            body.CopyTo(packet.AsMemory(HeaderBytes));
+            await stream.WriteAsync(packet.AsMemory(0, packetLength), cancellationToken);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(packet, clearArray: true);
+        }
+
+        return id;
+    }
+
+    private async Task<byte[]> ReceiveResponseAsync(
+        ulong id,
+        AfcOperation expectedOperation,
+        CancellationToken cancellationToken)
+    {
+        var header = new byte[HeaderBytes];
+        await stream.ReadExactlyAsync(header, cancellationToken);
+        var size = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(TotalLengthOffset));
+        var thisSize = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(ThisLengthOffset));
+        var responseId = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(SequenceOffset));
+        var responseOperation = (AfcOperation)BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(OperationOffset));
+        var validMagic = header.AsSpan(0, Magic.Length).SequenceEqual(Magic);
+        var validLengths = size is >= HeaderBytes and <= Plist.MaxBytes && thisSize >= HeaderBytes && thisSize <= size;
+        if (!validMagic || !validLengths || responseId != id) throw new InvalidDataException("Invalid AFC response header.");
+
+        var response = new byte[checked((int)size - HeaderBytes)];
+        await stream.ReadExactlyAsync(response, cancellationToken);
+        if (responseOperation == AfcOperation.Status)
+        {
+            if (response.Length != sizeof(ulong)) throw new InvalidDataException("Invalid AFC status response.");
+
+            var code = BinaryPrimitives.ReadUInt64LittleEndian(response);
+            if (code != (ulong)AfcStatusCode.Success) throw new AfcException(code);
+
+            return expectedOperation == AfcOperation.Status
+                ? []
+                : throw new InvalidDataException("Unexpected AFC success status without response data.");
+        }
+
+        return responseOperation == expectedOperation
+            ? response : throw new InvalidDataException("Unexpected AFC response operation.");
+    }
+
+    private async Task<T> WithDeadlineAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
         if (this.IsBroken) throw new IOException("The AFC connection is closed.");
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
-        var id = ++this.sequence;
         try
         {
-            var packetLength = HeaderBytes + body.Length;
-            var packet = ArrayPool<byte>.Shared.Rent(packetLength);
-            try
-            {
-                Magic.CopyTo(packet);
-                BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(TotalLengthOffset), (ulong)packetLength);
-                var thisLength = (ulong)(HeaderBytes + (headerBodyBytes ?? body.Length));
-                BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(ThisLengthOffset), thisLength);
-                BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(SequenceOffset), id);
-                BinaryPrimitives.WriteUInt64LittleEndian(packet.AsSpan(OperationOffset), (ulong)operation);
-                body.CopyTo(packet.AsMemory(HeaderBytes));
-                await stream.WriteAsync(packet.AsMemory(0, packetLength), deadline.Token);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(packet, clearArray: true);
-            }
-
-            var header = new byte[HeaderBytes];
-            await stream.ReadExactlyAsync(header, deadline.Token);
-
-            var size = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(TotalLengthOffset));
-            var thisSize = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(ThisLengthOffset));
-            var responseId = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(SequenceOffset));
-            var responseOperation = (AfcOperation)BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(OperationOffset));
-            var validMagic = header.AsSpan(0, Magic.Length).SequenceEqual(Magic);
-            var validLengths = size is >= HeaderBytes and <= Plist.MaxBytes && thisSize >= HeaderBytes && thisSize <= size;
-            if (!validMagic || !validLengths || responseId != id) throw new InvalidDataException("Invalid AFC response header.");
-
-            var response = new byte[checked((int)size - HeaderBytes)];
-            await stream.ReadExactlyAsync(response, deadline.Token);
-            if (responseOperation == AfcOperation.Status)
-            {
-                if (response.Length != sizeof(ulong)) throw new InvalidDataException("Invalid AFC status response.");
-
-                var code = BinaryPrimitives.ReadUInt64LittleEndian(response);
-                if (code != (ulong)AfcStatusCode.Success) throw new AfcException(code);
-                return expectedOperation == AfcOperation.Status
-                    ? []
-                    : throw new InvalidDataException("Unexpected AFC success status without response data.");
-            }
-
-            return responseOperation == expectedOperation
-                ? response : throw new InvalidDataException("Unexpected AFC response operation.");
+            return await operation(deadline.Token);
         }
         catch (AfcException)
         {

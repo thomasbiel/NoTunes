@@ -91,7 +91,11 @@ internal sealed class SimulatedSyncDevice : IDisposable
         return await engine.RunAsync(options, cancellationToken);
     }
 
-    public SyncEngine CreateEngine(SourceScanner scanner, ISourceFileSystem fileSystem, TextWriter error)
+    public SyncEngine CreateEngine(
+        SourceScanner scanner,
+        ISourceFileSystem fileSystem,
+        TextWriter error,
+        string? deviceHashCacheDirectory = null)
     {
         return new SyncEngine(
             scanner,
@@ -100,7 +104,8 @@ internal sealed class SimulatedSyncDevice : IDisposable
             error)
         {
             OpenConnection = this.OpenAsync,
-            PromptForGroupName = this.PromptForGroupName
+            PromptForGroupName = this.PromptForGroupName,
+            DeviceHashCacheDirectory = deviceHashCacheDirectory
         };
     }
 

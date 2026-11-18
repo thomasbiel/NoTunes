@@ -16,6 +16,7 @@ internal static class CliSyntax
     public const string ReadCatalogue = "read-catalog";
     public const string DryRun = "dry-run";
     public const string Debug = "debug";
+    public const string FullReadback = "full-readback";
     public const string AllowEmptySource = "allow-empty-source";
     public const string StateFolder = "state-folder";
     public const string Udid = "UDID";

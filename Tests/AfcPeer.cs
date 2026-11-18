@@ -22,6 +22,12 @@ internal sealed class AfcPeer : Stream
 
     public bool DeferWrites { get; init; }
 
+    public bool AllowPipelinedFileInfo { get; set; }
+
+    public Dictionary<string, Dictionary<string, string>> FileInfoOverrides { get; } = new(StringComparer.Ordinal);
+
+    public List<AfcOperation> Operations { get; } = [];
+
     public bool RequireParentDirectories { get; init; }
 
     public bool FailWrite { get; init; }
@@ -56,11 +62,15 @@ internal sealed class AfcPeer : Stream
 
     public Func<CancellationToken, Task>? BeforeFileReadReplyAsync { get; init; }
 
+    public Action? BeforeTransportRead { get; init; }
+
     public int Opens { get; private set; }
 
     public int Closes { get; private set; }
 
     public int Reads { get; private set; }
+
+    public List<string> ReadPaths { get; } = [];
 
     public int OpenHandles => this.handles.Count;
 
@@ -92,6 +102,7 @@ internal sealed class AfcPeer : Stream
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
+        this.BeforeTransportRead?.Invoke();
         if (this.closePending)
             await Task.Delay(Timeout.Infinite, cancellationToken);
 
@@ -123,9 +134,14 @@ internal sealed class AfcPeer : Stream
 
     private void Handle(byte[] request)
     {
-        Assert.That(this.input.Position, Is.EqualTo(this.input.Length), "The previous response must be consumed first.");
         var operation = (AfcOperation)BinaryPrimitives.ReadUInt64LittleEndian(
             request.AsSpan(ProtocolFrames.AfcOperationOffset));
+        this.Operations.Add(operation);
+        if (!this.AllowPipelinedFileInfo || operation != AfcOperation.GetFileInfo)
+        {
+            Assert.That(this.input.Position, Is.EqualTo(this.input.Length), "The previous response must be consumed first.");
+        }
+
         var id = BinaryPrimitives.ReadUInt64LittleEndian(request.AsSpan(ProtocolFrames.AfcSequenceOffset));
         var body = request.AsSpan(ProtocolFrames.AfcHeaderBytes);
         switch (operation)
@@ -163,8 +179,22 @@ internal sealed class AfcPeer : Stream
                     return;
                 }
 
+                var attributes = new Dictionary<string, string>
+                {
+                    [AfcKeys.FileType] = "S_IFREG",
+                    [AfcKeys.FileSize] = file.Length.ToString(),
+                    [AfcKeys.ModificationTime] = "1"
+                };
+                if (this.FileInfoOverrides.TryGetValue(path, out var overrides))
+                {
+                    foreach (var pair in overrides)
+                    {
+                        attributes[pair.Key] = pair.Value;
+                    }
+                }
+
                 this.Response(id, AfcOperation.Data,
-                    Encoding.UTF8.GetBytes($"st_ifmt\0S_IFREG\0st_size\0{file.Length}\0st_mtime\01\0"));
+                    Encoding.UTF8.GetBytes(string.Join('\0', attributes.SelectMany(pair => new[] { pair.Key, pair.Value })) + '\0'));
                 return;
             case AfcOperation.FileOpen:
                 var mode = (AfcOpenMode)BinaryPrimitives.ReadUInt64LittleEndian(body);
@@ -195,6 +225,7 @@ internal sealed class AfcPeer : Stream
                 var readHandle = BinaryPrimitives.ReadUInt64LittleEndian(body);
                 var requested = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(body[sizeof(ulong)..]));
                 var source = this.handles[readHandle];
+                this.ReadPaths.Add(source.Path);
                 var count = this.EarlyEof ? 0 : Math.Min(Math.Min(this.ChunkLimit, requested), this.Files[source.Path].Length - source.Offset);
                 this.Response(id, AfcOperation.Data, [.. this.Files[source.Path].AsSpan(source.Offset, count)]);
                 this.handles[readHandle] = (source.Path, source.Offset + count);
@@ -253,8 +284,11 @@ internal sealed class AfcPeer : Stream
 
     private void Response(ulong id, AfcOperation operation, byte[] body)
     {
+        byte[] remaining = this.input.Position == this.input.Length
+            ? []
+            : this.input.ToArray().AsSpan((int)this.input.Position).ToArray();
         this.input.Dispose();
-        this.input = new MemoryStream(ProtocolFrames.Afc(id, (ulong)operation, body), writable: false);
+        this.input = new MemoryStream([.. remaining, .. ProtocolFrames.Afc(id, (ulong)operation, body)], writable: false);
     }
 
     protected override void Dispose(bool disposing)

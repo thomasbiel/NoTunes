@@ -221,8 +221,29 @@ arbitrarily. Errors go to stderr. JSON results go to stdout.
 
 Each comparison can take time: candidate device files are read over USB and
 hashed on the host. Only files whose size occurs in the source need hashing.
-Device hashes are not cached. No device-side file-hash operation is used. Diagnostics go to stderr; `--json`
-prints the plan, dry-run flag and verified batch count to stdout.
+Verified device hashes are cached under the local NoTunes data folder in
+`device-hash-cache`, separately from source hashes and recovery journals.
+`--state-folder` does not relocate either hash cache. Cache entries belong to one
+device and saved library/database/container identity, and match the persistent
+track ID, path, size and all stable AFC file attributes, including modification
+time. Access time is ignored. Missing or unusable modification times disable reuse.
+Candidate file attributes are queried in batches of at most 64 requests; audio
+reads and writes remain sequential. A missing file cannot become a cache hit.
+Cache files are validated, bounded in size and replaced atomically after a
+successful comparison. Invalid caches trigger full reads; cache persistence
+failures are reported and do not abort synchronization.
+
+`sync --full-readback` bypasses cached device hashes and refreshes them from full
+USB reads of every comparison candidate. The default assumes content changes are
+reflected in file attributes; replacing bytes while preserving every stable
+attribute is detected by a full readback. The source hash cache is independent
+and remains enabled. Newly transferred audio and separate artwork are always
+read back and verified regardless of cache hits or this option.
+Embedded pictures participate in the MP3 hash. Separate registered iPhone artwork
+is not audited by `--full-readback`; existing cover checks and repairs are unchanged.
+No device-side file-hash operation is used. Diagnostics include cache-hit/read
+counts on stderr; `--json` prints the plan, dry-run flag and verified batch count
+to stdout.
 
 `scan` and `sync` report percentage progress to stderr for each work phase:
 source hashing, catalogue reads, device comparison, source and cover preparation,
