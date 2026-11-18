@@ -19,10 +19,12 @@ internal static class ArtworkCatalogue
         SELECT count(*) FROM sqlite_schema WHERE type='table'
         AND name IN ('artwork','artwork_token','best_artwork_token')
         """;
+
     private const string IdsSql = """
         SELECT artwork_token FROM artwork WHERE artwork_source_type=$localSource
         UNION SELECT artwork_token FROM artwork_token WHERE artwork_source_type=$localSource
         """;
+
     private const string TracksSql = """
         SELECT s.sync_id,t.artwork_token,
           CASE WHEN EXISTS(SELECT 1 FROM best_artwork_token b
@@ -71,7 +73,9 @@ internal static class ArtworkCatalogue
 
                 if (!tracks.TryAdd(rows.GetInt64(TrackSyncIdColumn),
                     new ArtworkReference(ParseId(rows.GetString(TrackTokenColumn)), path)))
+                {
                     throw new InvalidDataException("Ambiguous track artwork registration.");
+                }
             }
         }
 
@@ -80,10 +84,16 @@ internal static class ArtworkCatalogue
 
     private static uint ParseId(string text)
     {
-        if (!uint.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var value)
+        if (!uint.TryParse(
+            text,
+            NumberStyles.None,
+            CultureInfo.InvariantCulture,
+            out var value)
             || value == 0 || value > ArtworkProtocol.MaximumCacheId
             || value.ToString(CultureInfo.InvariantCulture) != text)
+        {
             throw new InvalidDataException("Invalid local artwork token.");
+        }
 
         return value;
     }

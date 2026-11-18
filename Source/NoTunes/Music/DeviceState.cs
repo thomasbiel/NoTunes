@@ -13,6 +13,7 @@ internal static class DeviceState
     {
         var key = Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(DeviceUdid.Normalize(device).ToUpperInvariant())));
+
         var directory = Path.GetFullPath(Path.Combine(root, key));
         if (OperatingSystem.IsWindows())
         {

@@ -21,6 +21,7 @@ public sealed class AtcSyncPermissionsTests
             ("AutoSync", auto),
             ("DataProtected", protectedData),
             ("DisabledAssetTypes", musicDisabled ? new object[] { "Music" } : new object[] { "Video" }));
+
         var result = AtcClient.ReadSyncPermissions(parameters);
         Assert.That(result.Allowed, Is.EqualTo(expected));
         Assert.That(result.DataProtected, Is.EqualTo(protectedData));
@@ -58,6 +59,7 @@ public sealed class AtcSyncPermissionsTests
         {
             null!
         }, null ];
+
         foreach (var invalid in invalidValues)
         {
             var parameters = Plist.Dict(("ManualSync", false), ("DisabledAssetTypes", invalid!));

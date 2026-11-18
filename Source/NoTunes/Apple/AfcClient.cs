@@ -97,6 +97,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
                 failure?.Throw();
                 return true;
             }, cancellationToken);
+
             onProgress?.Invoke(offset + count);
         }
 
@@ -472,6 +473,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
                 body,
                 token,
                 headerBodyBytes);
+
             return await this.ReceiveResponseAsync(id, expectedOperation, token);
         }, cancellationToken);
     }

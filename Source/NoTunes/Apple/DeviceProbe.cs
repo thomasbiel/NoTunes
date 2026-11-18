@@ -9,11 +9,13 @@ public static class DeviceProbe
             device,
             timeout,
             cancellationToken);
-        
+
         await lockdown.StartPairedSessionAsync(cancellationToken);
         var info = await lockdown.GetInfoAsync(cancellationToken);
         if (!info.Model.StartsWith(DeviceInfo.IphoneModelPrefix, StringComparison.Ordinal))
+        {
             throw new IOException($"The selected device is {info.Model}, not an iPhone.");
+        }
 
         await using var afc = new AfcClient(await lockdown.OpenServiceAsync(DeviceServices.Afc, cancellationToken), timeout);
         var storage = await afc.GetDeviceInfoAsync(cancellationToken);

@@ -1,4 +1,3 @@
-using NoTunes.Music;
 using NUnit.Framework;
 
 namespace NoTunes.Tests;
@@ -26,7 +25,7 @@ public sealed class ArtworkCatalogueSchemaTests
             fixture.Execute("UPDATE best_artwork_token SET available_artwork_token='101';");
         }
 
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         Assert.That(catalogue.ArtworkAvailable, Is.True);
         Assert.That(catalogue.TrackArtwork[101].CacheId, Is.EqualTo(101));
         Assert.That(catalogue.TrackArtwork[101].Path, Is.EqualTo(available ? "aa/cover.jpg" : null));

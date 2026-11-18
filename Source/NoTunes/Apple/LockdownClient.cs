@@ -27,11 +27,14 @@ public sealed class LockdownClient : IAsyncDisposable
             device,
             timeout,
             stream);
+
         try
         {
             var reply = await client.RequestAsync(LockdownRequests.QueryType, [], cancellationToken);
             if (reply.Text(LockdownKeys.Type) != DeviceServices.Lockdown)
+            {
                 throw new IOException("The connected service is not Apple's lockdown service.");
+            }
 
             return client;
         }
@@ -48,7 +51,9 @@ public sealed class LockdownClient : IAsyncDisposable
         var info = value.AsDict();
         var udid = info.Text(LockdownKeys.Udid);
         if (!StringComparer.OrdinalIgnoreCase.Equals(DeviceUdid.Normalize(udid), DeviceUdid.Normalize(this.device.Udid)))
+        {
             throw new IOException("The connected iPhone identity does not match the selected USB device.");
+        }
 
         return new DeviceInfo(
             udid,
@@ -80,7 +85,9 @@ public sealed class LockdownClient : IAsyncDisposable
         try
         {
             if (!reply.TryGetValue(LockdownKeys.EnableSessionSsl, out var ssl) || ssl is not true)
+            {
                 throw new InvalidDataException("EnableSessionSSL must be true to authenticate the paired iPhone.");
+            }
 
             var id = reply.Text(LockdownKeys.SessionId);
             this.connection.UpgradeStream(await this.EncryptAsync(this.connection.Stream, cancellationToken));
@@ -101,7 +108,9 @@ public sealed class LockdownClient : IAsyncDisposable
         var reply = await this.RequestAsync(LockdownRequests.StartService, Plist.Dict((LockdownKeys.Service, name)), cancellationToken);
         var port = reply.Number(LockdownKeys.Port);
         if (port is < 1 or > ushort.MaxValue)
+        {
             throw new InvalidDataException("The iPhone returned an invalid service port.");
+        }
 
         var stream = await this.mux.ConnectDeviceAsync(this.device, (ushort)port, cancellationToken);
         try
@@ -127,7 +136,9 @@ public sealed class LockdownClient : IAsyncDisposable
         }
 
         if (reply.Text(LockdownKeys.Request) != request)
+        {
             throw new InvalidDataException("Unexpected lockdown response.");
+        }
 
         return reply;
     }

@@ -29,7 +29,7 @@ public sealed class LinuxUsbMuxTransport : IUsbMuxTransport
         catch (SocketException e)
         {
             socket.Dispose();
-            throw new IOException($"Cannot connect to usbmuxd ({this.endpoint}). " 
+            throw new IOException($"Cannot connect to usbmuxd ({this.endpoint}). "
                                   + "Install and start usbmuxd, check socket permissions, and establish trust with the unlocked iPhone.", e);
         }
         catch

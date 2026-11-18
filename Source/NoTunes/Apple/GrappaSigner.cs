@@ -32,7 +32,9 @@ internal sealed class GrappaSigner : IDisposable
     {
         if (reply.Length != ReplyLength || reply[0] != EnvelopeVersion || reply[1] != EnvelopeVersion
             || reply[ControlOffset] != CiphertextLength)
+        {
             throw new InvalidDataException("Unsupported Grappa reply envelope.");
+        }
 
         using var cipher = Aes.Create();
         cipher.Key = [.. Enumerable.Repeat(FixedKeyByte, AesKeyLength)];
@@ -63,7 +65,9 @@ internal sealed class GrappaSigner : IDisposable
     public byte[] Sign(byte[] operation)
     {
         if (operation.Length is < 1 or > SyncProtocol.MaxOperationBytes)
+        {
             throw new InvalidDataException("Operation file must contain 1 byte to 4 MiB.");
+        }
 
         var tag = HMACSHA1.HashData(this.key, operation);
         var result = new byte[SignatureLength];

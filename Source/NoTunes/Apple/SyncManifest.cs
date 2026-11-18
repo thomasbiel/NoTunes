@@ -13,7 +13,9 @@ internal static class SyncManifest
         var manifest = parameters.Dictionary(AtcKeys.AssetManifest);
         if (manifest.Keys.Any(key => key != AtcKeys.Media) || manifest.GetValueOrDefault(AtcKeys.Media) is not object[] entries
             || entries.Length > SyncProtocol.ManifestLimit)
+        {
             throw new InvalidDataException("Unsupported ATC asset manifest.");
+        }
 
         var own = additions.ToDictionary(track => track.AssetId, StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -24,7 +26,9 @@ internal static class SyncManifest
             var id = entry.Text(AtcKeys.AssetId);
             var parts = entry.Dictionary(AtcKeys.Variant).Number(AtcKeys.AssetParts);
             if (entry.Text(AtcKeys.AssetType) != AtcKeys.Music || !entry.Flag(AtcKeys.IsDownload) || !seen.Add(id))
+            {
                 throw new InvalidDataException("Invalid or duplicate asset request.");
+            }
 
             if (own.TryGetValue(id, out var track)
                 && (track.IsArtworkOnly
@@ -47,7 +51,9 @@ internal static class SyncManifest
         }
 
         if (own.Keys.Any(id => !seen.Contains(id)))
+        {
             throw new InvalidDataException("The phone did not request every new audio asset.");
+        }
 
         return result;
     }

@@ -7,8 +7,9 @@ namespace NoTunes.Music;
 
 internal static class CatalogueReader
 {
-    private const int MinimumSchemaVersion = 2350000;
     internal const int MaximumTracks = 50000;
+    internal const char GroupKeySeparator = '\0';
+    private const int MinimumSchemaVersion = 2350000;
     private const long MusicMediaType = 8;
     private const int SyncIdColumn = 0;
     private const int TitleColumn = 1;
@@ -31,7 +32,6 @@ internal static class CatalogueReader
     private const int GroupArtistRowIdColumn = 5;
     private const int SortNameColumn = 0;
     private const int SortValueColumn = 1;
-    internal const char GroupKeySeparator = '\0';
     private const long MissingBaseLocationId = 0;
     private const string ConfigureSql = "PRAGMA trusted_schema=OFF; PRAGMA query_only=ON;";
     private const string IntegritySql = "PRAGMA quick_check";
@@ -44,14 +44,17 @@ internal static class CatalogueReader
         SELECT sync_id FROM item_store WHERE sync_id<>0
         UNION SELECT sync_id FROM composer WHERE sync_id<>0
         """;
+
     private const string AlbumsSql = """
         SELECT a.sync_id,a.album,ar.album_artist,a.album_pid,COALESCE(a.sort_album,a.album,''),a.album_artist_pid
         FROM album a LEFT JOIN album_artist ar USING(album_artist_pid) ORDER BY a.album_pid
         """;
+
     private const string ArtistsSql = """
         SELECT sync_id,album_artist,NULL,album_artist_pid,COALESCE(sort_album_artist,album_artist,''),NULL
         FROM album_artist ORDER BY album_artist_pid
         """;
+
     private const string ArtistSortsSql = "SELECT item_artist,COALESCE(sort_item_artist,item_artist,'') FROM item_artist";
     private const string ComposerSortsSql = "SELECT composer,COALESCE(sort_composer,composer,'') FROM composer";
     private const string ItemsSql = """
@@ -89,76 +92,18 @@ internal static class CatalogueReader
         bool allowUninitialized = false)
     {
         using var workspace = new SyncWorkspace();
-        var path = Path.Combine(workspace.Root, SyncPaths.DatabaseFile);
-        await File.WriteAllBytesAsync(path, snapshot.Database, cancellationToken);
-        if (snapshot.Wal is not null)
-        {
-            await File.WriteAllBytesAsync(path + SyncPaths.WalSuffix, snapshot.Wal, cancellationToken);
-        }
-
+        var path = await WriteSnapshotAsync(snapshot, workspace, cancellationToken);
         try
         {
             // SQLite replays only committed WAL frames in our private local copy. Never open the phone's file.
-            var builder = new SQLiteConnectionStringBuilder
-            {
-                DataSource = path,
-                FailIfMissing = true,
-                Pooling = false
-            };
-
+            var builder = new SQLiteConnectionStringBuilder { DataSource = path, FailIfMissing = true, Pooling = false };
             await using var connection = new SQLiteConnection(builder.ToString());
-
             connection.Open();
-            Execute(connection, ConfigureSql);
 
-            if (!StringComparer.Ordinal.Equals(Scalar(connection, IntegritySql), IntegritySuccess))
-            {
-                throw new InvalidDataException("The captured music catalogue failed SQLite integrity checks.");
-            }
+            ValidateDatabase(connection);
 
-            if (long.Parse(Scalar(connection, VersionSql), CultureInfo.InvariantCulture) < MinimumSchemaVersion)
-            {
-                throw new InvalidDataException("Unsupported iPhone music catalogue schema.");
-            }
-
-            await using var ids = connection.CreateCommand();
-            ids.CommandText = IdentitySql;
-            await using var rows = ids.ExecuteReader();
-            var initialized = rows.Read();
-            if (!initialized && !allowUninitialized)
-            {
-                throw new IOException("The music library has not been initialized. Run 'notunes init' first.");
-            }
-
-            var databaseId = initialized ? rows.GetInt64(DatabaseIdColumn) : 0;
-            var containerId = initialized ? rows.GetInt64(ContainerIdColumn) : 0;
-            if (initialized && (databaseId == 0 || containerId == 0 || rows.Read()))
-            {
-                throw new InvalidDataException("Ambiguous music database identity.");
-            }
-
-            rows.Close();
-            var anchorText = Scalar(connection, AnchorSql, SyncProtocol.InitialMediaAnchor);
-            if (!uint.TryParse(
-                anchorText,
-                NumberStyles.None,
-                CultureInfo.InvariantCulture,
-                out var anchor) || anchor == uint.MaxValue || anchor.ToString(CultureInfo.InvariantCulture) != anchorText)
-            {
-                throw new InvalidDataException("Invalid Media sync anchor.");
-            }
-
-            var occupied = new HashSet<long> { databaseId, containerId };
-            await using (var occupiedCommand = connection.CreateCommand())
-            {
-                occupiedCommand.CommandText = OccupiedIdsSql;
-                await using var occupiedRows = occupiedCommand.ExecuteReader();
-                while (occupiedRows.Read())
-                {
-                    occupied.Add(occupiedRows.GetInt64(SyncIdColumn));
-                }
-            }
-
+            var (databaseId, containerId, anchor) = ReadIdentity(connection, allowUninitialized);
+            var occupied = ReadOccupiedIds(connection, databaseId, containerId);
             var artists = ReadGroups(connection, ArtistsSql, occupied);
             var albums = ReadGroups(
                 connection,
@@ -166,92 +111,12 @@ internal static class CatalogueReader
                 occupied,
                 true);
 
-            await using var command = connection.CreateCommand();
-            command.CommandText = ItemsSql;
-            await using var reader = command.ExecuteReader();
-            var tracks = new List<DeviceTrack>();
-            var protectedItems = new List<ProtectedCatalogueItem>();
-            var trackIds = new HashSet<long>();
-            var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            while (reader.Read())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var id = OptionalNumber(reader, SyncIdColumn);
-                var sagaId = OptionalNumber(reader, StoreSagaIdColumn);
-                var mediaType = OptionalNumber(reader, MusicTypeColumn);
-                var remoteLocation = OptionalNumber(reader, RemoteLocationColumn);
-                if (id is { } occupiedId && occupiedId != 0)
-                {
-                    if (!trackIds.Add(occupiedId))
-                    {
-                        throw new InvalidDataException("Ambiguous track sync identity in the music catalogue.");
-                    }
-
-                    occupied.Add(occupiedId);
-                }
-
-                // Preserve cloud purchases, videos and other nonlocal/nonmusic rows.
-                if (id is null or 0 || sagaId != 0 || mediaType != MusicMediaType || remoteLocation != 0)
-                {
-                    var item = new ProtectedCatalogueItem(
-                        reader.GetInt64(ItemIdColumn),
-                        id,
-                        sagaId,
-                        mediaType,
-                        remoteLocation,
-                        OptionalText(reader, TitleColumn),
-                        OptionalText(reader, BasePathColumn),
-                        OptionalText(reader, FilenameColumn),
-                        OptionalNumber(reader, FileSizeColumn)) { Metadata = ReadTrackMetadata(reader) };
-
-                    protectedItems.Add(item);
-                    continue;
-                }
-
-                if (tracks.Count >= MaximumTracks) throw new InvalidDataException("Catalogue track limit exceeded.");
-
-                var size = reader.GetInt64(FileSizeColumn);
-                var incomplete = reader.GetInt64(BaseLocationIdColumn) == MissingBaseLocationId && size == 0
-                    && (reader.IsDBNull(FilenameColumn) || reader.GetString(FilenameColumn).Length == 0);
-
-                string? fullPath = null;
-                if (!incomplete)
-                {
-                    fullPath = reader.GetString(BasePathColumn) + "/" + reader.GetString(FilenameColumn);
-                    AfcClient.ValidatePath(fullPath);
-                    if (!fullPath.StartsWith(SyncPaths.MusicBucketPrefix, StringComparison.Ordinal) || !paths.Add(fullPath))
-                    {
-                        throw new InvalidDataException("Unsafe or ambiguous music catalogue entry.");
-                    }
-                }
-
-                if (size < 0) throw new InvalidDataException("Unsafe or ambiguous music catalogue entry.");
-
-                var track = new DeviceTrack(
-                    id.Value,
-                    reader.GetString(TitleColumn),
-                    fullPath,
-                    size) { Metadata = ReadTrackMetadata(reader) };
-
-                tracks.Add(track);
-            }
-
-            await using var containers = connection.CreateCommand();
-            containers.CommandText = ContainersSql;
-            await using var containerRows = containers.ExecuteReader();
-            var hasPrimaryContainer = false;
-            while (containerRows.Read())
-            {
-                var id = containerRows.GetInt64(SyncIdColumn);
-                if (id != 0) occupied.Add(id);
-
-                hasPrimaryContainer |= containerRows.GetInt64(ContainerRowIdColumn) == containerId;
-            }
-
-            if (initialized && !hasPrimaryContainer)
-            {
-                throw new IOException("The music library is incomplete: its primary container is missing.");
-            }
+            var (tracks, protectedItems) = ReadInventory(connection, occupied, cancellationToken);
+            ReadContainers(
+                connection,
+                occupied,
+                containerId,
+                databaseId != 0);
 
             return ArtworkCatalogue.Read(connection, new DeviceCatalogue(
                 databaseId,
@@ -275,6 +140,197 @@ internal static class CatalogueReader
         catch (Exception e) when (e is SQLiteException or InvalidCastException or FormatException)
         {
             throw new InvalidDataException("Cannot read the captured iPhone music catalogue: " + e.Message, e);
+        }
+    }
+
+    private static async Task<string> WriteSnapshotAsync(
+        CatalogueSnapshot snapshot,
+        SyncWorkspace workspace,
+        CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(workspace.Root, SyncPaths.DatabaseFile);
+        await File.WriteAllBytesAsync(path, snapshot.Database, cancellationToken);
+        if (snapshot.Wal is not null)
+        {
+            await File.WriteAllBytesAsync(path + SyncPaths.WalSuffix, snapshot.Wal, cancellationToken);
+        }
+
+        return path;
+    }
+
+    private static void ValidateDatabase(SQLiteConnection connection)
+    {
+        Execute(connection, ConfigureSql);
+        if (!StringComparer.Ordinal.Equals(Scalar(connection, IntegritySql), IntegritySuccess))
+        {
+            throw new InvalidDataException("The captured music catalogue failed SQLite integrity checks.");
+        }
+
+        if (long.Parse(Scalar(connection, VersionSql), CultureInfo.InvariantCulture) < MinimumSchemaVersion)
+        {
+            throw new InvalidDataException("Unsupported iPhone music catalogue schema.");
+        }
+    }
+
+    private static (long DatabaseId, long ContainerId, uint Anchor) ReadIdentity(
+        SQLiteConnection connection,
+        bool allowUninitialized)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = IdentitySql;
+        using var rows = command.ExecuteReader();
+        var initialized = rows.Read();
+        if (!initialized && !allowUninitialized)
+        {
+            throw new IOException("The music library has not been initialized. Run 'notunes init' first.");
+        }
+
+        var databaseId = initialized ? rows.GetInt64(DatabaseIdColumn) : 0;
+        var containerId = initialized ? rows.GetInt64(ContainerIdColumn) : 0;
+        if (initialized && (databaseId == 0 || containerId == 0 || rows.Read()))
+        {
+            throw new InvalidDataException("Ambiguous music database identity.");
+        }
+
+        rows.Close();
+        var anchorText = Scalar(connection, AnchorSql, SyncProtocol.InitialMediaAnchor);
+        if (!uint.TryParse(
+            anchorText,
+            NumberStyles.None,
+            CultureInfo.InvariantCulture,
+            out var anchor) || anchor == uint.MaxValue || anchor.ToString(CultureInfo.InvariantCulture) != anchorText)
+        {
+            throw new InvalidDataException("Invalid Media sync anchor.");
+        }
+
+        return (databaseId, containerId, anchor);
+    }
+
+    private static HashSet<long> ReadOccupiedIds(SQLiteConnection connection, long databaseId, long containerId)
+    {
+        var occupied = new HashSet<long> { databaseId, containerId };
+        using var command = connection.CreateCommand();
+        command.CommandText = OccupiedIdsSql;
+        using var rows = command.ExecuteReader();
+        while (rows.Read())
+        {
+            occupied.Add(rows.GetInt64(SyncIdColumn));
+        }
+
+        return occupied;
+    }
+
+    private static (List<DeviceTrack> Tracks, List<ProtectedCatalogueItem> Protected) ReadInventory(
+        SQLiteConnection connection,
+        ISet<long> occupied,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = ItemsSql;
+        using var reader = command.ExecuteReader();
+        var tracks = new List<DeviceTrack>();
+        var protectedItems = new List<ProtectedCatalogueItem>();
+        var trackIds = new HashSet<long>();
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (reader.Read())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var id = ReadUniqueTrackId(reader, trackIds, occupied);
+            if (IsProtected(reader, id))
+            {
+                protectedItems.Add(ReadProtectedItem(reader, id));
+                continue;
+            }
+
+            if (tracks.Count >= MaximumTracks) throw new InvalidDataException("Catalogue track limit exceeded.");
+
+            tracks.Add(ReadLocalTrack(reader, id!.Value, paths));
+        }
+
+        return (tracks, protectedItems);
+    }
+
+    private static long? ReadUniqueTrackId(DbDataReader reader, ISet<long> seen, ISet<long> occupied)
+    {
+        var id = OptionalNumber(reader, SyncIdColumn);
+        if (id is { } value && value != 0)
+        {
+            if (!seen.Add(value)) throw new InvalidDataException("Ambiguous track sync identity in the music catalogue.");
+
+            occupied.Add(value);
+        }
+
+        return id;
+    }
+
+    private static bool IsProtected(DbDataReader reader, long? id)
+    {
+        return id is null or 0 || OptionalNumber(reader, StoreSagaIdColumn) != 0
+                               || OptionalNumber(reader, MusicTypeColumn) != MusicMediaType
+                               || OptionalNumber(reader, RemoteLocationColumn) != 0;
+    }
+
+    private static ProtectedCatalogueItem ReadProtectedItem(DbDataReader reader, long? id)
+    {
+        return new ProtectedCatalogueItem(
+            reader.GetInt64(ItemIdColumn),
+            id,
+            OptionalNumber(reader, StoreSagaIdColumn),
+            OptionalNumber(reader, MusicTypeColumn),
+            OptionalNumber(reader, RemoteLocationColumn),
+            OptionalText(reader, TitleColumn),
+            OptionalText(reader, BasePathColumn),
+            OptionalText(reader, FilenameColumn),
+            OptionalNumber(reader, FileSizeColumn)) { Metadata = ReadTrackMetadata(reader) };
+    }
+
+    private static DeviceTrack ReadLocalTrack(DbDataReader reader, long id, ISet<string> paths)
+    {
+        var size = reader.GetInt64(FileSizeColumn);
+        var incomplete = reader.GetInt64(BaseLocationIdColumn) == MissingBaseLocationId && size == 0
+            && (reader.IsDBNull(FilenameColumn) || reader.GetString(FilenameColumn).Length == 0);
+
+        string? fullPath = null;
+        if (!incomplete)
+        {
+            fullPath = reader.GetString(BasePathColumn) + "/" + reader.GetString(FilenameColumn);
+            AfcClient.ValidatePath(fullPath);
+            if (!fullPath.StartsWith(SyncPaths.MusicBucketPrefix, StringComparison.Ordinal) || !paths.Add(fullPath))
+            {
+                throw new InvalidDataException("Unsafe or ambiguous music catalogue entry.");
+            }
+        }
+
+        if (size < 0) throw new InvalidDataException("Unsafe or ambiguous music catalogue entry.");
+
+        return new DeviceTrack(
+            id,
+            reader.GetString(TitleColumn),
+            fullPath,
+            size) { Metadata = ReadTrackMetadata(reader) };
+    }
+
+    private static void ReadContainers(
+        SQLiteConnection connection,
+        ISet<long> occupied,
+        long containerId,
+        bool initialized)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = ContainersSql;
+        using var rows = command.ExecuteReader();
+        var hasPrimaryContainer = false;
+        while (rows.Read())
+        {
+            var id = rows.GetInt64(SyncIdColumn);
+            if (id != 0) occupied.Add(id);
+
+            hasPrimaryContainer |= rows.GetInt64(ContainerRowIdColumn) == containerId;
+        }
+
+        if (initialized && !hasPrimaryContainer)
+        {
+            throw new IOException("The music library is incomplete: its primary container is missing.");
         }
     }
 

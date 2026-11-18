@@ -54,7 +54,6 @@ public sealed class LinuxSourceSessionTests
             this.MoveDirectory(path, path + "-moved");
             Directory.CreateSymbolicLink(path, this.outside);
         }
-
         else
         {
             File.Delete(path);

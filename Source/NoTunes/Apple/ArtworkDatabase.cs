@@ -46,9 +46,10 @@ internal static class ArtworkDatabase
     internal static uint Highest(byte[] bytes)
     {
         var big = bytes.AsSpan().StartsWith(BigEndianRootSignature);
-        if (bytes.Length < RootHeader || bytes.Length > MaximumBytes
-            || !big && !bytes.AsSpan().StartsWith(RootSignature))
+        if (bytes.Length < RootHeader || bytes.Length > MaximumBytes || !big && !bytes.AsSpan().StartsWith(RootSignature))
+        {
             throw new InvalidDataException("Unsupported saved ArtworkDB.");
+        }
 
         uint Number(int at)
         {
@@ -62,24 +63,36 @@ internal static class ArtworkDatabase
         {
             var expected = Encoding.ASCII.GetBytes(big ? new string(magic.Reverse().ToArray()) : magic);
             if (at < 0 || at > end - minimum || !bytes.AsSpan(at, expected.Length).SequenceEqual(expected))
+            {
                 throw new InvalidDataException("Invalid ArtworkDB record.");
+            }
 
             var head = Number(at + HeaderLengthOffset);
             var length = Number(at + RecordLengthOffset);
             if (head < minimum || length < head || length > end - at || length % sizeof(uint) != 0)
+            {
                 throw new InvalidDataException("Invalid ArtworkDB record length.");
+            }
 
             return checked(at + (int)length);
         }
 
-        if (Record(0, RootMagic, RootHeader, bytes.Length) != bytes.Length
+        if (Record(
+            0,
+            RootMagic,
+            RootHeader,
+            bytes.Length) != bytes.Length
             || Number(MajorVersionOffset) != SupportedMajorVersion
             || Number(MinorVersionOffset) is not (SupportedMinorVersion or LegacyMinorVersion))
+        {
             throw new InvalidDataException("Unsupported ArtworkDB version or size.");
+        }
 
         var maximum = Number(CacheCounterOffset);
-        if (maximum < ArtworkProtocol.CacheIdFloor || maximum > ArtworkProtocol.MaximumCacheId)
+        if (maximum is < ArtworkProtocol.CacheIdFloor or > ArtworkProtocol.MaximumCacheId)
+        {
             throw new InvalidDataException("Invalid artwork counter.");
+        }
 
         var sections = Number(SectionCountOffset);
         if (sections is < 1 or > MaximumSections) throw new InvalidDataException("Invalid ArtworkDB sections.");
@@ -88,21 +101,32 @@ internal static class ArtworkDatabase
         var kinds = new HashSet<uint>();
         for (var section = 0; section < sections; section++)
         {
-            var end = Record(offset, SectionMagic, SectionHeader, bytes.Length);
+            var end = Record(
+                offset,
+                SectionMagic,
+                SectionHeader,
+                bytes.Length);
+
             var kind = Number(offset + SectionKindOffset) & ushort.MaxValue;
             if (kind is < ImageSectionKind or > LastSectionKind || !kinds.Add(kind))
+            {
                 throw new InvalidDataException("Ambiguous artwork sections.");
+            }
 
             if (kind == ImageSectionKind)
             {
                 var list = offset + checked((int)Number(offset + HeaderLengthOffset));
                 if (list > end - ListHeader || Number(list + HeaderLengthOffset) > end - list)
+                {
                     throw new InvalidDataException("Truncated artwork image list.");
+                }
 
                 var magic = Encoding.ASCII.GetString(bytes.AsSpan(list, ImageListMagic.Length));
                 if (!StringComparer.Ordinal.Equals(magic, big ? BigEndianImageListMagic : ImageListMagic)
                     || Number(list + HeaderLengthOffset) < ListHeader)
+                {
                     throw new InvalidDataException("Invalid artwork image list.");
+                }
 
                 var count = Number(list + ImageCountOffset);
                 if (count > MaximumImages) throw new InvalidDataException("Artwork record limit exceeded.");
@@ -110,7 +134,12 @@ internal static class ArtworkDatabase
                 var image = list + checked((int)Number(list + HeaderLengthOffset));
                 for (var index = 0; index < count; index++)
                 {
-                    var next = Record(image, ImageMagic, ImageHeader, end);
+                    var next = Record(
+                        image,
+                        ImageMagic,
+                        ImageHeader,
+                        end);
+
                     var id = Number(image + ImageIdOffset);
                     if (id == 0) throw new InvalidDataException("Invalid artwork image ID.");
 
@@ -125,7 +154,9 @@ internal static class ArtworkDatabase
         }
 
         if (offset != bytes.Length || !kinds.Contains(ImageSectionKind))
+        {
             throw new InvalidDataException("Missing artwork image section.");
+        }
 
         return maximum;
     }

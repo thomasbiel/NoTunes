@@ -94,7 +94,7 @@ public sealed class GroupAliasRecoveryTests
             INSERT INTO album_artist VALUES(22,1011,'{alias}','{alias}');
             """);
 
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         var addition = LegacyAddition(alias);
         var stored = FeatureTestData.Stored(addition);
         stored = stored with

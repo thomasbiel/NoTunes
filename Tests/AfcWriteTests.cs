@@ -36,6 +36,7 @@ public sealed class AfcWriteTests
         await using var afc = new AfcClient(peer, RequestTimeout);
         var exception = await Assert.ThrowsAsync<AfcException>(async () =>
             await afc.AcquireSyncLockAsync(CancellationToken.None));
+
         Assert.That(exception!.Code, Is.EqualTo(AfcPeer.LockWouldBlockStatus));
         Assert.That(peer.WasDisposed, Is.True);
     }
@@ -51,6 +52,7 @@ public sealed class AfcWriteTests
             input,
             input.Length,
             CancellationToken.None));
+
         Assert.That(exception!.InnerException, Is.InstanceOf<OperationCanceledException>());
         Assert.That(peer.WasDisposed, Is.True);
     }
@@ -77,6 +79,7 @@ public sealed class AfcWriteTests
             StallClose = true,
             OnClose = cancellation.Cancel
         };
+
         await using var afc = new AfcClient(peer, RequestTimeout);
         var lease = await afc.AcquireSyncLockAsync(cancellation.Token);
         await Assert.CatchAsync<OperationCanceledException>(async () => await lease.DisposeAsync());
@@ -101,6 +104,7 @@ public sealed class AfcWriteTests
                 cancellation.Cancel();
                 return Task.CompletedTask;
             }));
+
         Assert.That(exception!.CancellationToken, Is.EqualTo(cancellation.Token));
         Assert.That(peer.WasDisposed, Is.True);
     }
@@ -115,6 +119,7 @@ public sealed class AfcWriteTests
             StallClose = true,
             OnClose = cancellation.Cancel
         };
+
         await using var afc = new AfcClient(peer, RequestTimeout);
         using var input = new MemoryStream([1]);
         await Assert.CatchAsync<OperationCanceledException>(() => afc.WriteNewFileAsync(
@@ -122,6 +127,7 @@ public sealed class AfcWriteTests
             input,
             input.Length,
             cancellation.Token));
+
         Assert.That(cancellation.IsCancellationRequested, Is.True);
         Assert.That(peer.WasDisposed, Is.True);
     }
@@ -152,12 +158,14 @@ public sealed class AfcWriteTests
             input,
             bytes.Length,
             CancellationToken.None);
+
         Assert.That(peer.Files[Target], Is.EqualTo(bytes));
         Assert.That(peer.WritePackets, Has.Count.EqualTo(2));
         foreach (var packet in peer.WritePackets)
         {
             Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(packet.AsSpan(ProtocolFrames.AfcTotalLengthOffset)),
                 Is.EqualTo((ulong)packet.Length));
+
             Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(packet.AsSpan(ProtocolFrames.AfcThisLengthOffset)),
                 Is.EqualTo((ulong)(ProtocolFrames.AfcHeaderBytes + sizeof(ulong))));
         }
@@ -178,6 +186,7 @@ public sealed class AfcWriteTests
             input,
             1,
             CancellationToken.None));
+
         Assert.That(peer.Opens, Is.Zero);
         Assert.That(peer.Files[Target], Is.EqualTo(new byte[] { 7 }));
     }
@@ -194,6 +203,7 @@ public sealed class AfcWriteTests
             input,
             size,
             CancellationToken.None));
+
         Assert.That(peer.OpenHandles, Is.Zero);
         Assert.That(peer.Closes, Is.EqualTo(1));
     }
@@ -210,6 +220,7 @@ public sealed class AfcWriteTests
                 input,
                 1,
                 CancellationToken.None));
+
             Assert.That(peer.OpenHandles, Is.Zero);
         }
     }
@@ -242,6 +253,7 @@ public sealed class AfcWriteTests
             input,
             0,
             CancellationToken.None));
+
         Assert.That(peer.Opens, Is.Zero);
     }
 }

@@ -19,12 +19,16 @@ internal sealed record LibraryIdentity(string LibraryId, string Binding)
             || BinaryPrimitives.ReadUInt16LittleEndian(content.AsSpan(MajorVersionOffset)) != MajorVersion
             || BinaryPrimitives.ReadUInt16LittleEndian(content.AsSpan(MinorVersionOffset)) != MinorVersion
             || content[ConfiguredOffset] != Configured)
+        {
             throw new InvalidDataException("Unsupported or unconfigured iTunes preferences.");
+        }
 
         var catalog = BinaryPrimitives.ReadUInt64LittleEndian(content.AsSpan(CatalogueIdentityOffset));
         var user = BinaryPrimitives.ReadUInt64LittleEndian(content.AsSpan(UserIdentityOffset));
         if (catalog == 0 || user == 0 || catalog == user)
+        {
             throw new InvalidDataException("Invalid saved music library identity.");
+        }
 
         return new LibraryIdentity((catalog ^ user).ToString("X16"), Convert.ToHexString(SHA256.HashData(content.AsSpan(CatalogueIdentityOffset, 2 * sizeof(ulong)))));
     }
@@ -38,7 +42,9 @@ internal sealed record LibraryIdentity(string LibraryId, string Binding)
                 continue;
             var identity = Parse(await afc.ReadFileAsync(path, SyncProtocol.MaxPreferenceBytes, cancellationToken));
             if (result is not null && result != identity)
+            {
                 throw new InvalidDataException("The saved library identities disagree.");
+            }
 
             result = identity;
         }

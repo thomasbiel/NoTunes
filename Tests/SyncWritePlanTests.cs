@@ -40,7 +40,7 @@ public sealed class SyncWritePlanTests
         int added,
         int deleted)
     {
-        var catalogue = SyncPlannerTests.Catalogue([
+        var catalogue = CatalogueTestData.Create([
             .. Enumerable.Range(FirstTrackId, existing)
                 .Select(id => new DeviceTrack(
                     id,
@@ -48,12 +48,14 @@ public sealed class SyncWritePlanTests
                     $"F01/{id}.mp3",
                     1))
         ]);
+
         var additions = Enumerable.Range(0, added)
             .Select(id => new SourceTrack(
                 $"{id}.mp3",
                 1,
                 DateTime.UnixEpoch,
                 "hash")).ToArray();
+
         var unchanged = existing - deleted;
         var source = new SourceLibrary("source", [
             .. additions,
@@ -64,12 +66,14 @@ public sealed class SyncWritePlanTests
                     DateTime.UnixEpoch,
                     "hash"), unchanged)
         ]);
+
         var plan = new SyncPlan(
             "phone",
             catalogue.Anchor,
             additions,
             [.. catalogue.Tracks.Take(deleted)],
             unchanged);
+
         return (source, plan, catalogue);
     }
 }

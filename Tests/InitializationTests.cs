@@ -17,12 +17,9 @@ public sealed class InitializationTests
         using var fixture = Fresh();
         var saved = await SaveStateAsync(fixture, state.Root);
         CommitInitialization(fixture, saved);
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
-        var files = new AfcPeer { AllowWrites = !dryRun };
+        var before = await fixture.ReadAsync();
+        var files = Files(fixture, saved, allowWrites: !dryRun);
         files.Directories.Add(SyncPaths.MetadataDirectory);
-        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
-        files.Files[SyncPaths.Preferences] = saved.Preferences;
-        files.Files[SyncPaths.PreferencesPlist] = LibraryPreferences.Wrap(saved.Preferences);
         var operation = partial ? saved.Operation[..^1] : saved.Operation;
         var signature = partial ? saved.Signature![..^1] : saved.Signature!;
         files.Files[SyncPaths.Metadata] = operation;
@@ -38,7 +35,7 @@ public sealed class InitializationTests
         Assert.That(result.AlreadyInitialized, Is.True);
         Assert.That(result.DryRun, Is.EqualTo(dryRun));
         Assert.That(peer.SentMessages(), Is.Empty);
-        SyncEngine.RequireUnchanged(before, await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None));
+        SyncEngine.RequireUnchanged(before, await fixture.ReadAsync());
         if (dryRun)
         {
             Assert.That(files.WritePackets, Is.Empty);
@@ -63,11 +60,8 @@ public sealed class InitializationTests
         CommitInitialization(fixture, saved);
 
         var foreign = "Z[\\"u8.ToArray();
-        var files = new AfcPeer { AllowWrites = true };
+        var files = Files(fixture, saved, allowWrites: true);
         files.Directories.Add(SyncPaths.MetadataDirectory);
-        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
-        files.Files[SyncPaths.Preferences] = saved.Preferences;
-        files.Files[SyncPaths.PreferencesPlist] = LibraryPreferences.Wrap(saved.Preferences);
         files.Files[SyncPaths.Metadata] = saved.Operation;
         files.Files[SyncPaths.Metadata + SyncPaths.SignatureSuffix] = saved.Signature!;
         files.Files[foreignPath] = foreign;
@@ -99,9 +93,8 @@ public sealed class InitializationTests
         }
 
         var foreign = "Z[\\"u8.ToArray();
-        var files = new AfcPeer { AllowWrites = true };
+        var files = Files(fixture, allowWrites: true);
         files.Directories.Add(SyncPaths.MetadataDirectory);
-        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
         if (recovering)
         {
             files.Files[SyncPaths.Metadata] = saved.Operation;
@@ -121,6 +114,7 @@ public sealed class InitializationTests
                 files.Files.Remove(path);
             }
         });
+
         await using var afc = new AfcClient(files, Timeout);
         await using var atc = new AtcClient(peer, Timeout);
         await atc.ReadSyncStatusAsync(CancellationToken.None);
@@ -139,9 +133,8 @@ public sealed class InitializationTests
         using var state = new SyncWorkspace();
         using var fixture = Fresh();
         var saved = await SaveStateAsync(fixture, state.Root);
-        var files = new AfcPeer { AllowWrites = true };
+        var files = Files(fixture, allowWrites: true);
         files.Directories.Add(SyncPaths.MetadataDirectory);
-        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
         files.Files[SyncPaths.Metadata] = saved.Operation[..^1];
         files.Files[SyncPaths.Metadata + SyncPaths.SignatureSuffix] = saved.Signature![..^1];
         var peer = Peer(files, fixture, () =>
@@ -161,25 +154,16 @@ public sealed class InitializationTests
         Assert.That(result.DatabaseId, Is.EqualTo(saved.DatabaseId));
     }
 
-    [TestCase(0, false)]
-    [TestCase(0, true)]
-    [TestCase(1, false)]
-    [TestCase(1, true)]
-    [TestCase(7, true)]
+    [Test]
     public async Task Reports_An_Existing_Initialization_Only_After_The_First_Revision_And_Primary_Container_Exist(
-        int revision,
-        bool hasPrimaryContainer)
+        [Values(0, 1, 7)] int revision,
+        [Values] bool hasPrimaryContainer)
     {
         using var state = new SyncWorkspace();
         using var fixture = Fresh();
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None, allowUninitialized: true);
+        var before = await fixture.ReadAsync(allowUninitialized: true);
 
-        var saved = new InitializationState(
-            LibraryPreferences.Create(),
-            2001,
-            2002,
-            SyncOperations.Initialize(2001, 2002, "Test iPhone"),
-            CatalogueCheckpoint.Capture(before));
+        var saved = CreateState(before);
 
         DeviceState.Save(Path.Combine(DeviceState.DirectoryFor(state.Root, "phone"), "initialization.json"), saved);
         fixture.Execute($"INSERT INTO db_info VALUES({saved.DatabaseId},{saved.ContainerId}); "
@@ -190,10 +174,7 @@ public sealed class InitializationTests
             fixture.Execute($"INSERT INTO container(sync_id,container_pid) VALUES({saved.ContainerId},{saved.ContainerId});");
         }
 
-        var files = new AfcPeer();
-        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
-        files.Files[SyncPaths.Preferences] = saved.Preferences;
-        files.Files[SyncPaths.PreferencesPlist] = LibraryPreferences.Wrap(saved.Preferences);
+        var files = Files(fixture, saved);
         await using var afc = new AfcClient(files, Timeout);
         await using var peer = new AtcPeer();
         await using var atc = new AtcClient(peer, Timeout);
@@ -237,8 +218,7 @@ public sealed class InitializationTests
     {
         using var state = new SyncWorkspace();
         using var fixture = Fresh();
-        var files = new AfcPeer { AllowWrites = !dryRun };
-        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        var files = Files(fixture, allowWrites: !dryRun);
         var peer = Peer(files, fixture);
         await using var afc = new AfcClient(files, Timeout);
         await using var atc = new AtcClient(peer, Timeout);
@@ -259,7 +239,7 @@ public sealed class InitializationTests
             return;
         }
 
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         Assert.That(catalogue.DatabaseId, Is.EqualTo(result.DatabaseId));
         Assert.That(catalogue.Anchor, Is.EqualTo(1));
         Assert.That(catalogue.Tracks, Is.Empty);
@@ -332,6 +312,32 @@ public sealed class InitializationTests
         Assert.That(files.Files.ContainsKey(SyncPaths.Lock), Is.False);
     }
 
+    private static AfcPeer Files(CatalogueFixture fixture, InitializationState? saved = null, bool allowWrites = false)
+    {
+        var files = new AfcPeer { AllowWrites = allowWrites };
+        files.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
+        if (saved is not null)
+        {
+            files.Files[SyncPaths.Preferences] = saved.Preferences;
+            files.Files[SyncPaths.PreferencesPlist] = LibraryPreferences.Wrap(saved.Preferences);
+        }
+
+        return files;
+    }
+
+    private static InitializationState CreateState(DeviceCatalogue before, byte[]? signature = null)
+    {
+        const long databaseId = 2001;
+        const long containerId = 2002;
+        return new InitializationState(
+            LibraryPreferences.Create(),
+            databaseId,
+            containerId,
+            SyncOperations.Initialize(databaseId, containerId, "Test iPhone"),
+            CatalogueCheckpoint.Capture(before),
+            signature);
+    }
+
     private static Task<InitializationResult> InitializeAsync(AfcClient afc, AtcClient atc, InitOptions options)
     {
         var initializer = new LibraryInitializer(new SilentUsbMuxTransport(), TextWriter.Null);
@@ -360,19 +366,14 @@ public sealed class InitializationTests
             DELETE FROM db_info; DELETE FROM item; DELETE FROM item_store; DELETE FROM item_extra;
             DELETE FROM container; DELETE FROM _MLDatabaseProperties;
             """);
+
         return fixture;
     }
 
     private static async Task<InitializationState> SaveStateAsync(CatalogueFixture fixture, string root)
     {
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None, allowUninitialized: true);
-        var saved = new InitializationState(
-            LibraryPreferences.Create(),
-            2001,
-            2002,
-            SyncOperations.Initialize(2001, 2002, "Test iPhone"),
-            CatalogueCheckpoint.Capture(before),
-            [1, 2, 3]);
+        var before = await fixture.ReadAsync(allowUninitialized: true);
+        var saved = CreateState(before, [1, 2, 3]);
 
         DeviceState.Save(Path.Combine(DeviceState.DirectoryFor(root, "phone"), "initialization.json"), saved);
         return saved;

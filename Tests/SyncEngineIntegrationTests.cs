@@ -7,20 +7,35 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class SyncEngineIntegrationTests
 {
+    private SyncWorkspace source = null!;
+    private SyncWorkspace state = null!;
+
+    [SetUp]
+    public void SetUp()
+    {
+        this.source = new SyncWorkspace();
+        this.state = new SyncWorkspace();
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        this.state.Dispose();
+        this.source.Dispose();
+    }
+
     [Test]
     public async Task Skips_Invalid_Source_Files_And_Defers_Deletions(
         [Values] bool dryRun,
         [Values] bool invalidCover)
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
-        var validPath = CreateSource(source.Root, 1);
+        var validPath = this.CreateSource(1);
         const string invalidName = "!invalid.mp3";
         if (invalidCover)
         {
             SourceTestData.WriteTrack(
-                source.Root,
+                this.source.Root,
                 invalidName,
                 "Album",
                 "Artist",
@@ -28,15 +43,13 @@ public sealed class SyncEngineIntegrationTests
         }
         else
         {
-            await File.WriteAllTextAsync(Path.Combine(source.Root, invalidName), "Not an MP3");
+            await File.WriteAllTextAsync(Path.Combine(this.source.Root, invalidName), "Not an MP3");
         }
 
         var before = await device.ReadCatalogueAsync();
-        var result = await RunAsync(
-            device,
-            source.Root,
-            state.Root,
+        var result = await this.RunAsync(device,
             dryRun);
+
         var after = await device.ReadCatalogueAsync();
 
         Assert.That(result.Plan.Add.Select(track => track.RelativePath), Is.EqualTo([Path.GetFileName(validPath)]));
@@ -49,6 +62,7 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(after.Tracks, Has.Count.EqualTo(dryRun ? 1 : 2));
         Assert.That(after.Tracks.Single(track => track.Id == SimulatedSyncCatalogue.ExistingTrackId),
             Is.EqualTo(before.Tracks.Single()));
+
         Assert.That(after.ProtectedItems, Is.EqualTo(before.ProtectedItems));
         Assert.That(device.Files.ContainsKey(SimulatedSyncCatalogue.ExistingTrackPath), Is.True);
         if (!dryRun)
@@ -57,23 +71,19 @@ public sealed class SyncEngineIntegrationTests
             Assert.That(device.Files[added.Path!], Is.EqualTo(await File.ReadAllBytesAsync(validPath)));
         }
 
-        AssertSettled(device, state.Root, dryRun ? 0 : 1);
+        this.AssertSettled(device, dryRun ? 0 : 1);
     }
 
     [Test]
     public async Task Preserves_All_Existing_Tracks_When_Every_Addition_Is_Invalid([Values] bool dryRun)
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
-        await File.WriteAllTextAsync(Path.Combine(source.Root, "invalid.mp3"), "Not an MP3");
+        await File.WriteAllTextAsync(Path.Combine(this.source.Root, "invalid.mp3"), "Not an MP3");
 
         var before = await device.ReadCatalogueAsync();
-        var result = await RunAsync(
-            device,
-            source.Root,
-            state.Root,
+        var result = await this.RunAsync(device,
             dryRun);
+
         var after = await device.ReadCatalogueAsync();
 
         Assert.That(result.Plan.HasChanges, Is.False);
@@ -85,31 +95,28 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(device.StartedSessions, Is.Zero);
         Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
         Assert.That(after.Anchor, Is.EqualTo(before.Anchor));
-        AssertSettled(device, state.Root, 0);
+        this.AssertSettled(device, 0);
     }
 
     [Test]
     public async Task Skips_A_Broken_Cover_Repair_And_Continues_Audio_Additions([Values] bool dryRun)
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
-        CreateSource(source.Root, 1);
+        this.CreateSource(1);
         var path = SourceTestData.WriteTrack(
-            source.Root,
+            this.source.Root,
             "covered.mp3",
             "Album",
             "Artist",
             file => file.Tag.Pictures = [FeatureTestData.FrontCover([1, 2, 3, 4])]);
+
         var bytes = await File.ReadAllBytesAsync(path);
         device.SetExistingAudio(bytes);
 
         var before = await device.ReadCatalogueAsync();
-        var result = await RunAsync(
-            device,
-            source.Root,
-            state.Root,
+        var result = await this.RunAsync(device,
             dryRun);
+
         var after = await device.ReadCatalogueAsync();
 
         Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
@@ -121,42 +128,42 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(result.VerifiedBatches, Is.EqualTo(dryRun ? 0 : 1));
         Assert.That(after.Tracks.Single(track => track.Id == SimulatedSyncCatalogue.ExistingTrackId),
             Is.EqualTo(before.Tracks.Single()));
+
         Assert.That(device.Files[SimulatedSyncCatalogue.ExistingTrackPath], Is.EqualTo(bytes));
         Assert.That(device.Batches.SelectMany(batch => batch)
             .All(operation => operation.Text(MediaKeys.Operation) == MediaOperations.InsertTrack), Is.True);
-        AssertSettled(device, state.Root, dryRun ? 0 : 1);
+
+        this.AssertSettled(device, dryRun ? 0 : 1);
     }
 
     [Test]
     public async Task Still_Stops_For_An_Unresolved_Group_Before_Any_Device_Write()
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
         device.AddAlbumArtist(
             22,
             1022,
             "Artist",
             "Other Sort");
-        CreateSource(source.Root, 1);
+
+        this.CreateSource(1);
 
         var before = await device.ReadCatalogueAsync();
         var exception = await Assert.ThrowsAsync<InvalidDataException>(
-            () => RunAsync(device, source.Root, state.Root));
+            () => this.RunAsync(device));
+
         var after = await device.ReadCatalogueAsync();
 
         Assert.That(exception!.Message, Does.Contain("Cannot uniquely assign"));
         Assert.That(device.StartedSessions, Is.Zero);
         Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
         Assert.That(device.FileConnections.SelectMany(connection => connection.WritePackets), Is.Empty);
-        AssertSettled(device, state.Root, 0);
+        this.AssertSettled(device, 0);
     }
 
     [Test]
     public async Task Synchronizes_After_Automatic_Or_Interactive_Group_Resolution([Values] bool ask)
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         var prompts = 0;
 
         using var device = new SimulatedSyncDevice
@@ -183,7 +190,7 @@ public sealed class SyncEngineIntegrationTests
                 "Second Sort");
         }
 
-        var path = CreateSource(source.Root, 1);
+        var path = this.CreateSource(1);
         if (ask)
         {
             using var file = TagLib.File.Create(path);
@@ -193,7 +200,7 @@ public sealed class SyncEngineIntegrationTests
 
         var bytes = await File.ReadAllBytesAsync(path);
         var before = await device.ReadCatalogueAsync();
-        var result = await RunAsync(device, source.Root, state.Root);
+        var result = await this.RunAsync(device);
         var after = await device.ReadCatalogueAsync();
         Assert.That(prompts, Is.EqualTo(ask ? 1 : 0));
         Assert.That(result.VerifiedBatches, Is.EqualTo(1));
@@ -202,7 +209,7 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(after.ArtistGroups, Is.EqualTo(before.ArtistGroups));
         Assert.That(device.Files[after.Tracks.Single().Path!], Is.EqualTo(bytes));
         Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
-        AssertSettled(device, state.Root, 1);
+        this.AssertSettled(device, 1);
     }
 
     private const int RunTimeoutSeconds = 90;
@@ -213,16 +220,11 @@ public sealed class SyncEngineIntegrationTests
     [Test]
     public async Task Dry_Run_Reports_Changes_Without_Starting_Batches_Or_Writing_State()
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
-        CreateSource(source.Root, 1);
+        this.CreateSource(1);
 
         var before = await device.ReadCatalogueAsync();
-        var result = await RunAsync(
-            device,
-            source.Root,
-            state.Root,
+        var result = await this.RunAsync(device,
             dryRun: true);
 
         Assert.That(result.DryRun, Is.True);
@@ -232,10 +234,8 @@ public sealed class SyncEngineIntegrationTests
             Is.EqualTo([SimulatedSyncCatalogue.ExistingTrackId]));
 
         Assert.That(result.VerifiedBatches, Is.Zero);
-        Assert.That(device.Batches, Is.Empty);
-        Assert.That(device.FileConnections.SelectMany(connection => connection.WritePackets), Is.Empty);
-        Assert.That(device.Files.ContainsKey(SyncPaths.Lock), Is.False);
-        Assert.That(Directory.EnumerateFileSystemEntries(state.Root), Is.Empty);
+        SimulatedSyncDeviceAssertions.HasNoWrites(device);
+        Assert.That(Directory.EnumerateFileSystemEntries(this.state.Root), Is.Empty);
         SyncEngine.RequireUnchanged(before, await device.ReadCatalogueAsync());
         Assert.That(device.Connections.All(connection => connection.IsDisposed), Is.True);
     }
@@ -244,14 +244,12 @@ public sealed class SyncEngineIntegrationTests
     public async Task Verifies_All_Addition_Batches_Before_Removing_Obsolete_Music()
     {
         const int additions = SyncProtocol.MaxTrackChanges + 1;
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
 
-        var path = CreateSource(source.Root, additions);
+        var path = this.CreateSource(additions);
         var before = await device.ReadCatalogueAsync();
         var bytes = await File.ReadAllBytesAsync(path);
-        var result = await RunAsync(device, source.Root, state.Root);
+        var result = await this.RunAsync(device);
         var after = await device.ReadCatalogueAsync();
 
         Assert.That(result.Plan.Add, Has.Count.EqualTo(additions));
@@ -266,6 +264,7 @@ public sealed class SyncEngineIntegrationTests
 
         Assert.That(device.Batches.Take(2).SelectMany(batch => batch)
             .All(operation => operation.Text(MediaKeys.Operation) == MediaOperations.InsertTrack), Is.True);
+
         Assert.That(
             device.Batches.Last().Single().Text(MediaKeys.Operation),
             Is.EqualTo(MediaOperations.DeleteTrack));
@@ -279,21 +278,19 @@ public sealed class SyncEngineIntegrationTests
             Assert.That(device.Files[track.Path!], Is.EqualTo(bytes));
         }
 
-        AssertSettled(device, state.Root, result.VerifiedBatches);
+        this.AssertSettled(device, result.VerifiedBatches);
     }
 
     [Test]
     public async Task Repairs_Only_Artwork_While_Preserving_Existing_Audio_Identity_And_Metadata()
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
 
-        var path = CreateSource(source.Root, 1, artwork: true);
+        var path = this.CreateSource(1, artwork: true);
         var bytes = await File.ReadAllBytesAsync(path);
         device.SetExistingAudio(bytes);
         var before = await device.ReadCatalogueAsync();
-        var result = await RunAsync(device, source.Root, state.Root);
+        var result = await this.RunAsync(device);
         var after = await device.ReadCatalogueAsync();
 
         Assert.That(result.Plan.Add, Is.Empty);
@@ -308,26 +305,25 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
         Assert.That(after.ProtectedItems, Is.EqualTo(before.ProtectedItems));
         Assert.That(device.Files[SimulatedSyncCatalogue.ExistingTrackPath], Is.EqualTo(bytes));
-        var artwork = after.TrackArtwork[SimulatedSyncCatalogue.ExistingTrackId];
-        Assert.That(
-            device.Files[SyncPaths.ArtworkOriginals + artwork.Path],
-            Is.EqualTo(Mp3Metadata.Read(path, Path.GetFileName(path)).Artwork!.Bytes));
+        SimulatedSyncDeviceAssertions.HasArtworkFrom(
+            device,
+            after,
+            SimulatedSyncCatalogue.ExistingTrackId,
+            path);
 
-        AssertSettled(device, state.Root, 1);
+        this.AssertSettled(device, 1);
     }
 
     [Test]
     public async Task Registers_Distinct_Covers_For_Additions_And_Repairs_In_The_Same_Run()
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
 
-        var path = CreateSource(source.Root, 2, artwork: true);
+        var path = this.CreateSource(2, artwork: true);
         var bytes = await File.ReadAllBytesAsync(path);
         device.SetExistingAudio(bytes);
         var before = await device.ReadCatalogueAsync();
-        var result = await RunAsync(device, source.Root, state.Root);
+        var result = await this.RunAsync(device);
         var after = await device.ReadCatalogueAsync();
 
         Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
@@ -347,29 +343,26 @@ public sealed class SyncEngineIntegrationTests
             Assert.That(device.Files[SyncPaths.ArtworkOriginals + cover.Path], Is.EqualTo(Mp3Metadata.Read(path, Path.GetFileName(path)).Artwork!.Bytes));
         }
 
-        AssertSettled(device, state.Root, 2);
+        this.AssertSettled(device, 2);
     }
 
-    [TestCase(SyncInterruptionPoint.AfterMetadata, false)]
-    [TestCase(SyncInterruptionPoint.AfterMetadata, true)]
-    [TestCase(SyncInterruptionPoint.AfterAssets, false)]
-    [TestCase(SyncInterruptionPoint.AfterAssets, true)]
-    public async Task Reconciles_Interrupted_Insertions_From_Their_Durable_Journal(SyncInterruptionPoint interruption, bool artwork)
+    [Test]
+    public async Task Reconciles_Interrupted_Insertions_From_Their_Durable_Journal(
+        [Values(SyncInterruptionPoint.AfterMetadata, SyncInterruptionPoint.AfterAssets)] SyncInterruptionPoint interruption,
+        [Values] bool artwork)
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice { Interruption = interruption };
 
-        var path = CreateSource(source.Root, 1, artwork);
+        var path = this.CreateSource(1, artwork);
         var before = await device.ReadCatalogueAsync();
-        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
-        var pending = ReadPending(state.Root);
+        await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device));
+        var pending = this.ReadPending();
         var interruptedId = pending.Additions.Single().Id;
         Assert.That(pending.Before.Anchor, Is.EqualTo(before.Anchor));
         Assert.That(device.Connections.All(connection => connection.IsDisposed), Is.True);
 
         // A fresh engine and workspace must reconcile the saved evidence without replaying the signed insertion.
-        var result = await RunAsync(device, source.Root, state.Root);
+        var result = await this.RunAsync(device);
         var after = await device.ReadCatalogueAsync();
         Assert.That(after.Tracks, Has.Count.EqualTo(1));
         Assert.That(after.ProtectedItems, Is.EqualTo(before.ProtectedItems));
@@ -381,9 +374,11 @@ public sealed class SyncEngineIntegrationTests
                 Is.EqualTo([MediaOperations.InsertTrack, MediaOperations.DeleteTrack, MediaOperations.InsertTrack]));
 
             Assert.That(device.Batches[1].Single().Number(MediaKeys.PersistentId), Is.EqualTo(interruptedId));
-            Assert.That(after.Tracks.Single().Id, Is.Not.EqualTo(interruptedId));
-            Assert.That(result.VerifiedBatches, Is.EqualTo(1));
-            AssertSettled(device, state.Root, 2);
+            this.AssertRecoveredReplacement(
+                device,
+                result,
+                after,
+                interruptedId);
         }
         else
         {
@@ -391,7 +386,7 @@ public sealed class SyncEngineIntegrationTests
             Assert.That(after.Tracks.Single().Id, Is.EqualTo(interruptedId));
             Assert.That(result.Plan.Unchanged, Is.EqualTo(1));
             Assert.That(result.VerifiedBatches, Is.Zero);
-            AssertSettled(device, state.Root, 1);
+            this.AssertSettled(device, 1);
         }
 
         if (artwork)
@@ -406,50 +401,45 @@ public sealed class SyncEngineIntegrationTests
     [Test]
     public async Task Resumes_A_Recovery_Interrupted_After_Its_Compensating_Deletion_Commits()
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice { Interruption = SyncInterruptionPoint.AfterMetadata };
 
-        CreateSource(source.Root, 1);
-        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
-        var insertedId = ReadPending(state.Root).Additions.Single().Id;
+        this.CreateSource(1);
+        await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device));
+        var insertedId = this.ReadPending().Additions.Single().Id;
         device.Interruption = SyncInterruptionPoint.AfterMetadata;
         device.InterruptAtBatch = 2;
-        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
-        var cleanup = ReadPending(state.Root);
+        await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device));
+        var cleanup = this.ReadPending();
         Assert.That(cleanup.Additions, Is.Empty);
         Assert.That(cleanup.Deletions.Single().Id, Is.EqualTo(insertedId));
 
-        var result = await RunAsync(device, source.Root, state.Root);
+        var result = await this.RunAsync(device);
         var after = await device.ReadCatalogueAsync();
         Assert.That(
             device.Batches.Select(batch => batch.Single().Text(MediaKeys.Operation)),
             Is.EqualTo([MediaOperations.InsertTrack, MediaOperations.DeleteTrack, MediaOperations.InsertTrack]));
 
         Assert.That(after.Tracks, Has.Count.EqualTo(1));
-        Assert.That(after.Tracks.Single().Id, Is.Not.EqualTo(insertedId));
-        Assert.That(result.VerifiedBatches, Is.EqualTo(1));
-        AssertSettled(device, state.Root, 2);
+        this.AssertRecoveredReplacement(
+            device,
+            result,
+            after,
+            insertedId);
     }
 
     [Test]
     public async Task Dry_Run_Leaves_An_Interrupted_Batch_And_Its_Journal_Untouched()
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice { Interruption = SyncInterruptionPoint.AfterMetadata };
 
-        CreateSource(source.Root, 1);
-        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
-        var record = Directory.GetFiles(state.Root, PendingFilePattern, SearchOption.AllDirectories).Single();
+        this.CreateSource(1);
+        await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device));
+        var record = Directory.GetFiles(this.state.Root, PendingFilePattern, SearchOption.AllDirectories).Single();
         var saved = await File.ReadAllBytesAsync(record);
         var before = await device.ReadCatalogueAsync();
         var staged = device.Files[SyncPaths.Metadata].ToArray();
 
-        var result = await RunAsync(
-            device,
-            source.Root,
-            state.Root,
+        var result = await this.RunAsync(device,
             dryRun: true);
 
         Assert.That(result.DryRun, Is.True);
@@ -467,163 +457,176 @@ public sealed class SyncEngineIntegrationTests
     [TestCase(SyncInterruptionPoint.AfterAssets)]
     public async Task Recovers_An_Interrupted_Cover_Repair_Without_Removing_The_Existing_Track(SyncInterruptionPoint interruption)
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true) { Interruption = interruption };
 
-        var path = CreateSource(source.Root, 1, artwork: true);
-        device.SetExistingAudio(await File.ReadAllBytesAsync(path));
-        var before = await device.ReadCatalogueAsync();
-        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
-        Assert.That(ReadPending(state.Root).Additions.Single().IsArtworkOnly, Is.True);
+        var (path, before) = await this.InterruptCoverRepairAsync(device);
+        Assert.That(this.ReadPending().Additions.Single().IsArtworkOnly, Is.True);
 
-        var result = await RunAsync(device, source.Root, state.Root);
+        var result = await this.RunAsync(device);
         var after = await device.ReadCatalogueAsync();
         Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
         Assert.That(device.Batches.SelectMany(batch => batch)
             .All(operation => operation.Text(MediaKeys.Operation) == MediaOperations.UpdateTrack), Is.True);
+
         Assert.That(device.Batches, Has.Count.EqualTo(interruption == SyncInterruptionPoint.AfterMetadata ? 2 : 1));
         Assert.That(result.Plan.HasChanges, Is.False);
         Assert.That(result.VerifiedBatches, Is.Zero);
-        Assert.That(after.TrackArtwork[SimulatedSyncCatalogue.ExistingTrackId].Path, Is.Not.Null);
-        var artwork = after.TrackArtwork[SimulatedSyncCatalogue.ExistingTrackId];
-        Assert.That(device.Files[SyncPaths.ArtworkOriginals + artwork.Path],
-            Is.EqualTo(Mp3Metadata.Read(path, Path.GetFileName(path)).Artwork!.Bytes));
-        AssertSettled(device, state.Root, 1);
+        SimulatedSyncDeviceAssertions.HasArtworkFrom(
+            device,
+            after,
+            SimulatedSyncCatalogue.ExistingTrackId,
+            path);
+
+        this.AssertSettled(device, 1);
     }
 
     [Test]
     public async Task Resumes_A_Cover_Recovery_After_Replacing_Its_Durable_Assets()
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true) { Interruption = SyncInterruptionPoint.AfterMetadata };
 
-        var path = CreateSource(source.Root, 1, artwork: true);
-        device.SetExistingAudio(await File.ReadAllBytesAsync(path));
-        var before = await device.ReadCatalogueAsync();
-        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
-        var previousCover = Directory.GetFiles(state.Root, "*.jpg", SearchOption.AllDirectories).Single();
+        var (path, before) = await this.InterruptCoverRepairAsync(device);
+        var previousCover = Directory.GetFiles(this.state.Root, "*.jpg", SearchOption.AllDirectories).Single();
 
         device.Interruption = SyncInterruptionPoint.AfterMetadata;
         device.InterruptAtBatch = 2;
-        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
+        await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device));
         Assert.That(File.Exists(previousCover), Is.False);
-        var replacement = Directory.GetFiles(state.Root, "*.jpg", SearchOption.AllDirectories).Single();
+        var replacement = Directory.GetFiles(this.state.Root, "*.jpg", SearchOption.AllDirectories).Single();
         Assert.That(replacement, Is.Not.EqualTo(previousCover));
-        Assert.That(ReadPending(state.Root).Additions.Single().IsArtworkOnly, Is.True);
+        Assert.That(this.ReadPending().Additions.Single().IsArtworkOnly, Is.True);
 
-        await RunAsync(device, source.Root, state.Root);
+        await this.RunAsync(device);
         var after = await device.ReadCatalogueAsync();
         Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
         Assert.That(device.Batches, Has.Count.EqualTo(3));
         Assert.That(device.Batches.SelectMany(batch => batch)
             .All(operation => operation.Text(MediaKeys.Operation) == MediaOperations.UpdateTrack), Is.True);
 
-        var artwork = after.TrackArtwork[SimulatedSyncCatalogue.ExistingTrackId];
-        Assert.That(
-            device.Files[SyncPaths.ArtworkOriginals + artwork.Path],
-            Is.EqualTo(Mp3Metadata.Read(path, Path.GetFileName(path)).Artwork!.Bytes));
+        SimulatedSyncDeviceAssertions.HasArtworkFrom(
+            device,
+            after,
+            SimulatedSyncCatalogue.ExistingTrackId,
+            path);
 
-        AssertSettled(device, state.Root, 1);
+        this.AssertSettled(device, 1);
     }
 
     [Test]
     public async Task Reconciles_A_Committed_Deletion_Without_Starting_Another_Sync_Session()
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true)
         {
             Interruption = SyncInterruptionPoint.AfterMetadata,
             InterruptAtBatch = 2
         };
 
-        CreateSource(source.Root, 1);
-        await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
-        var pending = ReadPending(state.Root);
+        this.CreateSource(1);
+        await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device));
+        var pending = this.ReadPending();
         Assert.That(pending.Additions, Is.Empty);
         Assert.That(pending.Deletions.Single().Id, Is.EqualTo(SimulatedSyncCatalogue.ExistingTrackId));
         var started = device.StartedSessions;
-        var result = await RunAsync(device, source.Root, state.Root);
+        var result = await this.RunAsync(device);
         Assert.That(result.Plan.HasChanges, Is.False);
         Assert.That(
             device.StartedSessions,
             Is.EqualTo(started),
             "Settling an observed deletion must not request a new media import.");
 
-        AssertSettled(device, state.Root, 2);
+        this.AssertSettled(device, 2);
     }
 
     [Test]
     public async Task Retains_The_Journal_And_Obsolete_Tracks_When_Permanent_Audio_Verification_Fails()
     {
-        using var source = new SyncWorkspace();
-        using var state = new SyncWorkspace();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true) { CorruptUploadedAudio = true };
 
-        CreateSource(source.Root, 1);
-        var exception = await Assert.ThrowsAsync<IOException>(() => RunAsync(device, source.Root, state.Root));
+        this.CreateSource(1);
+        var exception = await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device));
 
         Assert.That(exception!.Message, Does.Contain("read-back differs"));
         Assert.That(device.Batches, Has.Count.EqualTo(1));
-        Assert.That(ReadPending(state.Root).Additions, Has.Length.EqualTo(1));
+        Assert.That(this.ReadPending().Additions, Has.Length.EqualTo(1));
         Assert.That(device.Files.ContainsKey(SimulatedSyncCatalogue.ExistingTrackPath), Is.True);
-        Assert.That(Directory.GetFiles(state.Root, VerifiedFilePattern, SearchOption.AllDirectories), Is.Empty);
+        Assert.That(Directory.GetFiles(this.state.Root, VerifiedFilePattern, SearchOption.AllDirectories), Is.Empty);
         Assert.That(device.Connections.All(connection => connection.IsDisposed), Is.True);
     }
 
-    private static async Task<SyncResult> RunAsync(
-        SimulatedSyncDevice device,
-        string source,
-        string state,
-        bool dryRun = false)
+    private async Task<SyncResult> RunAsync(SimulatedSyncDevice device, bool dryRun = false)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(RunTimeoutSeconds));
         return await device.RunAsync(
-            source,
-            state,
+            this.source.Root,
+            this.state.Root,
             dryRun,
             deadline.Token);
     }
 
-    private static string CreateSource(string root, int count, bool artwork = false)
+    [Test]
+    public async Task Transfers_All_Tracks_When_Metadata_Limits_Shorten_A_Batch()
     {
-        var path = SourceTestData.WriteTrack(
-            root,
-            "0000.mp3",
-            "Album",
-            "Artist",
-            file =>
+        using var device = new SimulatedSyncDevice();
+        const int count = 180;
+        this.CreateSource(count,
+            configure: file =>
             {
-                file.Tag.Composers = ["Composer"];
-                file.Tag.Genres = ["Genre"];
-                if (artwork)
-                {
-                    file.Tag.Pictures = [FeatureTestData.FrontCover()];
-                }
+                file.Tag.Title = new string('界', Mp3Metadata.MaximumTextLength);
+                file.Tag.TitleSort = file.Tag.Title;
+                file.Tag.Comment = new string('言', Mp3Metadata.MaximumTextLength);
             });
 
-        for (var index = 1; index < count; index++)
-        {
-            File.Copy(path, Path.Combine(root, $"{index:0000}.mp3"));
-        }
-
-        return path;
+        var result = await this.RunAsync(device);
+        var after = await device.ReadCatalogueAsync();
+        Assert.That(device.Batches.First(), Has.Length.LessThan(count), "The byte limit must shorten the first batch.");
+        Assert.That(device.Batches.Sum(batch => batch.Length), Is.EqualTo(count));
+        Assert.That(after.Tracks, Has.Count.EqualTo(count));
+        Assert.That(after.Tracks.All(track => !track.IsIncomplete), Is.True);
+        Assert.That(result.VerifiedBatches, Is.GreaterThan(1));
+        this.AssertSettled(device, result.VerifiedBatches);
     }
 
-    private static PendingSync ReadPending(string root)
+    private async Task<(string Path, DeviceCatalogue Before)> InterruptCoverRepairAsync(SimulatedSyncDevice device)
     {
-        using var journal = new SyncJournal(root, SimulatedSyncDevice.Udid, allowPending: true);
+        var path = this.CreateSource(1, artwork: true);
+        device.SetExistingAudio(await File.ReadAllBytesAsync(path));
+        var before = await device.ReadCatalogueAsync();
+        await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device));
+        return (path, before);
+    }
+
+    private void AssertRecoveredReplacement(
+        SimulatedSyncDevice device,
+        SyncResult result,
+        DeviceCatalogue after,
+        long interruptedId)
+    {
+        Assert.That(after.Tracks.Single().Id, Is.Not.EqualTo(interruptedId));
+        Assert.That(result.VerifiedBatches, Is.EqualTo(1));
+        this.AssertSettled(device, 2);
+    }
+
+    private string CreateSource(int count, bool artwork = false, Action<TagLib.File>? configure = null)
+    {
+        return SourceTestData.WriteSyncTracks(
+            this.source.Root,
+            count,
+            artwork,
+            configure);
+    }
+
+    private PendingSync ReadPending()
+    {
+        using var journal = new SyncJournal(this.state.Root, SimulatedSyncDevice.Udid, allowPending: true);
         Assert.That(journal.HasPending, Is.True);
         return journal.ReadPending();
     }
 
-    private static void AssertSettled(SimulatedSyncDevice device, string state, int verified)
+    private void AssertSettled(SimulatedSyncDevice device, int verified)
     {
-        Assert.That(Directory.GetFiles(state, PendingFilePattern, SearchOption.AllDirectories), Is.Empty);
-        Assert.That(Directory.GetFiles(state, VerifiedFilePattern, SearchOption.AllDirectories), Has.Length.EqualTo(verified));
-        Assert.That(Directory.GetDirectories(state, AssetsDirectoryPattern, SearchOption.AllDirectories), Is.Empty);
+        Assert.That(Directory.GetFiles(this.state.Root, PendingFilePattern, SearchOption.AllDirectories), Is.Empty);
+        Assert.That(Directory.GetFiles(this.state.Root, VerifiedFilePattern, SearchOption.AllDirectories), Has.Length.EqualTo(verified));
+        Assert.That(Directory.GetDirectories(this.state.Root, AssetsDirectoryPattern, SearchOption.AllDirectories), Is.Empty);
         Assert.That(device.Connections.All(connection => connection.IsDisposed), Is.True);
         Assert.That(device.FileConnections.All(connection => connection.OpenHandles == 0), Is.True);
     }

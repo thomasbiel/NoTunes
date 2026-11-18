@@ -24,6 +24,7 @@ public sealed class BinaryPlistSizeTests
             ("References", Enumerable.Repeat<object>(true, Math.Min(length, 65536)).ToArray()),
             ("Numbers", new object[] { -1L, 0, 255L, 256L, 65535L, 65536L, long.MaxValue, long.MinValue }),
             ("Other", new object[] { false, 1.25, DateTime.UnixEpoch, new object[0], Plist.Dict() }));
+
         var size = checked((int)BinaryPlistSize.Measure(value));
         var bytes = BinaryPlist.WriteWithinLimit(value, size);
         Assert.That(bytes, Has.Length.EqualTo(size));
@@ -38,6 +39,7 @@ public sealed class BinaryPlistSizeTests
     {
         Assert.Throws<InvalidDataException>(() => BinaryPlistSize.Measure(
             Enumerable.Repeat<object>(true, Plist.MaxObjectCount).ToArray()));
+
         object nested = true;
         for (var depth = 0; depth <= Plist.MaxNestingDepth; depth++)
         {

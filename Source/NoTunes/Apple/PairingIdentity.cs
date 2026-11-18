@@ -36,7 +36,9 @@ public sealed class PairingIdentity
             var pem = new PemReader(reader).ReadObject();
             var key = pem is AsymmetricCipherKeyPair pair ? pair.Private : pem as AsymmetricKeyParameter;
             if (key is not RsaPrivateCrtKeyParameters rsa || client.GetPublicKey() is not RsaKeyParameters publicKey || !rsa.Modulus.Equals(publicKey.Modulus) || !rsa.PublicExponent.Equals(publicKey.Exponent))
+            {
                 throw new InvalidDataException("The pairing certificate and RSA private key do not match.");
+            }
 
             return new PairingIdentity(key, clientBytes, deviceBytes);
         }

@@ -22,7 +22,6 @@ public sealed class ScanOptions : CommandOptions
         {
             WriteJson(context.Output, library);
         }
-
         else
         {
             await context.Output.WriteLineAsync($"Source: {library.Root}");

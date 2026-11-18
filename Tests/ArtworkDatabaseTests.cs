@@ -102,16 +102,36 @@ public sealed class ArtworkDatabaseTests
             Number(offset + 8, total);
         }
 
-        Header(0, "mhfd", RootBytes, (uint)bytes.Length);
+        Header(
+            0,
+            "mhfd",
+            RootBytes,
+            (uint)bytes.Length);
+
         Number(16, 6);
         Number(20, 1);
         Number(28, next);
-        Header(RootBytes, "mhsd", SectionBytes, (uint)(bytes.Length - RootBytes));
+        Header(
+            RootBytes,
+            "mhsd",
+            SectionBytes,
+            (uint)(bytes.Length - RootBytes));
+
         Number(RootBytes + 12, 1);
         var list = RootBytes + SectionBytes;
-        Header(list, "mhli", ListBytes, 1);
+        Header(
+            list,
+            "mhli",
+            ListBytes,
+            1);
+
         var image = list + ListBytes;
-        Header(image, "mhii", ImageBytes, ImageBytes);
+        Header(
+            image,
+            "mhii",
+            ImageBytes,
+            ImageBytes);
+
         Number(image + 16, imageId);
         return bytes;
     }

@@ -25,12 +25,15 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
                 (AtcKeys.SyncedAssetTypes, new object[] { AtcKeys.Music }),
                 (AtcKeys.Wakeable, 0L),
                 (AtcKeys.Grappa, GrappaSigner.HostRequest)))), cancellationToken);
+
         client.StartKeepAlive(cancellationToken);
         var ready = await this.WaitAsync([AtcCommands.ReadyForSync], cancellationToken);
         var parameters = ready.Dictionary(AtcKeys.Parameters);
         var anchors = parameters.Dictionary(AtcKeys.Anchors);
         if (!StringComparer.Ordinal.Equals(anchors.Text(AtcKeys.Media), anchor.ToString(CultureInfo.InvariantCulture)))
+        {
             throw new IOException("The live Media anchor changed. Recompute the sync plan.");
+        }
 
         if (anchors.TryGetValue(AtcKeys.VoiceMemo, out var voiceMemo)
             && !StringComparer.Ordinal.Equals(voiceMemo, SyncProtocol.VoiceMemoAnchor))
@@ -40,6 +43,7 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
 
         var token = parameters.Dictionary(AtcKeys.DeviceInfo).GetValueOrDefault(AtcKeys.Grappa) as byte[]
             ?? throw new InvalidDataException("ReadyForSync has no Grappa token.");
+
         return new GrappaSigner(token);
     }
 
@@ -172,57 +176,23 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
                 progress.Report(completed);
             }
 
-            if (track.IsArtworkOnly)
+            if (!track.IsArtworkOnly)
             {
-                completingAsset();
-                await this.SendAsync(AtcCommands.FileComplete, Plist.Dict(
-                    (AtcKeys.AssetId, track.AssetId),
-                    (AtcKeys.Dataclass, AtcKeys.Media),
-                    (AtcKeys.AssetPath, string.Empty)), cancellationToken);
+                await this.TransferAudioAsync(
+                    afc,
+                    track,
+                    bytes => progress.Report(completed + bytes),
+                    cancellationToken);
 
-                progress.Report(++completed);
-                continue;
+                completed += track.Source.Size;
             }
 
-            await afc.EnsureDirectoryAsync(SyncPaths.Airlock.TrimEnd('/'), cancellationToken);
-            var staged = SyncPaths.Airlock + track.AssetId;
-            if (debug is not null) await debug.WriteLineAsync($"Transfer: {track.Source.RelativePath}");
-
-            await using var input = new FileStream(
-                track.LocalPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read);
-
-            if (await afc.GetFileInfoAsync(track.DevicePath, cancellationToken) is not null
-                || await afc.GetFileInfoAsync(staged, cancellationToken) is not null)
-                throw new IOException("A planned audio destination is occupied.");
-
-            await afc.WriteNewFileAsync(
-                staged + SyncPaths.Mp3Extension,
-                input,
-                track.Source.Size,
-                cancellationToken,
-                (bytes, token) =>
-                {
-                    progress.Report(completed + bytes);
-                    return this.SendProgressAsync(bytes, track.Source.Size, token);
-                });
-
-            completed += track.Source.Size;
-            await VerifyHashAsync(
-                afc,
-                staged + SyncPaths.Mp3Extension,
-                track.Source,
-                cancellationToken);
-
-            await afc.RenameNewFileAsync(staged + SyncPaths.Mp3Extension, staged, cancellationToken);
             completingAsset();
 
             await this.SendAsync(AtcCommands.FileComplete, Plist.Dict(
                 (AtcKeys.AssetId, track.AssetId),
                 (AtcKeys.Dataclass, AtcKeys.Media),
-                (AtcKeys.AssetPath, track.DevicePath)), cancellationToken);
+                (AtcKeys.AssetPath, track.IsArtworkOnly ? string.Empty : track.DevicePath)), cancellationToken);
 
             progress.Report(++completed);
         }
@@ -240,11 +210,55 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
 
     }
 
+    private async Task TransferAudioAsync(
+        AfcClient afc,
+        PreparedTrack track,
+        Action<long> onProgress,
+        CancellationToken cancellationToken)
+    {
+        await afc.EnsureDirectoryAsync(SyncPaths.Airlock.TrimEnd('/'), cancellationToken);
+        var staged = SyncPaths.Airlock + track.AssetId;
+        if (debug is not null) await debug.WriteLineAsync($"Transfer: {track.Source.RelativePath}");
+
+        await using var input = new FileStream(
+            track.LocalPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read);
+
+        if (await afc.GetFileInfoAsync(track.DevicePath, cancellationToken) is not null
+            || await afc.GetFileInfoAsync(staged, cancellationToken) is not null)
+        {
+            throw new IOException("A planned audio destination is occupied.");
+        }
+
+        await afc.WriteNewFileAsync(
+            staged + SyncPaths.Mp3Extension,
+            input,
+            track.Source.Size,
+            cancellationToken,
+            (bytes, token) =>
+            {
+                onProgress(bytes);
+                return this.SendProgressAsync(bytes, track.Source.Size, token);
+            });
+
+        await VerifyHashAsync(
+            afc,
+            staged + SyncPaths.Mp3Extension,
+            track.Source,
+            cancellationToken);
+
+        await afc.RenameNewFileAsync(staged + SyncPaths.Mp3Extension, staged, cancellationToken);
+    }
+
     internal static async Task VerifyHashAsync(AfcClient afc, string path, SourceTrack source, CancellationToken cancellationToken)
     {
         var actual = await afc.HashFileAsync(path, source.Size, cancellationToken);
         if (!StringComparer.Ordinal.Equals(actual, source.Sha256))
+        {
             throw new IOException($"iPhone audio read-back differs: {source.RelativePath}");
+        }
     }
 
     private Task SendProgressAsync(long bytes, long size, CancellationToken cancellationToken)
@@ -283,17 +297,23 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
             }
 
             if (command is AtcCommands.ConnectionInvalid or AtcCommands.IdleExit)
+            {
                 throw new IOException("The iPhone ended the music sync connection.");
+            }
 
             if (message.Number(AtcKeys.Session) != SyncProtocol.Session)
                 continue;
             if (command is AtcCommands.SyncFailed or AtcCommands.FileError)
+            {
                 throw new IOException($"The iPhone reported {command} during music synchronization.");
+            }
 
             if (command == AtcCommands.SyncAllowed)
             {
                 if (!AtcClient.ReadSyncPermissions(message.Dictionary(AtcKeys.Parameters)).Allowed)
+                {
                     throw new IOException("The iPhone revoked music sync permission.");
+                }
 
                 continue;
             }
@@ -301,7 +321,9 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
             if (expected.Contains(command, StringComparer.Ordinal))
                 return message;
             if (command is not (AtcCommands.Pong or AtcCommands.Progress or AtcCommands.AssetMetrics or AtcCommands.InstalledAssets or AtcCommands.Capabilities))
+            {
                 throw new InvalidDataException($"Unexpected ATC sync command: {command}");
+            }
         }
 
         throw new IOException("ATC sync message limit exceeded.");

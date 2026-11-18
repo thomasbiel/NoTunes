@@ -22,10 +22,13 @@ public static class SourceSettings
             {
                 ExeConfigFilename = configurationFile
             };
+
             var configuration = ConfigurationManager.OpenMappedExeConfiguration(mapping, ConfigurationUserLevel.None);
             var folder = configuration.AppSettings.Settings[SourceFolderSettingName]?.Value;
             if (string.IsNullOrWhiteSpace(folder))
+            {
                 throw new InvalidDataException($"{SourceFolderSettingName} is missing or empty in '{configurationFile}'. " + "Set it in app.config or supply a source folder on the command line.");
+            }
 
             return folder;
         }

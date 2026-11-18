@@ -27,6 +27,7 @@ public sealed class CatalogueStabilityTests
                 };
             }
         };
+
         File.Copy(SyncTestData.FixturePath, Path.Combine(source.Root, "new.mp3"));
         var result = await device.RunAsync(source.Root, state.Root, dryRun: true);
         Assert.That(changed, Is.True);
@@ -61,6 +62,7 @@ public sealed class CatalogueStabilityTests
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(2));
         await Assert.CatchAsync<OperationCanceledException>(() => CatalogueSnapshot.CaptureWithRetryAsync(
             afc, cancellation.Token));
+
         Assert.That(peer.Opens, Is.Zero);
     }
 }

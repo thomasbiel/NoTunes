@@ -12,7 +12,6 @@ internal sealed class SyncWorkspace : IDisposable
         {
             Directory.CreateDirectory(this.Root);
         }
-
         else
         {
             Directory.CreateDirectory(this.Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);

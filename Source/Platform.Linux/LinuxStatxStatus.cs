@@ -9,6 +9,7 @@ internal struct LinuxStatxStatus
     internal const int StatxModeOffset = 28;
     [FieldOffset(0)]
     public uint Mask;
+
     [FieldOffset(StatxModeOffset)]
     public ushort Mode;
 }

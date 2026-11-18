@@ -43,12 +43,16 @@ internal sealed record ArtworkFile(string Path, int Length, string Sha256)
     private void RequireLength(Stream input)
     {
         if (this.Length is < 0 or > ArtworkImage.MaximumBytes || input.Length != this.Length)
+        {
             throw new IOException("Prepared artwork size differs from its verified record.");
+        }
     }
 
     private void RequireHash(byte[] hash)
     {
         if (!StringComparer.Ordinal.Equals(Convert.ToHexString(hash), this.Sha256))
+        {
             throw new IOException("Prepared artwork bytes differ from their verified record.");
+        }
     }
 }

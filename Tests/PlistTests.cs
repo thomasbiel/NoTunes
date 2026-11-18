@@ -18,6 +18,7 @@ public sealed class PlistTests
             ("Allowed", true),
             ("Data", data),
             ("Nested", new object[] { "hello", Plist.Dict(("Value", 42L)) }));
+
         var parsed = Plist.Parse(binary ? BinaryPlist.Write(original) : Plist.ToXml(original)).AsDict();
         Assert.That(parsed.Text("Name"), Is.EqualTo("Björk — 東京 🎵"));
         Assert.That(parsed.Number("Count"), Is.EqualTo(-123L));
@@ -229,6 +230,7 @@ public sealed class PlistTests
             8,
             11
         };
+
         for (var index = 2; index <= 64; index++)
         {
             offsets.Add((byte)stream.Position);

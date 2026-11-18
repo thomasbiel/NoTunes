@@ -12,13 +12,17 @@ internal sealed class PairedTlsAuthentication(TlsContext context, PairingIdentit
     {
         var chain = serverCertificate.Certificate;
         if (chain.IsEmpty || !CryptographicOperations.FixedTimeEquals(chain.GetCertificateAt(0).GetEncoded(), identity.DeviceCertificate))
+        {
             throw new AuthenticationException("The iPhone TLS certificate does not match the saved pairing record.");
+        }
     }
 
     public TlsCredentials GetClientCredentials(CertificateRequest request)
     {
         if (request.CertificateTypes is null || !request.CertificateTypes.Contains(ClientCertificateType.rsa_sign))
+        {
             throw new AuthenticationException("The iPhone did not request a supported RSA pairing identity.");
+        }
 
         var crypto = (BcTlsCrypto)context.Crypto;
         var certificate = new Certificate([crypto.CreateCertificate(identity.ClientCertificate)]);

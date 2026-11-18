@@ -30,6 +30,7 @@ public sealed class SourceScanner(
                 fullName,
                 cached,
                 cancellationToken));
+
             progress.Advance();
         }
 
@@ -66,7 +67,9 @@ public sealed class SourceScanner(
                 var directory = current.Directory;
                 var entry = current.Entries.Current;
                 if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
                     throw new IOException($"Symbolic link or junction in source folder: {Path.Combine(directory.FullName, entry.Name)}. " + "The scan is aborted to prevent an incomplete inventory from causing deletions.");
+                }
 
                 var fullName = Path.Combine(directory.FullName, entry.Name);
                 if (entry.Attributes.HasFlag(FileAttributes.Directory))
@@ -107,9 +110,14 @@ public sealed class SourceScanner(
         }
 
         if (!attributes.HasFlag(FileAttributes.Directory))
+        {
             throw new IOException($"The source path is not a directory: {root.FullName}");
+        }
+
         if (attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
             throw new IOException("The source folder must not be a symbolic link or directory junction.");
+        }
 
         return root;
     }
@@ -138,7 +146,9 @@ public sealed class SourceScanner(
         }
 
         if (stream.Length != size || File.GetLastWriteTimeUtc(stream.SafeFileHandle) != modified)
+        {
             throw new IOException($"File changed during the scan: {fullName}");
+        }
 
         return new SourceTrack(
             relativePath,

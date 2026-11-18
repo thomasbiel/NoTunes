@@ -16,6 +16,7 @@ public sealed class DeviceHashCacheTests
         "Song",
         "music/song.mp3",
         3);
+
     private SyncWorkspace workspace = null!;
     private AfcPeer peer = null!;
     private AfcClient afc = null!;
@@ -30,7 +31,7 @@ public sealed class DeviceHashCacheTests
         this.peer = new AfcPeer { AllowPipelinedFileInfo = true };
         this.peer.Files[Track.Path!] = "abc"u8.ToArray();
         this.afc = new AfcClient(this.peer, TimeSpan.FromSeconds(2));
-        this.catalogue = SyncPlannerTests.Catalogue([Track]);
+        this.catalogue = CatalogueTestData.Create([Track]);
     }
 
     [TearDown]
@@ -84,8 +85,7 @@ public sealed class DeviceHashCacheTests
         var cached = this.Open();
         Assert.That(await cached.ReadAsync(this.afc, Track, CancellationToken.None), Is.EqualTo(original));
         var full = this.Open(fullReadback: true);
-        var actual = await full.ReadAsync(this.afc, Track, CancellationToken.None);
-        full.Save();
+        var actual = await this.ReadAndSaveAsync(full);
         Assert.That(actual, Is.EqualTo(Convert.ToHexString(SHA256.HashData("xyz"u8))));
         Assert.That(full.Hits, Is.Zero);
         Assert.That(full.Reads, Is.EqualTo(1));
@@ -99,9 +99,7 @@ public sealed class DeviceHashCacheTests
         await this.PrimeAsync();
         this.peer.FileInfoOverrides[Track.Path!] = new() { [key] = "2" };
         var cache = this.Open();
-        await cache.ReadAsync(this.afc, Track, CancellationToken.None);
-        Assert.That(cache.Hits, Is.Zero);
-        Assert.That(cache.Reads, Is.EqualTo(1));
+        await this.AssertCacheMissAsync(cache);
     }
 
     [Test]
@@ -132,9 +130,8 @@ public sealed class DeviceHashCacheTests
                 : changed == "container" ? this.catalogue with { ContainerId = this.catalogue.ContainerId + 1 } : this.catalogue,
             false,
             this.error);
-        await cache.ReadAsync(this.afc, Track, CancellationToken.None);
-        Assert.That(cache.Hits, Is.Zero);
-        Assert.That(cache.Reads, Is.EqualTo(1));
+
+        await this.AssertCacheMissAsync(cache);
     }
 
     [TestCase("id")]
@@ -149,11 +146,10 @@ public sealed class DeviceHashCacheTests
             "path" => Track with { Path = "music/renamed.mp3" },
             _ => Track with { Size = Track.Size + 1 }
         };
+
         this.peer.Files[track.Path!] = changed == "size" ? "abcd"u8.ToArray() : "abc"u8.ToArray();
         var cache = this.Open();
-        await cache.ReadAsync(this.afc, track, CancellationToken.None);
-        Assert.That(cache.Hits, Is.Zero);
-        Assert.That(cache.Reads, Is.EqualTo(1));
+        await this.AssertCacheMissAsync(cache, track);
     }
 
     [TestCase("")]
@@ -164,9 +160,7 @@ public sealed class DeviceHashCacheTests
         this.peer.FileInfoOverrides[Track.Path!] = new() { [AfcKeys.ModificationTime] = modified };
         await this.PrimeAsync();
         var cache = this.Open();
-        await cache.ReadAsync(this.afc, Track, CancellationToken.None);
-        Assert.That(cache.Hits, Is.Zero);
-        Assert.That(cache.Reads, Is.EqualTo(1));
+        await this.AssertCacheMissAsync(cache);
     }
 
     [TestCase("not json")]
@@ -200,11 +194,10 @@ public sealed class DeviceHashCacheTests
             "duplicate" => snapshot with { Tracks = [track, track] },
             _ => snapshot with { Tracks = [track with { Attributes = null! }] }
         };
+
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(invalid));
         var cache = this.Open();
-        await cache.ReadAsync(this.afc, Track, CancellationToken.None);
-        Assert.That(cache.Hits, Is.Zero);
-        Assert.That(cache.Reads, Is.EqualTo(1));
+        await this.AssertCacheMissAsync(cache);
     }
 
     [Test]
@@ -219,8 +212,8 @@ public sealed class DeviceHashCacheTests
             this.catalogue,
             false,
             this.error);
-        var hash = await cache.ReadAsync(this.afc, Track, CancellationToken.None);
-        cache.Save();
+
+        var hash = await this.ReadAndSaveAsync(cache);
         Assert.That(hash, Is.EqualTo(Convert.ToHexString(SHA256.HashData("abc"u8))));
         Assert.That(this.error.ToString(), Does.Contain("Device hash cache could not be saved"));
     }
@@ -234,9 +227,7 @@ public sealed class DeviceHashCacheTests
         await Assert.ThrowsAsync<InvalidDataException>(() => cache.ReadAsync(afc, Track, CancellationToken.None));
         cache.Save();
         var next = this.Open();
-        await next.ReadAsync(this.afc, Track, CancellationToken.None);
-        Assert.That(next.Hits, Is.Zero);
-        Assert.That(next.Reads, Is.EqualTo(1));
+        await this.AssertCacheMissAsync(next);
     }
 
     [Test]
@@ -291,6 +282,13 @@ public sealed class DeviceHashCacheTests
         Assert.That(File.Exists(cache.FilePath), Is.False);
     }
 
+    private async Task AssertCacheMissAsync(DeviceHashCache cache, DeviceTrack? track = null)
+    {
+        await cache.ReadAsync(this.afc, track ?? Track, CancellationToken.None);
+        Assert.That(cache.Hits, Is.Zero);
+        Assert.That(cache.Reads, Is.EqualTo(1));
+    }
+
     private DeviceHashCache Open(bool fullReadback = false)
     {
         return DeviceHashCache.Open(
@@ -302,11 +300,17 @@ public sealed class DeviceHashCacheTests
             this.error);
     }
 
+    private async Task<string?> ReadAndSaveAsync(DeviceHashCache cache)
+    {
+        var hash = await cache.ReadAsync(this.afc, Track, CancellationToken.None);
+        cache.Save();
+        return hash;
+    }
+
     private async Task<string?> PrimeAsync()
     {
         var cache = this.Open();
-        var hash = await cache.ReadAsync(this.afc, Track, CancellationToken.None);
-        cache.Save();
+        var hash = await this.ReadAndSaveAsync(cache);
         return hash;
     }
 }

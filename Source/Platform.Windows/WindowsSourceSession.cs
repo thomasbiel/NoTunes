@@ -16,7 +16,7 @@ internal sealed class WindowsSourceSession : ISourceEditSession
     private const uint BackupSemantics = 0x02000000;
     private const uint SequentialScan = 0x08000000;
     private const uint Overlapped = 0x40000000;
-    
+
     // Pin different spellings separately because Windows directories can enable case-sensitive names.
     private readonly Dictionary<string, SafeFileHandle> directories = new(StringComparer.Ordinal);
 
@@ -60,7 +60,7 @@ internal sealed class WindowsSourceSession : ISourceEditSession
             ReadAttributes | ListDirectory,
             BackupSemantics,
             directory: true);
-        
+
         this.directories.Add(path, handle);
     }
 
@@ -74,7 +74,7 @@ internal sealed class WindowsSourceSession : ISourceEditSession
             IgnoreInaccessible = false,
             AttributesToSkip = 0
         };
-        
+
         return directory.EnumerateFileSystemInfos(SourceFileDefaults.AllEntriesPattern, options)
                         .Select(entry => new SourceEntry(entry.Name, entry.Attributes));
     }
@@ -91,7 +91,7 @@ internal sealed class WindowsSourceSession : ISourceEditSession
             Overlapped | SequentialScan,
             directory: false,
             access == FileAccess.ReadWrite ? FileShare.None : FileShare.Read);
-        
+
         try
         {
             return new FileStream(
@@ -118,7 +118,7 @@ internal sealed class WindowsSourceSession : ISourceEditSession
             FileMode.Open,
             flags | OpenReparsePoint,
             IntPtr.Zero);
-        
+
         if (handle.IsInvalid)
         {
             var error = new Win32Exception(Marshal.GetLastPInvokeError());

@@ -13,7 +13,7 @@ public sealed class CatalogueReaderTests
         using var fixture = new CatalogueFixture();
         fixture.Execute("UPDATE item SET base_location_id=0 WHERE item_pid=1;");
         fixture.Execute($"UPDATE item_extra SET location={location},file_size=0 WHERE item_pid=1;");
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         var track = catalogue.Tracks.Single();
         Assert.That(track.Id, Is.EqualTo(101));
         Assert.That(track.Path, Is.Null);
@@ -29,6 +29,7 @@ public sealed class CatalogueReaderTests
             catalogue,
             (_, _) => throw new AssertionException("An unfinished transfer has no audio to hash."),
             CancellationToken.None);
+
         Assert.That(plan.Delete, Is.EqualTo(catalogue.Tracks));
         Assert.That(plan.Add, Has.Count.EqualTo(1));
         Assert.That(plan.Unchanged, Is.Zero);
@@ -43,8 +44,7 @@ public sealed class CatalogueReaderTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(mutation);
-        await Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(
-            fixture.Snapshot(), CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ReadAsync());
     }
 
     [Test]
@@ -52,7 +52,7 @@ public sealed class CatalogueReaderTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute("INSERT INTO album VALUES(13,1013,'Album',11,'Other sort')");
-        var result = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var result = await fixture.ReadAsync();
         var key = CatalogueReader.GroupKey("Album", "Artist");
         Assert.That(result.Albums[key], Is.Zero);
         Assert.That(result.SortNames.Albums[key], Is.Null);
@@ -64,7 +64,7 @@ public sealed class CatalogueReaderTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute("DELETE FROM _MLDatabaseProperties WHERE key='MLSyncClientSyncAnchor'");
-        var result = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var result = await fixture.ReadAsync();
         Assert.That(result.Anchor, Is.Zero);
         Assert.That(result.Tracks, Has.Count.EqualTo(1));
     }
@@ -73,7 +73,7 @@ public sealed class CatalogueReaderTests
     public async Task Reads_Wire_Identities_And_Preserves_Cloud_Remote_And_Video_Items()
     {
         using var fixture = new CatalogueFixture();
-        var result = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var result = await fixture.ReadAsync();
         Assert.That(result.Anchor, Is.EqualTo(7));
         Assert.That(result.DatabaseId, Is.EqualTo(1001));
         Assert.That(result.Tracks.Select(track => track.Id), Is.EqualTo([101L]));
@@ -106,6 +106,6 @@ public sealed class CatalogueReaderTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(mutation);
-        await Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ReadAsync());
     }
 }

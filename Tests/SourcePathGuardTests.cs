@@ -133,7 +133,7 @@ public sealed class SourcePathGuardTests
     [Test]
     public async Task Cover_Removal_Rejects_A_Junction_Without_Changing_The_Target()
     {
-        var path = SourceTestData.WriteTrack(this.outside, "covered.mp3", file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
+        var path = SourceTestData.WriteCoveredTrack(this.outside, "covered.mp3");
         var bytes = await File.ReadAllBytesAsync(path);
         var link = Path.Combine(this.source, "linked-album");
         this.CreateJunction(link, this.outside);
@@ -169,8 +169,11 @@ public sealed class SourcePathGuardTests
             FileMode.Open,
             0x02200000,
             IntPtr.Zero);
+
         if (handle.IsInvalid)
+        {
             throw new IOException("Cannot open test junction.", new Win32Exception(Marshal.GetLastPInvokeError()));
+        }
 
         var substitute = Encoding.Unicode.GetBytes(@"\??\" + target);
         var printName = Encoding.Unicode.GetBytes(target);
@@ -191,7 +194,9 @@ public sealed class SourcePathGuardTests
             0,
             out _,
             IntPtr.Zero)) // FSCTL_SET_REPARSE_POINT
+        {
             throw new IOException("Cannot create test junction.", new Win32Exception(Marshal.GetLastPInvokeError()));
+        }
 
         this.junctions.Add(path);
     }

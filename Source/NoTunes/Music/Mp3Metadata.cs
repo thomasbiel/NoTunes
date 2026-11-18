@@ -25,7 +25,9 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
             var header = file.Properties.Codecs.OfType<TagLib.Mpeg.AudioHeader>().SingleOrDefault();
             if (header.AudioLayer != LayerThree || file.Properties.Duration <= TimeSpan.Zero
                 || file.Properties.AudioSampleRate <= 0 || file.Properties.AudioChannels is < MinimumChannels or > MaximumChannels)
+            {
                 throw new InvalidDataException($"Not a supported MP3 audio stream: {relativePath}");
+            }
 
             var format = header.Version switch
             {
@@ -34,6 +36,7 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
                 TagLib.Mpeg.Version.Version25 => Mpeg25Layer3,
                 _ => throw new InvalidDataException($"Unsupported MPEG version: {relativePath}")
             };
+
             var tag = file.Tag;
             var compilation = file.GetTag(TagLib.TagTypes.Id3v2, false) is TagLib.Id3v2.Tag { IsCompilation: true };
             var title = Text(tag.Title, Path.GetFileNameWithoutExtension(relativePath));
@@ -42,7 +45,9 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
             var album = Text(tag.Album, UnknownAlbum);
             var explicitAlbumArtist = !string.IsNullOrWhiteSpace(tag.FirstAlbumArtist);
             if (compilation && !explicitAlbumArtist)
+            {
                 throw new InvalidDataException($"Compilation requires an explicit album artist before sync: {relativePath}");
+            }
 
             var albumArtist = Text(tag.FirstAlbumArtist, artist);
             var albumArtistSort = Text(tag.FirstAlbumArtistSort, explicitAlbumArtist ? albumArtist : artistSort);
@@ -60,6 +65,7 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
                 (MediaKeys.RememberBookmark, false),
                 (MediaKeys.TotalMilliseconds, (long)file.Properties.Duration.TotalMilliseconds),
                 (MediaKeys.ArtworkChecksum, 0L));
+
             if (compilation)
             {
                 item[MediaKeys.IsCompilation] = true;
@@ -84,6 +90,7 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
                 (MediaKeys.Channels, (long)file.Properties.AudioChannels),
                 (MediaKeys.BitRate, (long)file.Properties.AudioBitrate),
                 (MediaKeys.Duration, (long)Math.Round(file.Properties.Duration.TotalSeconds * file.Properties.AudioSampleRate)));
+
             return new Mp3Metadata(
                 item,
                 audio,
@@ -109,6 +116,7 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
     {
         var picture = tag.Pictures.FirstOrDefault(value => value.Type == TagLib.PictureType.FrontCover)
             ?? tag.Pictures.FirstOrDefault();
+
         if (picture is null) return null;
 
         var bytes = picture.Data.Data;

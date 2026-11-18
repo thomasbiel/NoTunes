@@ -62,7 +62,9 @@ internal sealed record ArtworkImage
     public static ArtworkImage Read(byte[] bytes)
     {
         if (bytes.Length is < MinimumImageBytes or > MaximumBytes)
+        {
             throw new InvalidDataException("Embedded cover exceeds its size limit.");
+        }
 
         try
         {
@@ -70,7 +72,9 @@ internal sealed record ArtworkImage
             var info = ImageInfo.FromStream(input);
             if (info is not { Width: > 0, Height: > 0 } dimensions
                 || (long)dimensions.Width * dimensions.Height > MaximumPixels)
+            {
                 throw new InvalidDataException("Invalid or oversized embedded cover dimensions.");
+            }
 
             var image = ImageResult.FromMemory(bytes, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
             if (bytes.AsSpan().StartsWith(JpegStartMarker) && bytes.AsSpan().EndsWith(JpegEndMarker))
@@ -95,6 +99,7 @@ internal sealed record ArtworkImage
                 StbImageWriteSharp.ColorComponents.RedGreenBlue,
                 output,
                 JpegQuality);
+
             if (output.Length > MaximumBytes) throw new InvalidDataException("Converted cover exceeds its size limit.");
 
             return new ArtworkImage(output.ToArray());

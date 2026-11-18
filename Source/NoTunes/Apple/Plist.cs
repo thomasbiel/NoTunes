@@ -40,7 +40,9 @@ public static class Plist
             using var reader = XmlReader.Create(input, new XmlReaderSettings { DtdProcessing = DtdProcessing.Ignore, XmlResolver = null, MaxCharactersInDocument = MaxBytes });
             reader.MoveToContent();
             if (!reader.IsStartElement(PlistXmlNames.Root, string.Empty) || reader.IsEmptyElement)
+            {
                 throw new InvalidDataException("Invalid XML property list.");
+            }
 
             reader.ReadStartElement();
             var objects = 0;
@@ -119,7 +121,7 @@ public static class Plist
         var type = reader.LocalName;
         if (type == PlistXmlNames.Dictionary) return ReadDictionary(reader, depth, ref objects);
         if (type == PlistXmlNames.Array) return ReadArray(reader, depth, ref objects);
-        
+
         var text = reader.ReadElementContentAsString();
         return type switch
         {
@@ -141,7 +143,7 @@ public static class Plist
         var empty = reader.IsEmptyElement;
         reader.ReadStartElement();
         if (empty) return result;
-        
+
         while (reader.MoveToContent() != XmlNodeType.EndElement)
         {
             if (!reader.IsStartElement(PlistXmlNames.Key, string.Empty))
@@ -171,7 +173,7 @@ public static class Plist
         {
             result.Add(ReadValue(reader, depth + 1, ref objects));
         }
-        
+
         reader.ReadEndElement();
         return [.. result];
     }

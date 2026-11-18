@@ -16,27 +16,32 @@ public sealed class SyncVerificationTests
             "Retained",
             "retained.mp3",
             5);
+
         var removed = new DeviceTrack(
             2002,
             "Removed",
             "removed.mp3",
             5);
+
         var original = new ArtworkReference(101, "aa/cover.jpg");
-        var before = SyncPlannerTests.Catalogue([retained, removed]) with
+        var before = CatalogueTestData.Create([retained, removed]) with
         {
             TrackArtwork = new Dictionary<long, ArtworkReference> { [retained.Id] = original }
         };
+
         var after = before with
         {
             Anchor = before.Anchor + 1,
             Tracks = [retained],
             TrackArtwork = new Dictionary<long, ArtworkReference>()
         };
+
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after,
             [],
             [removed]));
+
         after = after with
         {
             TrackArtwork = new Dictionary<long, ArtworkReference>
@@ -44,11 +49,13 @@ public sealed class SyncVerificationTests
                 [retained.Id] = new ArtworkReference(cacheId, path)
             }
         };
+
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after,
             [],
             [removed]));
+
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             after with { TrackArtwork = before.TrackArtwork },
@@ -66,7 +73,8 @@ public sealed class SyncVerificationTests
             "Removed",
             "removed.mp3",
             5);
-        var before = SyncPlannerTests.Catalogue([retained, removed]) with
+
+        var before = CatalogueTestData.Create([retained, removed]) with
         {
             TrackArtwork = new Dictionary<long, ArtworkReference>
             {
@@ -74,6 +82,7 @@ public sealed class SyncVerificationTests
                 [removed.Id] = new ArtworkReference(99, "aa/removed.jpg")
             }
         };
+
         var after = before with
         {
             Anchor = before.Anchor + 1,
@@ -83,6 +92,7 @@ public sealed class SyncVerificationTests
                 [retained.Id] = new ArtworkReference(repair.Metadata.Artwork!.CacheId, "aa/repaired.jpg")
             }
         };
+
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -95,7 +105,7 @@ public sealed class SyncVerificationTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute("DELETE FROM item WHERE item_pid<>1;");
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute("""
             DELETE FROM item WHERE item_pid=1;
             DELETE FROM item_store WHERE item_pid=1;
@@ -106,14 +116,17 @@ public sealed class SyncVerificationTests
             DELETE FROM composer;
             UPDATE _MLDatabaseProperties SET value='8';
             """);
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+
+        var after = await fixture.ReadAsync();
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             after,
             [],
             before.Tracks));
+
         Assert.That(after.SortNames.Preserves(before.SortNames), Is.False,
             "The catalogue comparison before a batch must still reject missing groups.");
+
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -124,13 +137,14 @@ public sealed class SyncVerificationTests
     [Test]
     public void Rejects_Changes_To_Existing_Group_Sort_Names()
     {
-        var before = SyncPlannerTests.Catalogue([]) with
+        var before = CatalogueTestData.Create([]) with
         {
             SortNames = GroupSortNames.Empty with
             {
                 Artists = new Dictionary<string, string?> { ["Artist"] = "Artist, The" }
             }
         };
+
         var after = before with
         {
             Anchor = before.Anchor + 1,
@@ -139,6 +153,7 @@ public sealed class SyncVerificationTests
                 Artists = new Dictionary<string, string?> { ["Artist"] = "Artist" }
             }
         };
+
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -149,7 +164,7 @@ public sealed class SyncVerificationTests
     [Test]
     public void Accepts_Only_The_Expected_Track_Transition_And_Next_Anchor()
     {
-        var before = SyncPlannerTests.Catalogue([new(
+        var before = CatalogueTestData.Create([new(
             101,
             "Old",
             "old.mp3",
@@ -158,44 +173,9 @@ public sealed class SyncVerificationTests
                 "Keep",
                 "keep.mp3",
                 6)]);
+
         var track = SyncTestData.Track();
-        var added = new DeviceTrack(
-            track.Id,
-            (string)track.Metadata.Item[MediaKeys.Title],
-            track.DevicePath,
-            track.Source.Size)
-        {
-            Metadata = new TrackMetadata
-            {
-                AlbumId = track.AlbumId,
-                AlbumArtistId = track.ArtistId,
-                Album = track.Metadata.Album,
-                AlbumArtist = track.Metadata.AlbumArtist,
-                Artist = (string)track.Metadata.Item[MediaKeys.Artist],
-                Composer = track.Metadata.Item.GetValueOrDefault(MediaKeys.Composer) as string,
-                Genre = (string)track.Metadata.Item[MediaKeys.Genre],
-                SortTitle = (string)track.Metadata.Item[MediaKeys.SortTitle],
-                SortAlbum = (string)track.Metadata.Item[MediaKeys.SortAlbum],
-                SortAlbumArtist = (string)track.Metadata.Item[MediaKeys.SortAlbumArtist],
-                SortArtist = (string)track.Metadata.Item[MediaKeys.SortArtist],
-                SortComposer = track.Metadata.Item.GetValueOrDefault(MediaKeys.SortComposer) as string,
-                Comment = track.Metadata.Item.GetValueOrDefault(MediaKeys.Comment) as string,
-                TrackNumber = track.Metadata.Item.GetValueOrDefault(MediaKeys.TrackNumber) as long?,
-                TrackCount = track.Metadata.Item.GetValueOrDefault(MediaKeys.TrackCount) as long?,
-                DiscNumber = track.Metadata.Item.GetValueOrDefault(MediaKeys.DiscNumber) as long? ?? 1,
-                DiscCount = track.Metadata.Item.GetValueOrDefault(MediaKeys.DiscCount) as long?,
-                Year = track.Metadata.Item.GetValueOrDefault(MediaKeys.Year) as long?,
-                Compilation = track.Metadata.Item.GetValueOrDefault(MediaKeys.IsCompilation) is true ? 1 : 0,
-                TotalMilliseconds = Math.Floor((long)track.Metadata.Audio[MediaKeys.Duration] * 1000.0
-                    / (double)track.Metadata.Audio[MediaKeys.SampleRate]),
-                MediaKind = 1,
-                AudioFormat = (long)track.Metadata.Audio[MediaKeys.AudioFormat],
-                BitRate = (long)track.Metadata.Audio[MediaKeys.BitRate],
-                SampleRate = (double)track.Metadata.Audio[MediaKeys.SampleRate],
-                Duration = (long)track.Metadata.Audio[MediaKeys.Duration],
-                RememberBookmark = 0
-            }
-        };
+        var added = FeatureTestData.Stored(track);
         var after = before with
         {
             Anchor = before.Anchor + 1,
@@ -206,26 +186,31 @@ public sealed class SyncVerificationTests
             },
             Artists = new Dictionary<string, long> { [track.Metadata.AlbumArtist] = track.ArtistId }
         };
+
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             after,
             [track],
             [before.Tracks[0]]));
+
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after with { Anchor = before.Anchor },
             [track],
             [before.Tracks[0]]));
+
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after with { Tracks = [added] },
             [track],
             [before.Tracks[0]]));
+
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after with { DatabaseId = 99 },
             [track],
             [before.Tracks[0]]));
+
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after with { Tracks = [before.Tracks[1], added with { Path = "wrong.mp3" }] },

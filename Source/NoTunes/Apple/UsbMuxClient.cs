@@ -47,7 +47,7 @@ public sealed class UsbMuxClient
 
             var properties = propertiesValue.AsDict();
             if (properties.Text(UsbMuxKeys.ConnectionType) != UsbConnectionType) continue;
-            
+
             var id = record.Number(UsbMuxKeys.DeviceId);
             if (id is < 1 or > uint.MaxValue) throw new InvalidDataException("Invalid USB device ID.");
 
@@ -56,7 +56,7 @@ public sealed class UsbMuxClient
             {
                 udid = udid.Insert(DeviceUdid.ModernPrefixLength, DeviceUdid.Separator);
             }
-            
+
             result.Add(new UsbDevice((uint)id, udid, properties.Number(UsbMuxKeys.ProductId)));
         }
 
@@ -68,7 +68,7 @@ public sealed class UsbMuxClient
         var request = Plist.Dict(
             (UsbMuxKeys.MessageType, UsbMuxMessages.ReadPairRecord),
             (UsbMuxKeys.PairRecordId, udid));
-        
+
         var reply = await this.RequestAsync(request, cancellationToken);
         CheckResult(reply, "read pairing record; unlock the iPhone and trust this computer first");
         if (!reply.TryGetValue(UsbMuxKeys.PairRecordData, out var value) || value is not byte[] bytes)
@@ -99,7 +99,7 @@ public sealed class UsbMuxClient
                 (UsbMuxKeys.MessageType, UsbMuxMessages.Connect),
                 (UsbMuxKeys.DeviceId, (long)device.DeviceId),
                 (UsbMuxKeys.PortNumber, (long)networkPort));
-            
+
             var reply = await this.ExchangeAsync(stream, request, cancellationToken);
             if (!reply.TryGetValue(UsbMuxKeys.ResultNumber, out var status) || status is not long)
             {

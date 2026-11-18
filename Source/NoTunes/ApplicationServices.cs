@@ -18,7 +18,7 @@ public static class ApplicationServices
                 services.AddLinuxPlatform();
             else
                 throw new PlatformNotSupportedException("NoTunes currently provides platform services for Windows and Linux.");
-        
+
             return services.AddApplication(output, error, input);
         }
 
@@ -29,13 +29,16 @@ public static class ApplicationServices
             services.AddSingleton(new GroupResolutionPrompt(input ?? TextReader.Null, error));
             services.AddSingleton(_ => new SourceHashCache(
                 Path.Combine(DeviceState.Root(null), SourceHashCache.DirectoryName), error));
+
             services.AddTransient(provider => new SourceScanner(
                 provider.GetRequiredService<Platform.ISourceFileSystem>(),
                 provider.GetRequiredService<SourceHashCache>(),
                 error));
+
             services.AddTransient<CoverRemover>();
             services.AddTransient(provider => new LibraryInitializer(
                 provider.GetRequiredService<Platform.IUsbMuxTransport>(), error));
+
             services.AddTransient(provider => new SyncEngine(
                 provider.GetRequiredService<SourceScanner>(),
                 provider.GetRequiredService<Platform.ISourceFileSystem>(),
@@ -45,7 +48,7 @@ public static class ApplicationServices
                 PromptForGroupName = provider.GetRequiredService<GroupResolutionPrompt>().ReadAsync,
                 DeviceHashCacheDirectory = Path.Combine(DeviceState.Root(null), DeviceHashCache.DirectoryName)
             });
-        
+
             services.AddTransient(provider => new CommandContext(
                 provider.GetRequiredService<SourceScanner>(),
                 provider.GetRequiredService<Platform.IUsbMuxTransport>(),
@@ -53,7 +56,7 @@ public static class ApplicationServices
                 provider.GetRequiredService<LibraryInitializer>(),
                 provider.GetRequiredService<CoverRemover>(),
                 output));
-        
+
             return services;
         }
     }

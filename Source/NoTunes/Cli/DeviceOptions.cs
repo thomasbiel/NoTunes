@@ -27,9 +27,11 @@ public abstract class DeviceOptions : CommandOptions
     protected void ValidateTimeout()
     {
         if (this.Timeout is < MinimumTimeoutSeconds or > MaximumTimeoutSeconds)
+        {
             throw new InvalidArgumentsException($"--{CliSyntax.Timeout} must be between {MinimumTimeoutSeconds} and {MaximumTimeoutSeconds} seconds.");
+        }
     }
-    
+
     public static UsbDevice SelectDevice(IReadOnlyList<UsbDevice> devices, string? udid)
     {
         if (udid is not null)

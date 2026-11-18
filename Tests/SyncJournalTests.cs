@@ -14,7 +14,7 @@ public sealed class SyncJournalTests
         using var state = new SyncWorkspace();
         var first = FeatureTestData.Covered();
         var second = first with { Id = first.Id - 1, LocalPath = Path.Combine(workspace.Root, "missing.mp3") };
-        var before = SyncPlannerTests.Catalogue([]);
+        var before = CatalogueTestData.Create([]);
         var identity = new LibraryIdentity("id", "binding");
         using var journal = new SyncJournal(state.Root, "phone");
         PendingSync? previous = null;
@@ -49,9 +49,12 @@ public sealed class SyncJournalTests
         else
         {
             Assert.That(directories, Is.EqualTo([journal.Assets(previous)]));
-            Assert.That(await File.ReadAllBytesAsync(Path.Combine(journal.DirectoryPath, "pending.json")), Is.EqualTo(previousRecord));
-            var restored = previous.Additions.Single().Restore(journal.Assets(previous));
-            Assert.That(await File.ReadAllBytesAsync(restored.LocalPath), Is.EqualTo(await File.ReadAllBytesAsync(first.LocalPath)));
+            var restored = await AssertPendingAssetsAsync(
+                journal,
+                previous,
+                previousRecord,
+                first);
+
             Assert.That(restored.Metadata.Artwork!.Bytes, Is.EqualTo(first.Metadata.Artwork!.Bytes));
         }
     }
@@ -62,7 +65,7 @@ public sealed class SyncJournalTests
         using var workspace = new SyncWorkspace();
         using var journal = new SyncJournal(workspace.Root, "phone");
         Directory.CreateDirectory(Path.Combine(journal.DirectoryPath, "pending.json"));
-        var before = SyncPlannerTests.Catalogue([]);
+        var before = CatalogueTestData.Create([]);
         var failure = await Assert.CatchAsync<Exception>(() => journal.StartBatchAsync(
             new LibraryIdentity("id", "binding"),
             before,
@@ -82,7 +85,7 @@ public sealed class SyncJournalTests
         using var journal = new SyncJournal(workspace.Root, "phone");
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
-        var before = SyncPlannerTests.Catalogue([]);
+        var before = CatalogueTestData.Create([]);
         await Assert.CatchAsync<OperationCanceledException>(() => journal.StartBatchAsync(
             new LibraryIdentity("id", "binding"),
             before,
@@ -100,7 +103,7 @@ public sealed class SyncJournalTests
         using var workspace = new SyncWorkspace();
         using var journal = new SyncJournal(workspace.Root, "phone");
         var track = SyncTestData.Track();
-        var before = SyncPlannerTests.Catalogue([]);
+        var before = CatalogueTestData.Create([]);
         var batch = SyncBatch.Create(before, [track], []);
         var identity = new LibraryIdentity("id", "binding");
         await journal.StartBatchAsync(
@@ -120,9 +123,11 @@ public sealed class SyncJournalTests
             CancellationToken.None,
             replacePending: true));
 
-        Assert.That(await File.ReadAllBytesAsync(Path.Combine(journal.DirectoryPath, "pending.json")), Is.EqualTo(previousRecord));
-        var restored = previous.Additions.Single().Restore(journal.Assets(previous));
-        Assert.That(await File.ReadAllBytesAsync(restored.LocalPath), Is.EqualTo(await File.ReadAllBytesAsync(track.LocalPath)));
+        await AssertPendingAssetsAsync(
+            journal,
+            previous,
+            previousRecord,
+            track);
     }
 
     [Test]
@@ -133,7 +138,11 @@ public sealed class SyncJournalTests
             "phone",
             7,
             [],
-            [new(101, "Old", "old.mp3", 5)],
+            [new(
+                101,
+                "Old",
+                "old.mp3",
+                5)],
             0);
 
         using (var journal = new SyncJournal(workspace.Root, "phone"))
@@ -171,6 +180,21 @@ public sealed class SyncJournalTests
         using var next = new SyncJournal(workspace.Root, "phone");
         Assert.That(Directory.GetFiles(workspace.Root, "pending.json", SearchOption.AllDirectories), Is.Empty);
         Assert.That(Directory.GetFiles(workspace.Root, "verified-*.json", SearchOption.AllDirectories), Has.Length.EqualTo(1));
+    }
+
+    private static async Task<PreparedTrack> AssertPendingAssetsAsync(
+        SyncJournal journal,
+        PendingSync previous,
+        byte[]? previousRecord,
+        PreparedTrack original)
+    {
+        var record = await File.ReadAllBytesAsync(Path.Combine(journal.DirectoryPath, "pending.json"));
+        Assert.That(record, Is.EqualTo(previousRecord));
+        var restored = previous.Additions.Single().Restore(journal.Assets(previous));
+        Assert.That(await File.ReadAllBytesAsync(restored.LocalPath),
+            Is.EqualTo(await File.ReadAllBytesAsync(original.LocalPath)));
+
+        return restored;
     }
 
     [Test]

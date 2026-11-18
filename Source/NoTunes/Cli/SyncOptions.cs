@@ -35,7 +35,6 @@ public sealed class SyncOptions : DeviceOptions
         {
             WriteJson(context.Output, result);
         }
-
         else
         {
             foreach (var track in result.Plan.Add)
@@ -59,6 +58,7 @@ public sealed class SyncOptions : DeviceOptions
             var deferred = result.Plan.DeferredDeletions.Count == 0
                 ? string.Empty
                 : $", {result.Plan.DeferredDeletions.Count} deletion(s) deferred";
+
             await context.Output.WriteLineAsync($"{(result.DryRun ? "Preview" : "Verified")}: "
                 + $"{result.Plan.Add.Count} added, {result.Plan.Delete.Count} removed, "
                 + $"{result.Plan.Unchanged} unchanged{covers}{skipped}{deferred}.");

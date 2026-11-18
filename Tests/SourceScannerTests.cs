@@ -137,7 +137,6 @@ public sealed class SourceScannerTests
                 File.AppendAllText(file, "d");
                 File.SetLastWriteTimeUtc(file, originalWriteTime);
             }
-
             else
             {
                 File.WriteAllText(file, "xyz");

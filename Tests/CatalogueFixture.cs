@@ -65,6 +65,7 @@ internal sealed class CatalogueFixture : IDisposable
         CREATE TABLE item_stats(item_pid INTEGER,remember_bookmark INTEGER);
         INSERT INTO item_stats SELECT item_pid,0 FROM item;
         """;
+
     private readonly SyncWorkspace workspace = new();
 
     public SQLiteConnection Connection { get; }
@@ -112,6 +113,11 @@ internal sealed class CatalogueFixture : IDisposable
             ? ReadShared(this.Path + SyncPaths.WalSuffix) : null);
     }
 
+    public Task<DeviceCatalogue> ReadAsync(bool allowUninitialized = false)
+    {
+        return CatalogueReader.ReadAsync(this.Snapshot(), CancellationToken.None, allowUninitialized);
+    }
+
     private static byte[] ReadShared(string path)
     {
         using var input = new FileStream(
@@ -119,6 +125,7 @@ internal sealed class CatalogueFixture : IDisposable
             FileMode.Open,
             FileAccess.Read,
             FileShare.ReadWrite);
+
         using var output = new MemoryStream();
         input.CopyTo(output);
         return output.ToArray();

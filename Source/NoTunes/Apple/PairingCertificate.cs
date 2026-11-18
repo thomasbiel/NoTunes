@@ -28,7 +28,9 @@ internal static class PairingCertificate
         using var reader = new StringReader(Encoding.UTF8.GetString(content));
         var pem = new PemReader(reader).ReadPemObject();
         if (pem is null || !StringComparer.Ordinal.Equals(pem.Type, PemCertificateType))
+        {
             throw new InvalidDataException("The saved pairing certificate is not a PEM certificate.");
+        }
 
         return pem.Content;
     }
@@ -39,11 +41,15 @@ internal static class PairingCertificate
         {
             var certificate = Asn1Sequence.GetInstance(Asn1Object.FromByteArray(encoded));
             if (certificate.Count != CertificateFieldCount)
+            {
                 throw new InvalidDataException("Invalid pairing certificate structure.");
+            }
 
             var tbs = Asn1Sequence.GetInstance(certificate[BodyIndex]);
             if (tbs.Count is < MinimumBodyFieldCount or > MaximumBodyFieldCount)
+            {
                 throw new InvalidDataException("Invalid pairing certificate body.");
+            }
 
             var issuerIndex = tbs[BodyIndex] is Asn1TaggedObject ? IssuerIndexWithVersion : IssuerIndexWithoutVersion;
             if (X509Name.GetInstance(tbs[issuerIndex]).IsEmpty)

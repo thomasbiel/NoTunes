@@ -5,6 +5,44 @@ namespace NoTunes.Apple;
 
 internal static class DeviceStaging
 {
+    public static async Task WriteMetadataAsync(
+        AfcClient afc,
+        byte[] operation,
+        byte[] signature,
+        CancellationToken cancellationToken)
+    {
+        await WriteVerifiedAsync(
+            afc,
+            SyncPaths.Metadata,
+            operation,
+            cancellationToken);
+
+        await WriteVerifiedAsync(
+            afc,
+            SyncPaths.Metadata + SyncPaths.SignatureSuffix,
+            signature,
+            cancellationToken);
+    }
+
+    public static async Task RemoveMetadataAsync(
+        AfcClient afc,
+        byte[] operation,
+        byte[] signature,
+        CancellationToken cancellationToken)
+    {
+        await RemoveMatchingAsync(
+            afc,
+            SyncPaths.Metadata,
+            operation,
+            cancellationToken);
+
+        await RemoveMatchingAsync(
+            afc,
+            SyncPaths.Metadata + SyncPaths.SignatureSuffix,
+            signature,
+            cancellationToken);
+    }
+
     public static async Task WriteVerifiedAsync(
         AfcClient afc,
         string path,
@@ -12,7 +50,12 @@ internal static class DeviceStaging
         CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream(bytes, writable: false);
-        await afc.WriteNewFileAsync(path, stream, bytes.Length, cancellationToken);
+        await afc.WriteNewFileAsync(
+            path,
+            stream,
+            bytes.Length,
+            cancellationToken);
+
         if (!(await afc.ReadFileAsync(path, bytes.Length, cancellationToken)).AsSpan().SequenceEqual(bytes))
         {
             throw new IOException("Device staging failed read-back verification.");
@@ -26,7 +69,11 @@ internal static class DeviceStaging
         CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream(expected, writable: false);
-        await RemoveMatchingAsync(afc, path, stream, cancellationToken);
+        await RemoveMatchingAsync(
+            afc,
+            path,
+            stream,
+            cancellationToken);
     }
 
     public static async Task RemoveMatchingAsync(
@@ -36,7 +83,11 @@ internal static class DeviceStaging
         CancellationToken cancellationToken)
     {
         await using var stream = File.OpenRead(expectedFile);
-        await RemoveMatchingAsync(afc, path, stream, cancellationToken);
+        await RemoveMatchingAsync(
+            afc,
+            path,
+            stream,
+            cancellationToken);
     }
 
     private static async Task RemoveMatchingAsync(

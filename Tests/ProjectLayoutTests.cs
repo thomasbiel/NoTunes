@@ -14,6 +14,7 @@ public sealed class ProjectLayoutTests
         var projects = solution.Descendants("Project")
             .Select(project => Path.GetFullPath(Path.Combine(root, (string)project.Attribute("Path")!)))
             .ToArray();
+
         foreach (var project in projects)
         {
             var directory = Path.GetDirectoryName(project)!;
@@ -32,10 +33,12 @@ public sealed class ProjectLayoutTests
         var solution = XDocument.Load(Path.Combine(GetRepositoryRoot(), "NoTunes.slnx"));
         var folder = solution.Root!.Elements("Folder").SingleOrDefault(folder =>
             StringComparer.Ordinal.Equals((string?)folder.Attribute("Name"), "/Platform/"));
+
         Assert.That(folder, Is.Not.Null);
         var projects = folder!.Elements("Project")
             .Select(project => Path.GetFileNameWithoutExtension((string)project.Attribute("Path")!))
             .ToArray();
+
         Assert.That(projects, Is.EquivalentTo([
             "NoTunes.Platform.Abstractions",
             "NoTunes.Platform.Windows",

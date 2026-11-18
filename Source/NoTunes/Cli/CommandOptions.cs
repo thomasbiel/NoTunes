@@ -12,7 +12,9 @@ public abstract class CommandOptions
     {
         var additional = arguments.ToArray();
         if (additional.Length != 0)
+        {
             throw new InvalidArgumentsException($"Unexpected positional argument(s): {string.Join(", ", additional)}");
+        }
     }
 
     protected static void WriteJson<T>(TextWriter output, T value)

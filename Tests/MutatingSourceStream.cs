@@ -17,6 +17,7 @@ internal sealed class MutatingSourceStream(string file, Action mutate) : FileStr
             buffer[..Math.Min(buffer.Length, 1)],
             this.Position,
             cancellationToken);
+
         this.Position += read;
         if (read > 0 && !this.MutationPerformed)
         {

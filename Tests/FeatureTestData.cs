@@ -1,4 +1,3 @@
-using NoTunes.Apple;
 using NoTunes.Music;
 
 namespace NoTunes.Tests;
@@ -24,6 +23,7 @@ internal static class FeatureTestData
             2,
             StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha,
             output);
+
         return output.ToArray();
     }
 

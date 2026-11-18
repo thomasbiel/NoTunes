@@ -17,6 +17,7 @@ public sealed class CliProcessTests
             "--full-readback",
             "--dry-run",
             "--json");
+
         Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Error));
         Assert.That(result.Error, Does.Contain("Source folder not found"));
         Assert.That(result.Output, Is.Empty);
@@ -28,19 +29,16 @@ public sealed class CliProcessTests
         using var source = new Music.SyncWorkspace();
         await File.WriteAllTextAsync(Path.Combine(source.Root, "song.mp3"), "abc");
         var result = await RunAsync("scan", source.Root, "--json");
-        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        AssertScanResult(result, 1);
         Assert.That(result.Error, Does.Contain("Scanning and hashing source: 0% (0/1)"));
         Assert.That(result.Error, Does.Contain("Scanning and hashing source: 100% (1/1)"));
-        using var document = System.Text.Json.JsonDocument.Parse(result.Output);
-        Assert.That(document.RootElement.GetProperty("Tracks").GetArrayLength(), Is.EqualTo(1));
     }
 
     [Test]
     public async Task Removes_A_Local_Cover_Through_The_Cli([Values] bool json)
     {
         using var source = new Music.SyncWorkspace();
-        var path = SourceTestData.WriteTrack(source.Root, "song.mp3",
-            file => file.Tag.Pictures = [FeatureTestData.FrontCover([1, 2, 3, 4])]);
+        var path = SourceTestData.WriteCoveredTrack(source.Root, "song.mp3", coverBytes: [1, 2, 3, 4]);
 
         var result = await RunAsync(json ? ["remove-cover", path, "--json"] : ["remove-cover", path]);
 
@@ -65,8 +63,7 @@ public sealed class CliProcessTests
     public async Task Resolves_A_Cover_Command_Path_Relative_To_The_Selected_Music_Folder()
     {
         using var source = new Music.SyncWorkspace();
-        var path = SourceTestData.WriteTrack(source.Root, "song.mp3",
-            file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
+        var path = SourceTestData.WriteCoveredTrack(source.Root, "song.mp3");
 
         var result = await RunAsync(
             "remove-cover",
@@ -83,9 +80,7 @@ public sealed class CliProcessTests
     public async Task Requires_A_File_For_Cover_Removal()
     {
         var result = await RunAsync("remove-cover");
-        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.InvalidArguments));
-        Assert.That(result.Output, Is.Empty);
-        Assert.That(result.Error, Is.Not.Empty);
+        AssertArgumentError(result);
     }
 
     [Test]
@@ -93,10 +88,8 @@ public sealed class CliProcessTests
     {
         using var source = new Music.SyncWorkspace();
         var result = await RunAsync("scan", source.Root, "--json");
-        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        AssertScanResult(result, 0);
         Assert.That(result.Error, Does.Contain("Scanning and hashing source: 100% (0/0)"));
-        using var json = System.Text.Json.JsonDocument.Parse(result.Output);
-        Assert.That(json.RootElement.GetProperty("Tracks").GetArrayLength(), Is.Zero);
     }
 
     [TestCase("scan")]
@@ -106,9 +99,7 @@ public sealed class CliProcessTests
     {
         var missing = Path.Combine(Path.GetTempPath(), "NoTunes-missing-" + Guid.NewGuid().ToString("N"));
         var result = await RunAsync(command, missing, "unexpected");
-        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.InvalidArguments), result.Error);
-        Assert.That(result.Error, Does.Contain("unexpected"));
-        Assert.That(result.Output, Is.Empty);
+        AssertArgumentError(result, "unexpected");
     }
 
     [TestCase("devices")]
@@ -120,9 +111,8 @@ public sealed class CliProcessTests
             "unexpected",
             "--timeout",
             "0");
-        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.InvalidArguments), result.Error);
-        Assert.That(result.Error, Does.Contain("unexpected"));
-        Assert.That(result.Output, Is.Empty);
+
+        AssertArgumentError(result, "unexpected");
     }
 
     [TestCase("devices", "0")]
@@ -134,9 +124,7 @@ public sealed class CliProcessTests
     public async Task Invalid_Timeout_Uses_The_Argument_Error_Exit_Code(string command, string timeout)
     {
         var result = await RunAsync(command, "--timeout", timeout);
-        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.InvalidArguments), result.Error);
-        Assert.That(result.Error, Does.Contain("--timeout"));
-        Assert.That(result.Output, Is.Empty);
+        AssertArgumentError(result, "--timeout");
     }
 
     [TestCase("scan")]
@@ -161,9 +149,7 @@ public sealed class CliProcessTests
     public async Task Parser_Errors_Use_Standard_Error_Without_Contaminating_Json(string command, string option)
     {
         var result = await RunAsync(command, "--json", option);
-        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.InvalidArguments), result.Error);
-        Assert.That(result.Error, Is.Not.Empty);
-        Assert.That(result.Output, Is.Empty);
+        AssertArgumentError(result);
     }
 
     [Test]
@@ -175,24 +161,31 @@ public sealed class CliProcessTests
         Assert.That(result.Error, Is.Empty);
     }
 
-    [TestCase("--timeout", false)]
-    [TestCase("--timeout", true)]
-    [TestCase("--device", false)]
-    [TestCase("--device", true)]
-    [TestCase("--state-folder", false)]
-    [TestCase("--state-folder", true)]
-    [TestCase("--device=", false)]
-    [TestCase("--state-folder=", false)]
-    [TestCase("--timeout=", false)]
-    public async Task Rejects_Options_Without_A_Value_Before_Scanning(string option, bool beforeJson)
+    [Test]
+    public async Task Rejects_Options_Without_A_Value_Before_Scanning(
+        [Values("--timeout", "--device", "--state-folder", "--timeout=", "--device=", "--state-folder=")] string option,
+        [Values] bool beforeJson)
     {
         var missing = Path.Combine(Path.GetTempPath(), "NoTunes-missing-" + Guid.NewGuid().ToString("N"));
         string[] arguments = beforeJson ? ["sync", missing, option, "--json"] : ["sync", missing, "--json", option];
         var result = await RunAsync(arguments);
-        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.InvalidArguments), result.Error);
-        Assert.That(result.Error, Does.Contain(option.TrimEnd('=')));
+        AssertArgumentError(result, option.TrimEnd('='));
         Assert.That(result.Error, Does.Not.Contain("Scanning"));
+    }
+
+    private static void AssertScanResult((int ExitCode, string Output, string Error) result, int expectedTracks)
+    {
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        using var document = System.Text.Json.JsonDocument.Parse(result.Output);
+        Assert.That(document.RootElement.GetProperty("Tracks").GetArrayLength(), Is.EqualTo(expectedTracks));
+    }
+
+    private static void AssertArgumentError((int ExitCode, string Output, string Error) result, string? option = null)
+    {
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.InvalidArguments), result.Error);
         Assert.That(result.Output, Is.Empty);
+        Assert.That(result.Error, Is.Not.Empty);
+        if (option is not null) Assert.That(result.Error, Does.Contain(option));
     }
 
     private static async Task<(int ExitCode, string Output, string Error)> RunAsync(params string[] arguments)
@@ -204,6 +197,7 @@ public sealed class CliProcessTests
             UseShellExecute = false,
             CreateNoWindow = true
         };
+
         start.ArgumentList.Add(typeof(ApplicationServices).Assembly.Location);
         foreach (var argument in arguments)
         {

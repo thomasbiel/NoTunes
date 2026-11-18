@@ -18,7 +18,7 @@ public sealed class CatalogueGroupCompatibilityTests
     public async Task Reads_Shared_Group_Sync_Ids_Without_Losing_Track_Associations()
     {
         using var fixture = CreateSharedGroups();
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         Assert.That(catalogue.Artists[ArtistName], Is.Zero);
         Assert.That(catalogue.Artists[ArtistAlias], Is.Zero);
         Assert.That(catalogue.Albums[CatalogueReader.GroupKey(AlbumName, ArtistName)], Is.Zero);
@@ -36,7 +36,7 @@ public sealed class CatalogueGroupCompatibilityTests
     public async Task Prepares_Unrelated_Additions_Alongside_Shared_Group_Sync_Ids()
     {
         using var fixture = CreateSharedGroups();
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
         SourceTestData.WriteTrack(
@@ -56,7 +56,7 @@ public sealed class CatalogueGroupCompatibilityTests
     public async Task Resolves_A_Shared_Artist_Sync_Id_To_The_Receiver_Name(string artist)
     {
         using var fixture = CreateSharedGroups();
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
         SourceTestData.WriteTrack(
@@ -74,13 +74,14 @@ public sealed class CatalogueGroupCompatibilityTests
     public async Task Preserves_Byte_Identical_Tracks_When_Their_Group_Sync_Ids_Are_Shared()
     {
         using var fixture = CreateSharedGroups();
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         const string hash = "matching-hash";
         var sourceTrack = new SourceTrack(
             "renamed.mp3",
             5,
             DateTime.UnixEpoch,
             hash);
+
         var source = new SourceLibrary("source", [sourceTrack]);
         var plan = await SyncPlanner.CreateAsync(
             "phone",
@@ -100,7 +101,7 @@ public sealed class CatalogueGroupCompatibilityTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute("INSERT INTO album VALUES(13,1012,'Album.',11,'Other Sort');");
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
         SourceTestData.WriteTrack(
@@ -118,7 +119,7 @@ public sealed class CatalogueGroupCompatibilityTests
     public async Task Verifies_The_Actual_Group_Row_When_Sync_Ids_Are_Shared([Values] bool album)
     {
         using var fixture = CreateSharedGroups();
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
         SourceTestData.WriteTrack(
@@ -126,12 +127,14 @@ public sealed class CatalogueGroupCompatibilityTests
             "new.mp3",
             AlbumName,
             ArtistAlias);
+
         var addition = (await SourceTestData.PrepareAsync(source.Root, before, output)).Single();
         var stored = FeatureTestData.Stored(addition);
         stored = stored with
         {
             Metadata = stored.Metadata! with { AlbumRowId = 12, AlbumArtistRowId = 11 }
         };
+
         var after = before with { Anchor = before.Anchor + 1, Tracks = [.. before.Tracks, stored] };
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
@@ -144,6 +147,7 @@ public sealed class CatalogueGroupCompatibilityTests
             Metadata = album ? stored.Metadata! with { AlbumRowId = 13 }
                 : stored.Metadata! with { AlbumArtistRowId = 22 }
         };
+
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after with { Tracks = [.. before.Tracks, wrong] },
@@ -164,17 +168,17 @@ public sealed class CatalogueGroupCompatibilityTests
         {
             PromptForGroupName = (_, _) => ValueTask.FromResult<string?>(endOfInput ? null : string.Empty)
         };
+
         device.Files[CatalogueSnapshot.DatabasePath] = fixture.Snapshot().Database;
         SourceTestData.WriteTrack(
             source.Root,
             "affected.mp3",
             AlbumName,
             ArtistAlias);
+
         var failure = await Assert.CatchAsync<Exception>(() => device.RunAsync(source.Root, state.Root, dryRun));
         Assert.That(failure, endOfInput ? Is.TypeOf<InvalidDataException>() : Is.TypeOf<OperationCanceledException>());
-        Assert.That(device.Batches, Is.Empty);
-        Assert.That(device.FileConnections.SelectMany(connection => connection.WritePackets), Is.Empty);
-        Assert.That(device.Files.ContainsKey(SyncPaths.Lock), Is.False);
+        SimulatedSyncDeviceAssertions.HasNoWrites(device);
         Assert.That(Directory.GetFiles(state.Root, "pending.json", SearchOption.AllDirectories), Is.Empty);
     }
 
@@ -185,7 +189,8 @@ public sealed class CatalogueGroupCompatibilityTests
         fixture.Execute(album
             ? "INSERT INTO album VALUES(12,2012,'Other Album',11,'Other Sort');"
             : "INSERT INTO album_artist VALUES(11,2011,'Other Artist','Other Sort');");
-        await Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ReadAsync());
     }
 
     [TestCase("UPDATE album SET album_pid=23 WHERE album_pid=13;")]
@@ -203,29 +208,24 @@ public sealed class CatalogueGroupCompatibilityTests
             UPDATE album SET sort_album='Album, The';
             """);
 
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute(mutation);
 
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var after = await fixture.ReadAsync();
         Assert.That(after.Albums, Is.EquivalentTo(before.Albums));
         Assert.That(after.Artists, Is.EquivalentTo(before.Artists));
         Assert.That(after.OccupiedIds.SetEquals(before.OccupiedIds), Is.True);
         Assert.That(after.SortNames.Preserves(before.SortNames), Is.True);
-        Assert.Throws<IOException>(() => SyncEngine.RequireUnchanged(before, after));
-        Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
-            before,
-            after with { Anchor = before.Anchor + 1 },
-            [],
-            []));
+        CatalogueAssertions.RejectsUnrequestedChanges(before, after);
     }
 
     [Test]
     public async Task Allows_Deletion_By_Track_Id_While_Shared_Group_Rows_Remain()
     {
         using var fixture = CreateSharedGroups();
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute("DELETE FROM item WHERE item_pid=1; UPDATE _MLDatabaseProperties SET value='8';");
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var after = await fixture.ReadAsync();
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -245,7 +245,7 @@ public sealed class CatalogueGroupCompatibilityTests
             fixture.Execute("UPDATE album_artist SET album_artist='Artist' WHERE album_artist_pid=22;");
         }
 
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute("""
             DELETE FROM item WHERE item_pid=1;
             DELETE FROM album WHERE album_pid=12;
@@ -253,7 +253,7 @@ public sealed class CatalogueGroupCompatibilityTests
             UPDATE _MLDatabaseProperties SET value='8';
             """);
 
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var after = await fixture.ReadAsync();
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -270,14 +270,14 @@ public sealed class CatalogueGroupCompatibilityTests
     {
         using var fixture = CreateSharedGroups();
         fixture.Execute("DELETE FROM item WHERE item_pid<>1;");
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute("""
             DELETE FROM item WHERE item_pid=1;
             UPDATE album SET album_pid=23 WHERE album_pid=13;
             UPDATE _MLDatabaseProperties SET value='8';
             """);
 
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var after = await fixture.ReadAsync();
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -289,14 +289,14 @@ public sealed class CatalogueGroupCompatibilityTests
     public async Task Restores_Every_Shared_Group_Row_Through_A_Json_Checkpoint()
     {
         using var fixture = CreateSharedGroups();
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         var json = JsonSerializer.Serialize(CatalogueCheckpoint.Capture(catalogue));
         var restored = JsonSerializer.Deserialize<CatalogueCheckpoint>(json)!.Restore();
         Assert.That(restored.AlbumGroups, Is.EqualTo(catalogue.AlbumGroups));
         Assert.That(restored.ArtistGroups, Is.EqualTo(catalogue.ArtistGroups));
         Assert.DoesNotThrow(() => SyncEngine.RequireUnchanged(restored, catalogue));
         fixture.Execute("UPDATE album SET album_artist_pid=11 WHERE album_pid=13;");
-        var changed = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var changed = await fixture.ReadAsync();
         Assert.Throws<IOException>(() => SyncEngine.RequireUnchanged(restored, changed));
     }
 
@@ -304,7 +304,7 @@ public sealed class CatalogueGroupCompatibilityTests
     public async Task Requires_Row_Evidence_For_Legacy_Checkpoints_Only_When_Sync_Ids_Are_Shared([Values] bool shared)
     {
         using var fixture = shared ? CreateSharedGroups() : new CatalogueFixture();
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         var legacy = (CatalogueCheckpoint.Capture(catalogue) with
         {
             AlbumGroups = null,
@@ -335,10 +335,9 @@ public sealed class CatalogueGroupCompatibilityTests
             "new.mp3",
             "Independent Album",
             ArtistAlias);
+
         await Assert.ThrowsAsync<InvalidDataException>(() => device.RunAsync(source.Root, state.Root, dryRun));
-        Assert.That(device.Batches, Is.Empty);
-        Assert.That(device.FileConnections.SelectMany(connection => connection.WritePackets), Is.Empty);
-        Assert.That(device.Files.ContainsKey(SyncPaths.Lock), Is.False);
+        SimulatedSyncDeviceAssertions.HasNoWrites(device);
         Assert.That(Directory.GetFiles(state.Root, "pending.json", SearchOption.AllDirectories), Is.Empty);
     }
 
@@ -355,6 +354,7 @@ public sealed class CatalogueGroupCompatibilityTests
             "new.mp3",
             shared ? AlbumName : "Independent Album",
             shared ? ArtistAlias : "Independent Artist");
+
         var result = await device.RunAsync(source.Root, state.Root, dryRun: true);
         Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
         Assert.That(result.Plan.Delete.Select(track => track.Id), Is.EqualTo([101]));

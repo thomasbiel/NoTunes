@@ -39,6 +39,7 @@ public sealed class TrackMetadataVerificationTests
         INSERT INTO composer VALUES(1024,'Other composer','Other composer',24);
         INSERT INTO genre VALUES(25,'Other genre');
         """;
+
     private const string InsertAdditionSql = """
         INSERT INTO base_location VALUES(2,'iTunes_Control/Music/F06');
         INSERT INTO item(item_pid,media_type,remote_location_id,base_location_id,track_number,disc_number,is_compilation)
@@ -76,15 +77,10 @@ public sealed class TrackMetadataVerificationTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(OtherGroupsSql);
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute(mutation);
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
-        Assert.Throws<IOException>(() => SyncEngine.RequireUnchanged(before, after));
-        Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
-            before,
-            after with { Anchor = before.Anchor + 1 },
-            [],
-            []));
+        var after = await fixture.ReadAsync();
+        CatalogueAssertions.RejectsUnrequestedChanges(before, after);
     }
 
     [TestCase("UPDATE item SET album_pid=13 WHERE item_pid=6;")]
@@ -111,17 +107,18 @@ public sealed class TrackMetadataVerificationTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(OtherGroupsSql);
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute(InsertAdditionSql);
-        var correct = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var correct = await fixture.ReadAsync();
         var addition = Addition();
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             correct,
             [addition],
             []));
+
         fixture.Execute(mutation);
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var after = await fixture.ReadAsync();
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -133,7 +130,7 @@ public sealed class TrackMetadataVerificationTests
     public async Task Accepts_Receiver_Defaults_And_Ascii_Group_Spellings_For_An_Addition()
     {
         using var fixture = new CatalogueFixture();
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute(InsertAdditionSql);
         fixture.Execute("""
             UPDATE item SET track_number=0,disc_number=1,is_compilation=0 WHERE item_pid=6;
@@ -144,6 +141,7 @@ public sealed class TrackMetadataVerificationTests
             UPDATE composer SET composer='COMPOSER';
             UPDATE genre SET genre='GENRE';
             """);
+
         var addition = Addition();
         foreach (var key in new[] { MediaKeys.TrackNumber, MediaKeys.TrackCount, MediaKeys.DiscNumber,
             MediaKeys.DiscCount, MediaKeys.Year, MediaKeys.IsCompilation, MediaKeys.Comment })
@@ -154,7 +152,7 @@ public sealed class TrackMetadataVerificationTests
         addition.Metadata.Item[MediaKeys.SortTitle] = "Added";
         // Milliseconds are recalculated from the audio samples rather than copied from the item scalar.
         addition.Metadata.Item[MediaKeys.TotalMilliseconds] = 1001L;
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var after = await fixture.ReadAsync();
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -167,15 +165,10 @@ public sealed class TrackMetadataVerificationTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(OtherGroupsSql);
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute("UPDATE item SET album_pid=13,track_number=99 WHERE item_pid=5;");
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
-        Assert.Throws<IOException>(() => SyncEngine.RequireUnchanged(before, after));
-        Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
-            before,
-            after with { Anchor = before.Anchor + 1 },
-            [],
-            []));
+        var after = await fixture.ReadAsync();
+        CatalogueAssertions.RejectsUnrequestedChanges(before, after);
     }
 
     private static PreparedTrack Addition()
@@ -208,6 +201,7 @@ public sealed class TrackMetadataVerificationTests
                 (MediaKeys.Duration, 44100L)),
             "Album",
             "Artist");
+
         return new PreparedTrack(
             new SourceTrack(
                 "added.mp3",

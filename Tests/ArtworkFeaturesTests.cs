@@ -25,9 +25,10 @@ public sealed class ArtworkFeaturesTests
 
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
             .BuildServiceProvider();
+
         var library = await services.GetRequiredService<SourceScanner>().ScanAsync(source.Root, CancellationToken.None);
         var groupKey = CatalogueReader.GroupKey(album, artist);
-        var catalogue = SyncPlannerTests.Catalogue([]) with
+        var catalogue = CatalogueTestData.Create([]) with
         {
             ArtworkAvailable = true,
             Albums = new Dictionary<string, long> { [groupKey] = ambiguousIds ? 0 : 1012 },
@@ -38,12 +39,14 @@ public sealed class ArtworkFeaturesTests
                 AlbumArtists = new Dictionary<string, string?> { [artist] = ambiguousIds ? artist : null }
             }
         };
+
         var plan = new SyncPlan(
             "phone",
             catalogue.Anchor,
             library.Tracks,
             [],
             0);
+
         var fileSystem = services.GetRequiredService<ISourceFileSystem>();
         await Assert.ThrowsAsync<InvalidDataException>(() => SourcePreparation.PrepareAsync(
             library,
@@ -60,14 +63,15 @@ public sealed class ArtworkFeaturesTests
             fileSystem,
             output,
             CancellationToken.None,
-            artworkOnly: true);
+            new SourcePreparationOptions { ArtworkOnly = true });
+
         Assert.That(prepared, Has.Count.EqualTo(1));
         var repair = prepared[0] with { Id = SyncTestData.TrackId, IsArtworkOnly = true };
-        var document = Plist.Parse(SyncOperations.Serialize(catalogue, [repair], [])).AsDict();
-        var operation = ((object[])document[MediaKeys.Operations])[1].AsDict();
+        var operation = ReadArtworkUpdate(catalogue, repair);
         Assert.That(operation.Text(MediaKeys.Operation), Is.EqualTo(MediaOperations.UpdateTrack));
         Assert.That(operation.Dictionary(MediaKeys.Item).Keys,
             Is.EquivalentTo([MediaKeys.ArtworkCacheId, MediaKeys.ArtworkChecksum]));
+
         Assert.That(repair.Metadata.Artwork, Is.Not.Null);
     }
 
@@ -81,12 +85,12 @@ public sealed class ArtworkFeaturesTests
         Assert.Throws<InvalidDataException>(() => ArtworkImage.Read([1, 2, 3, 4]));
     }
 
-    [TestCase(false, 3L)]
-    [TestCase(false, 7L)]
-    [TestCase(true, 2L)]
-    [TestCase(true, 6L)]
-    public async Task Transfers_Artwork_Before_Completing_The_Requested_Asset(bool artworkOnly, long parts)
+    [Test]
+    public async Task Transfers_Artwork_Before_Completing_The_Requested_Asset(
+        [Values] bool artworkOnly,
+        [Values(0L, SyncProtocol.GeniusPart)] long extraParts)
     {
+        var parts = SyncProtocol.ArtworkPart | (artworkOnly ? 0 : SyncProtocol.AudioPart) | extraParts;
         var track = FeatureTestData.Covered(artworkOnly);
         var complete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var files = new AfcPeer { AllowWrites = true };
@@ -102,29 +106,27 @@ public sealed class ArtworkFeaturesTests
                 Assert.That(files.Files[SyncPaths.ArtworkAirlock + track.AssetId], Is.EqualTo(track.Metadata.Artwork!.Bytes));
                 Assert.That(message.Dictionary(AtcKeys.Parameters).Text(AtcKeys.AssetPath),
                     Is.EqualTo(artworkOnly ? string.Empty : track.DevicePath));
+
                 complete.TrySetResult();
             }
         };
-        await using var afc = new AfcClient(files, TimeSpan.FromSeconds(1));
-        await using var atc = new AtcClient(peer, TimeSpan.FromSeconds(1));
-        await atc.ReadSyncStatusAsync(CancellationToken.None);
-        var session = new AtcSyncSession(atc, TextWriter.Null);
-        using var signer = await session.BeginAsync(new LibraryIdentity("id", "binding"), 7, CancellationToken.None);
-        await session.FinishMetadataAsync(7, CancellationToken.None);
-        await session.TransferAsync(afc, [track], new HashSet<long>(), CancellationToken.None);
+
+        await using var session = new AtcSyncTestSession(peer, files);
+        await session.StartAsync();
+        await session.TransferAsync([track]);
         Assert.That(files.Files.ContainsKey(SyncPaths.Airlock + track.AssetId), Is.EqualTo(!artworkOnly));
     }
 
     [Test]
     public void Artwork_Only_Operations_Do_Not_Resend_Audio_Or_Track_Metadata()
     {
-        var catalogue = SyncPlannerTests.Catalogue([]);
+        var catalogue = CatalogueTestData.Create([]);
         var track = FeatureTestData.Covered(artworkOnly: true);
-        var operation = Plist.Parse(SyncOperations.Serialize(catalogue, [track], [])).AsDict();
-        var update = ((object[])operation[MediaKeys.Operations])[1].AsDict();
+        var update = ReadArtworkUpdate(catalogue, track);
         Assert.That(update.Text(MediaKeys.Operation), Is.EqualTo("update_track"));
         Assert.That(update.Dictionary(MediaKeys.Item).Keys,
             Is.EquivalentTo([MediaKeys.ArtworkCacheId, MediaKeys.ArtworkChecksum]));
+
         Assert.That(update.ContainsKey(MediaKeys.Audio), Is.False);
     }
 
@@ -143,7 +145,8 @@ public sealed class ArtworkFeaturesTests
                 SELECT entity_pid,entity_type,artwork_type,artwork_token,artwork_variant_type
                 FROM artwork_token WHERE entity_pid=1;
             """);
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+
+        var catalogue = await fixture.ReadAsync();
         Assert.That(catalogue.ArtworkAvailable, Is.True);
         Assert.That(catalogue.ArtworkHighWaterMark, Is.EqualTo(601));
         var image = ArtworkImage.Read(FeatureTestData.Png()) with { CacheId = 101 };
@@ -151,15 +154,21 @@ public sealed class ArtworkFeaturesTests
         var files = new AfcPeer();
         files.Files[SyncPaths.ArtworkOriginals + "aa/cover.jpg"] = image.Bytes;
         await using var afc = new AfcClient(files, TimeSpan.FromSeconds(1));
-        await SyncEngine.VerifyArtworkAsync(afc, catalogue, track, CancellationToken.None);
+        await SyncEngine.VerifyArtworkAsync(
+            afc,
+            catalogue,
+            track,
+            CancellationToken.None);
+
         files.Files[SyncPaths.ArtworkOriginals + "aa/cover.jpg"][^1] ^= 1;
         await Assert.ThrowsAsync<IOException>(() => SyncEngine.VerifyArtworkAsync(
             afc,
             catalogue,
             track,
             CancellationToken.None));
+
         fixture.Execute("DELETE FROM best_artwork_token;");
-        var unregistered = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var unregistered = await fixture.ReadAsync();
         Assert.That(unregistered.TrackArtwork[101].Path, Is.Null);
     }
 
@@ -168,18 +177,18 @@ public sealed class ArtworkFeaturesTests
     {
         using var source = new SyncWorkspace();
         using var prepared = new SyncWorkspace();
-        var path = SourceTestData.WriteTrack(source.Root, "covered.mp3",
-            file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
+        var path = SourceTestData.WriteCoveredTrack(source.Root, "covered.mp3");
         File.Copy(SyncTestData.FixturePath, Path.Combine(source.Root, "plain.mp3"));
 
         var original = await File.ReadAllBytesAsync(path);
         File.Copy(path, Path.Combine(source.Root, "second-covered.mp3"));
-        var catalogue = SyncPlannerTests.Catalogue([]) with { ArtworkAvailable = true, ArtworkHighWaterMark = 601 };
+        var catalogue = CatalogueTestData.Create([]) with { ArtworkAvailable = true, ArtworkHighWaterMark = 601 };
         var result = await SourceTestData.PrepareAsync(
             source.Root,
             catalogue,
             prepared,
             artworkOnly: true);
+
         Assert.That(result, Has.Count.EqualTo(2));
         Assert.That(result[0].Metadata.Artwork!.CacheId, Is.EqualTo(602));
         Assert.That(result[1].Metadata.Artwork!.CacheId, Is.EqualTo(603));
@@ -189,5 +198,12 @@ public sealed class ArtworkFeaturesTests
         Assert.That(await File.ReadAllBytesAsync(result[0].LocalPath), Is.EqualTo(original));
         Assert.That(Directory.GetFiles(prepared.Root, "*.mp3"), Has.Length.EqualTo(2));
         Assert.That(Directory.GetFiles(prepared.Root, "*.jpg"), Has.Length.EqualTo(1));
+    }
+
+    private static Dictionary<string, object> ReadArtworkUpdate(DeviceCatalogue catalogue, PreparedTrack track)
+    {
+        var document = Plist.Parse(SyncOperations.Serialize(catalogue, [track], [])).AsDict();
+        return ((object[])document[MediaKeys.Operations]).Select(value => value.AsDict())
+            .Single(operation => operation.Text(MediaKeys.Operation) == MediaOperations.UpdateTrack);
     }
 }

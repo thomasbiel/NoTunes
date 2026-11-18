@@ -19,6 +19,7 @@ internal static class SyncTestData
             bytes.Length,
             File.GetLastWriteTimeUtc(FixturePath),
             Convert.ToHexString(SHA256.HashData(bytes)));
+
         return new PreparedTrack(
             source,
             FixturePath,
@@ -48,7 +49,7 @@ internal static class SyncTestData
     {
         return Message(AtcCommands.ReadyForSync, Plist.Dict(
             (AtcKeys.Anchors, Plist.Dict((AtcKeys.Media, anchor))),
-            (AtcKeys.DeviceInfo, Plist.Dict((AtcKeys.Grappa, GrappaSignerTests.Reply())))));
+            (AtcKeys.DeviceInfo, Plist.Dict((AtcKeys.Grappa, GrappaTestData.Reply())))));
     }
 
     public static Dictionary<string, object>[] SessionMessages(params Dictionary<string, object>[] messages)

@@ -13,7 +13,9 @@ internal sealed class ArtworkCache(string directory, int maximumEntries = Artwor
     public ArtworkImage Read(byte[] bytes)
     {
         if (bytes.Length > ArtworkImage.MaximumBytes)
+        {
             throw new InvalidDataException("Embedded cover exceeds its size limit.");
+        }
 
         var key = Convert.ToHexString(SHA256.HashData(bytes));
         if (this.images.TryGetValue(key, out var image)) return image;

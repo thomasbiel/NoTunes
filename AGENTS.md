@@ -19,8 +19,11 @@
 
 - Qualify access to non-static fields, properties, methods and events with `this.`.
 - Put a blank line between property and method declarations.
+- Put a blank line after a multiline expression statement or declaration before
+  subsequent code.
 - Put a blank line after a closing code-block brace before subsequent code,
-  except between the `try`, `catch` and `finally` clauses of the same construct.
+  except before `else` (including `else if`) and between the `try`, `catch` and
+  `finally` clauses of the same construct.
 - Put braces for `try`, `catch` and `finally` blocks on their own lines.
 - Use the appropriate modern `ThrowIf...` guard methods instead of equivalent
   manual argument checks, for example `ArgumentOutOfRangeException.ThrowIfNegative(maxBytes)`.
@@ -31,6 +34,8 @@
   as the line-length guideline.
 - Short `if (...) throw ...;` guards may stay on one line. Put a blank line after
   the guard, or after the final guard in a consecutive group.
+- Enclose the `throw` body of a multiline `if` guard in braces, including when
+  it contains only that single statement.
 - Keep one class per file; extract helper classes into their own files.
 - Format auto-properties on one line, for example `public required bool SyncAllowed { get; init; }`.
 - Give protocol values, keys, paths, offsets and limits descriptive constants or enums; avoid magic numbers and strings.

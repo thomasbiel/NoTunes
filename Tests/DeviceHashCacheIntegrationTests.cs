@@ -39,6 +39,7 @@ public sealed class DeviceHashCacheIntegrationTests
                 }
             }
         };
+
         var path = this.WriteTrack("song.mp3");
         this.device.SetExistingAudio(await File.ReadAllBytesAsync(path));
         this.error = new StringWriter();
@@ -121,22 +122,16 @@ public sealed class DeviceHashCacheIntegrationTests
             this.services.GetRequiredService<ISourceFileSystem>(),
             this.error,
             this.cache.Root);
+
         return engine.RunAsync(this.options, CancellationToken.None);
     }
 
     private string WriteTrack(string name, bool artwork = false)
     {
-        return SourceTestData.WriteTrack(
+        return SourceTestData.WriteSyncTrack(
             this.source.Root,
             name,
-            "Album",
-            "Artist",
-            file =>
-            {
-                file.Tag.Title = name;
-                file.Tag.Composers = ["Composer"];
-                file.Tag.Genres = ["Genre"];
-                if (artwork) file.Tag.Pictures = [FeatureTestData.FrontCover()];
-            });
+            artwork,
+            file => file.Tag.Title = name);
     }
 }

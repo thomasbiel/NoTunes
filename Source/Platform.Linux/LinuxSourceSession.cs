@@ -85,7 +85,7 @@ internal sealed class LinuxSourceSession : ISourceEditSession
             IgnoreInaccessible = false,
             AttributesToSkip = 0
         };
-        
+
         return heldPath.EnumerateFileSystemInfos(SourceFileDefaults.AllEntriesPattern, options).Select(entry => new SourceEntry(entry.Name, entry.Attributes));
     }
 
@@ -114,13 +114,16 @@ internal sealed class LinuxSourceSession : ISourceEditSession
                 string.Empty,
                 EmptyPath,
                 StatType,
-                out var status) != 0) throw NativeError(file.FullName);
-            
+                out var status) != 0)
+            {
+                throw NativeError(file.FullName);
+            }
+
             if ((status.Mask & StatType) == 0 || (status.Mode & FileTypeMask) != RegularFile)
             {
                 throw new IOException($"Source path is not a regular file: {file.FullName}");
             }
-            
+
             var fileLock = access == FileAccess.ReadWrite ? LockExclusive : LockShared;
             if (Flock(handle, fileLock | LockNonBlocking) != 0) throw NativeError(file.FullName);
 

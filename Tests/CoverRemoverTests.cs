@@ -36,15 +36,14 @@ public sealed class CoverRemoverTests
             custom.Text = ["Unchanged value"];
         });
 
-        var neighbor = SourceTestData.WriteTrack(source.Root, "other.mp3", file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
+        var neighbor = SourceTestData.WriteCoveredTrack(source.Root, "other.mp3");
         var neighborBytes = await File.ReadAllBytesAsync(neighbor);
         var audioBefore = AudioHash(path);
         var oldModified = DateTime.UnixEpoch.AddYears(30);
         File.SetLastWriteTimeUtc(path, oldModified);
         var scanned = await SourceTestData.ScanAsync(source.Root);
-        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider();
 
-        var result = await services.GetRequiredService<CoverRemover>().RemoveAsync(path, CancellationToken.None);
+        var result = await RemoveAsync(path);
 
         Assert.That(result.Path, Is.EqualTo(path));
         Assert.That(result.RemovedCovers, Is.EqualTo(pictureCount));
@@ -80,9 +79,8 @@ public sealed class CoverRemoverTests
         var path = SourceTestData.WriteTrack(source.Root, "song.mp3", file => file.Tag.Pictures = []);
         var bytes = await File.ReadAllBytesAsync(path);
         var modified = File.GetLastWriteTimeUtc(path);
-        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider();
 
-        var result = await services.GetRequiredService<CoverRemover>().RemoveAsync(path, CancellationToken.None);
+        var result = await RemoveAsync(path);
 
         Assert.That(result.RemovedCovers, Is.Zero);
         Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
@@ -100,9 +98,8 @@ public sealed class CoverRemoverTests
         });
 
         var audioBefore = AudioHash(path);
-        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider();
 
-        var result = await services.GetRequiredService<CoverRemover>().RemoveAsync(path, CancellationToken.None);
+        var result = await RemoveAsync(path);
 
         Assert.That(result.RemovedCovers, Is.EqualTo(2));
         Assert.That(AudioHash(path), Is.EqualTo(audioBefore));
@@ -118,9 +115,8 @@ public sealed class CoverRemoverTests
         var path = Path.Combine(source.Root, "fake.mp3");
         await File.WriteAllTextAsync(path, "Not an MP3");
         var bytes = await File.ReadAllBytesAsync(path);
-        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider();
 
-        await Assert.CatchAsync<Exception>(() => services.GetRequiredService<CoverRemover>().RemoveAsync(path, CancellationToken.None));
+        await Assert.CatchAsync<Exception>(() => RemoveAsync(path));
 
         Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
     }
@@ -129,13 +125,12 @@ public sealed class CoverRemoverTests
     public async Task Honors_Cancellation_Before_Opening_The_File()
     {
         using var source = new SyncWorkspace();
-        var path = SourceTestData.WriteTrack(source.Root, "covered.mp3", file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
+        var path = SourceTestData.WriteCoveredTrack(source.Root, "covered.mp3");
         var bytes = await File.ReadAllBytesAsync(path);
         using var canceled = new CancellationTokenSource();
         await canceled.CancelAsync();
-        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider();
 
-        await Assert.CatchAsync<OperationCanceledException>(() => services.GetRequiredService<CoverRemover>().RemoveAsync(path, canceled.Token));
+        await Assert.CatchAsync<OperationCanceledException>(() => RemoveAsync(path, canceled.Token));
 
         Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
     }
@@ -144,7 +139,7 @@ public sealed class CoverRemoverTests
     public async Task Restores_The_Exact_Original_After_A_Partial_Write_Or_Cancellation([Values] bool cancel)
     {
         using var source = new SyncWorkspace();
-        var path = SourceTestData.WriteTrack(source.Root, "covered.mp3", file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
+        var path = SourceTestData.WriteCoveredTrack(source.Root, "covered.mp3");
         var bytes = await File.ReadAllBytesAsync(path);
         var modified = File.GetLastWriteTimeUtc(path);
         using var cancellation = new CancellationTokenSource();
@@ -175,7 +170,7 @@ public sealed class CoverRemoverTests
     {
         using var source = new SyncWorkspace();
         var actualDirectory = Directory.CreateDirectory(Path.Combine(source.Root, "actual"));
-        var path = SourceTestData.WriteTrack(actualDirectory.FullName, "covered.mp3", file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
+        var path = SourceTestData.WriteCoveredTrack(actualDirectory.FullName, "covered.mp3");
 
         var bytes = await File.ReadAllBytesAsync(path);
         var link = Path.Combine(source.Root, linkedDirectory ? "linked" : "linked.mp3");
@@ -195,12 +190,19 @@ public sealed class CoverRemoverTests
             Assert.Ignore("This environment cannot create symbolic links.");
         }
 
-        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null).BuildServiceProvider();
         var selected = linkedDirectory ? Path.Combine(link, "covered.mp3") : link;
 
-        await Assert.ThrowsAsync<IOException>(() => services.GetRequiredService<CoverRemover>().RemoveAsync(selected, CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => RemoveAsync(selected));
 
         Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
+    }
+
+    private static async Task<CoverRemovalResult> RemoveAsync(string path, CancellationToken cancellationToken = default)
+    {
+        await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
+            .BuildServiceProvider();
+
+        return await services.GetRequiredService<CoverRemover>().RemoveAsync(path, cancellationToken);
     }
 
     private static string AudioHash(string path)

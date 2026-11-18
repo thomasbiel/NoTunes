@@ -28,6 +28,7 @@ public sealed class ProtocolTests
             .. ProtocolFrames.PlistMessage(ping, atc: true),
             .. ProtocolFrames.PlistMessage(pong, atc: true)
         ];
+
         Assert.That(stream.Written, Is.EqualTo(expected));
     }
 

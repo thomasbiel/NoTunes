@@ -73,6 +73,7 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
                 case MediaOperations.UpdateTrack:
                     Assert.That(operation.Dictionary(MediaKeys.Item).Keys,
                         Is.EquivalentTo([MediaKeys.ArtworkCacheId, MediaKeys.ArtworkChecksum]));
+
                     break;
                 case MediaOperations.DeleteTrack:
                     this.Delete(operation.Number(MediaKeys.PersistentId));
@@ -85,6 +86,7 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
 
         this.Execute("UPDATE _MLDatabaseProperties SET value=$anchor",
             ("anchor", revision.ToString(CultureInfo.InvariantCulture)));
+
         transaction.Commit();
         this.Anchor = revision;
     }
@@ -112,6 +114,7 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
             ("artwork_type", TrackArtworkType),
             ("artwork_variant_type", DefaultArtworkVariant),
             ("relative_path", path));
+
         foreach (var table in new[] { "artwork_token", "best_artwork_token" })
         {
             this.Execute($"DELETE FROM {table} WHERE entity_pid=$id", ("id", itemId));
@@ -125,6 +128,7 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
             ("artwork_type", TrackArtworkType),
             ("entity_type", TrackEntityType),
             ("artwork_variant_type", DefaultArtworkVariant));
+
         this.Insert(
             "best_artwork_token",
             ("entity_pid", itemId),
@@ -164,13 +168,16 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
             ("track_number", item.GetValueOrDefault(MediaKeys.TrackNumber, 0L)),
             ("disc_number", item.GetValueOrDefault(MediaKeys.DiscNumber, 1L)),
             ("is_compilation", item.Flag(MediaKeys.IsCompilation) ? 1 : 0));
+
         this.Insert(
             "item_store",
             ("item_pid", id),
             ("sync_id", id),
             ("store_saga_id", 0));
+
         var milliseconds = Math.Floor(audio.Number(MediaKeys.Duration)
             * (double)TimeSpan.MillisecondsPerSecond / (double)audio[MediaKeys.SampleRate]);
+
         this.Insert(
             "item_extra",
             ("item_pid", id),
@@ -184,6 +191,7 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
             ("year", item.GetValueOrDefault(MediaKeys.Year, 0L)),
             ("total_time_ms", milliseconds),
             ("media_kind", SongMediaKind));
+
         this.Insert(
             "item_playback",
             ("item_pid", id),
@@ -191,6 +199,7 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
             ("bit_rate", audio.Number(MediaKeys.BitRate)),
             ("sample_rate", audio[MediaKeys.SampleRate]),
             ("duration", audio.Number(MediaKeys.Duration)));
+
         this.Insert("item_stats", ("item_pid", id), ("remember_bookmark", 0));
     }
 

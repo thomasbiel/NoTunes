@@ -29,7 +29,6 @@ internal sealed record SyncBatch(
             {
                 high = count - 1;
             }
-
             else
             {
                 best = count;
@@ -53,6 +52,7 @@ internal sealed record SyncBatch(
             SelectOperations(count);
             var operation = BinaryPlist.WriteWithinLimit(document, SyncProtocol.MaxOperationBytes)
                 ?? throw new InvalidDataException("Sync operation size changed during serialization.");
+
             return new SyncBatch(add, delete, operation);
         }
 

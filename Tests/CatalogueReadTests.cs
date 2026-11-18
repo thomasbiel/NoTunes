@@ -43,6 +43,7 @@ public sealed class CatalogueReadTests
                     CancellationToken.None);
             }
         });
+
         Assert.That(peer.Closes, Is.EqualTo(1));
         Assert.That(peer.OpenHandles, Is.Zero);
     }
@@ -54,6 +55,7 @@ public sealed class CatalogueReadTests
         {
             ChunkLimit = 2
         };
+
         peer.Files["track"] = [1, 2, 3, 4, 5];
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(2));
         Assert.That(await afc.ReadFileAsync("track", 5, CancellationToken.None), Is.EqualTo(peer.Files["track"]));
@@ -79,6 +81,7 @@ public sealed class CatalogueReadTests
         {
             EarlyEof = true
         };
+
         peer.Files["track"] = new byte[6];
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(2));
         await Assert.ThatAsync(async () => await afc.ReadFileAsync("track", 6, CancellationToken.None), Throws.TypeOf<InvalidDataException>());
@@ -93,6 +96,7 @@ public sealed class CatalogueReadTests
         {
             FailClose = true
         };
+
         peer.Files["track"] = [1];
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(2));
         await Assert.ThatAsync(async () => await afc.ReadFileAsync("track", 1, CancellationToken.None), Throws.TypeOf<AfcException>());
@@ -105,6 +109,7 @@ public sealed class CatalogueReadTests
         {
             StallClose = true
         };
+
         peer.Files["track"] = [1];
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(30));
         await Assert.ThatAsync(async () => await afc.ReadFileAsync("track", 1, CancellationToken.None), Throws.TypeOf<IOException>().With.Message.Contains("closing"));
@@ -121,6 +126,7 @@ public sealed class CatalogueReadTests
             StallClose = true,
             OnClose = cancellation.Cancel
         };
+
         peer.Files["track"] = [1];
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(30));
         await Assert.ThatAsync(async () => await afc.ReadFileAsync("track", 1, cancellation.Token), Throws.InstanceOf<OperationCanceledException>());
@@ -136,6 +142,7 @@ public sealed class CatalogueReadTests
             EarlyEof = true,
             StallClose = true
         };
+
         peer.Files["track"] = [1];
         await using var afc = new AfcClient(peer, TimeSpan.FromSeconds(30));
         await Assert.ThatAsync(async () => await afc.ReadFileAsync("track", 1, CancellationToken.None), Throws.TypeOf<InvalidDataException>().With.Message.Contains("read length"));
@@ -193,10 +200,12 @@ public sealed class CatalogueReadTests
             ["st_mtime"] = "1",
             ["st_atime"] = "1"
         };
+
         var second = new Dictionary<string, string>(first)
         {
             ["st_atime"] = "2"
         };
+
         Assert.That(AfcClient.SameAttributes(first, second), Is.True);
         second["st_mtime"] = "2";
         Assert.That(AfcClient.SameAttributes(first, second), Is.False);
@@ -218,6 +227,7 @@ public sealed class CatalogueReadTests
             [AfcKeys.FileSize] = "5",
             [AfcKeys.AccessTime] = "1"
         };
+
         var right = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             [sizeKey] = size,

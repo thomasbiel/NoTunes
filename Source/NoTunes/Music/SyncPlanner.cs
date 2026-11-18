@@ -17,7 +17,7 @@ internal static class SyncPlanner
         foreach (var track in catalogue.Tracks)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (track.IsIncomplete || !sourceSizes.Contains(track.Size))
+            if (!IsHashCandidate(track, sourceSizes))
             {
                 progress.Advance();
                 continue;
@@ -53,6 +53,12 @@ internal static class SyncPlanner
             catalogue.Anchor,
             additions,
             [.. catalogue.Tracks.Where(track => !retained.Contains(track.Id))],
-            retained.Count) { Matches = sourceMatches };
+            retained.Count)
+        { Matches = sourceMatches };
+    }
+
+    internal static bool IsHashCandidate(DeviceTrack track, IReadOnlySet<long> sourceSizes)
+    {
+        return !track.IsIncomplete && sourceSizes.Contains(track.Size);
     }
 }

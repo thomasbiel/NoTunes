@@ -6,44 +6,29 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class SyncPlannerTests
 {
+    private const long DefaultTrackId = 101;
+    private const long DefaultTrackSize = 5;
+
     [Test]
     public async Task Counts_Unmatched_Sizes_Incomplete_And_Missing_Tracks_In_Progress()
     {
         await using var error = new StringWriter();
         var reads = 0;
-        var result = await SyncPlanner.CreateAsync(
-            "phone",
-            new SourceLibrary("source", [Track("new.mp3", "A")]),
-            Catalogue(
-            [
-                new(
-                    101,
-                    "wrong size",
-                    "wrong.mp3",
-                    10),
-                new(
-                    102,
-                    "incomplete",
-                    null,
-                    5),
-                new(
-                    103,
-                    "missing",
-                    "missing.mp3",
-                    5),
-                new(
-                    104,
-                    "match",
-                    "match.mp3",
-                    5)
-            ]),
+        var result = await CreatePlanAsync(
             (track, _) =>
             {
                 reads++;
                 return Task.FromResult(track.Id == 104 ? "A" : null);
             },
-            CancellationToken.None,
-            error);
+            source: [Track("new.mp3", "A")],
+            device:
+            [
+                StoredTrack(size: 10),
+                StoredTrack(102, path: null),
+                StoredTrack(103, "missing.mp3"),
+                StoredTrack(104, "match.mp3")
+            ],
+            error: error);
 
         Assert.That(reads, Is.EqualTo(2));
         Assert.That(result.Unchanged, Is.EqualTo(1));
@@ -55,17 +40,8 @@ public sealed class SyncPlannerTests
     public async Task Does_Not_Report_Completion_When_Reading_Fails()
     {
         await using var error = new StringWriter();
-        await Assert.ThrowsAsync<IOException>(() => SyncPlanner.CreateAsync(
-            "phone",
-            new SourceLibrary("source", [Track("new.mp3", "A")]),
-            Catalogue([new(
-                101,
-                "unreadable",
-                "old.mp3",
-                5)]),
-            (_, _) => throw new IOException("Read failed"),
-            CancellationToken.None,
-            error));
+        await Assert.ThrowsAsync<IOException>(() => CreatePlanAsync(
+            (_, _) => throw new IOException("Read failed"), error: error));
 
         Assert.That(error.ToString(), Does.Contain("0% (0/1)").And.Not.Contain("100%"));
     }
@@ -73,57 +49,36 @@ public sealed class SyncPlannerTests
     [Test]
     public async Task Rejects_An_Already_Cancelled_Plan_With_An_Empty_Device_Catalogue([Values] bool hasSource)
     {
-        var source = new SourceLibrary("source", hasSource ? [Track("new.mp3", "A")] : []);
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => SyncPlanner.CreateAsync(
-            "phone",
-            source,
-            Catalogue([]),
+        await Assert.ThrowsAsync<OperationCanceledException>(() => CreatePlanAsync(
             (_, _) => throw new AssertionException("No device read was expected."),
-            cancellation.Token));
+            source: hasSource ? [Track("new.mp3", "A")] : [],
+            device: [],
+            cancellationToken: cancellation.Token));
     }
 
     [Test]
     public async Task Stops_When_Cancelled_After_The_Last_Device_Hash()
     {
         using var cancellation = new CancellationTokenSource();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => SyncPlanner.CreateAsync(
-            "phone",
-            new SourceLibrary("source", [Track("new.mp3", "A")]),
-            Catalogue([new(
-                101,
-                "old",
-                "F01/old.mp3",
-                5)]),
+        await Assert.ThrowsAsync<OperationCanceledException>(() => CreatePlanAsync(
             (_, _) =>
             {
                 cancellation.Cancel();
                 return Task.FromResult<string?>("A");
             },
-            cancellation.Token));
+            source: [Track("new.mp3", "A")],
+            cancellationToken: cancellation.Token));
     }
 
     [Test]
     public async Task Preserves_Renamed_Tracks_And_Matches_Duplicate_Content_One_To_One()
     {
-        SourceTrack[] source = [Track("new-name.mp3", "A"), Track("duplicate.mp3", "A"), Track("new.mp3", "B")];
-        var catalogue = Catalogue([new(
-            101,
-            "renamed",
-            "F01/old.mp3",
-            5), new(
-                102,
-                "extra",
-                "F01/extra.mp3",
-                5)]);
-
-        var result = await SyncPlanner.CreateAsync(
-            "phone",
-            new SourceLibrary("source", source),
-            catalogue,
-            (track, _) => Task.FromResult<string?>(track.Id == 101 ? "A" : "C"),
-            CancellationToken.None);
+        var result = await CreatePlanAsync(
+            (track, _) => Task.FromResult<string?>(track.Id == DefaultTrackId ? "A" : "C"),
+            source: [Track("new-name.mp3", "A"), Track("duplicate.mp3", "A"), Track("new.mp3", "B")],
+            device: [StoredTrack(), StoredTrack(102, "F01/extra.mp3")]);
 
         Assert.That(result.Unchanged, Is.EqualTo(1));
         Assert.That(result.Add.Select(track => track.RelativePath), Is.EquivalentTo(["duplicate.mp3", "new.mp3"]));
@@ -133,74 +88,66 @@ public sealed class SyncPlannerTests
     [Test]
     public async Task Does_Not_Read_Assets_With_No_Possible_Size_Match()
     {
-        var catalogue = Catalogue([new(
-            101,
-            "old",
-            "F01/old.mp3",
-            10)]);
-
-        var result = await SyncPlanner.CreateAsync(
-            "phone",
-            new SourceLibrary("source", [Track("new.mp3", "B")]),
-            catalogue,
+        var result = await CreatePlanAsync(
             (_, _) => throw new AssertionException("Unneeded device read"),
-            CancellationToken.None);
+            device: [StoredTrack(size: 10)]);
 
-        Assert.That(result.Add, Has.Count.EqualTo(1));
-        Assert.That(result.Delete, Has.Count.EqualTo(1));
+        AssertReplacement(result);
     }
 
     [Test]
     public async Task An_Unreadable_Device_Asset_Aborts_The_Plan()
     {
-        await Assert.ThrowsAsync<IOException>(() => SyncPlanner.CreateAsync(
-            "phone",
-            new SourceLibrary("source", [Track("new.mp3", "B")]),
-            Catalogue([new(
-                101,
-                "old",
-                "F01/old.mp3",
-                5)]),
-            (_, _) => throw new IOException("Denied"),
-            CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => CreatePlanAsync((_, _) => throw new IOException("Denied")));
     }
 
     [Test]
     public async Task A_Missing_Device_File_Is_Replaced()
     {
-        var result = await SyncPlanner.CreateAsync(
-            "phone",
-            new SourceLibrary("source", [Track("new.mp3", "B")]),
-            Catalogue([new(
-                101,
-                "old",
-                "F01/old.mp3",
-                5)]),
-            (_, _) => Task.FromResult<string?>(null),
-            CancellationToken.None);
-
-        Assert.That(result.Add, Has.Count.EqualTo(1));
-        Assert.That(result.Delete, Has.Count.EqualTo(1));
+        var result = await CreatePlanAsync((_, _) => Task.FromResult<string?>(null));
+        AssertReplacement(result);
     }
 
-    internal static DeviceCatalogue Catalogue(IReadOnlyList<DeviceTrack> tracks)
+    private static Task<SyncPlan> CreatePlanAsync(
+        Func<DeviceTrack, CancellationToken, Task<string?>> readHash,
+        IReadOnlyList<SourceTrack>? source = null,
+        IReadOnlyList<DeviceTrack>? device = null,
+        CancellationToken cancellationToken = default,
+        TextWriter? error = null)
     {
-        return new DeviceCatalogue(
-            1001,
-            1002,
-            7,
-            tracks,
-            new Dictionary<string, long>(),
-            new Dictionary<string, long>(),
-            tracks.Select(track => track.Id).Append(1001).Append(1002).ToHashSet());
+        return SyncPlanner.CreateAsync(
+            "phone",
+            new SourceLibrary("source", source ?? [Track("new.mp3", "B")]),
+            CatalogueTestData.Create(device ?? [StoredTrack()]),
+            readHash,
+            cancellationToken,
+            error);
     }
 
     private static SourceTrack Track(string name, string hash)
     {
-        return new(
+        return new SourceTrack(
             name,
-            5,
+            DefaultTrackSize,
             DateTime.UnixEpoch,
             hash);
+    }
+
+    private static DeviceTrack StoredTrack(
+        long id = DefaultTrackId,
+        string? path = "F01/old.mp3",
+        long size = DefaultTrackSize)
+    {
+        return new DeviceTrack(
+            id,
+            "old",
+            path,
+            size);
+    }
+
+    private static void AssertReplacement(SyncPlan plan)
+    {
+        Assert.That(plan.Add.Select(track => track.RelativePath), Is.EqualTo(["new.mp3"]));
+        Assert.That(plan.Delete.Select(track => track.Id), Is.EqualTo([DefaultTrackId]));
     }
 }

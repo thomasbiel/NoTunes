@@ -12,7 +12,9 @@ internal static class SyncOperations
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         if (database == 0 || container == 0 || database == container)
+        {
             throw new InvalidDataException("Initialization requires distinct nonzero identities.");
+        }
 
         var created = DateTime.UtcNow;
         created = created.AddTicks(-(created.Ticks % TimeSpan.TicksPerSecond));
@@ -61,13 +63,16 @@ internal static class SyncOperations
         IReadOnlyList<DeviceTrack> deletions)
     {
         if (additions.Count + deletions.Count is < 1 or > SyncProtocol.MaxTrackChanges)
+        {
             throw new InvalidDataException($"A sync batch must contain between 1 and {SyncProtocol.MaxTrackChanges} track changes.");
+        }
 
         var operations = new List<object>
         {
             Plist.Dict((MediaKeys.Operation, MediaOperations.UpdateDatabase), (MediaKeys.PersistentId, catalogue.DatabaseId),
                 (MediaKeys.DatabaseInfo, Plist.Dict((MediaKeys.PrimaryContainerId, catalogue.ContainerId))))
         };
+
         foreach (var track in additions)
         {
             if (track.IsArtworkOnly)
@@ -78,6 +83,7 @@ internal static class SyncOperations
                     (MediaKeys.PersistentId, track.Id),
                     (MediaKeys.Item, Plist.Dict((MediaKeys.ArtworkCacheId, (long)artwork.CacheId),
                         (MediaKeys.ArtworkChecksum, (long)artwork.Checksum)))));
+
                 continue;
             }
 
@@ -86,6 +92,7 @@ internal static class SyncOperations
                 [MediaKeys.AlbumId] = track.AlbumId,
                 [MediaKeys.ArtistId] = track.ArtistId
             };
+
             operations.Add(Plist.Dict(
                 (MediaKeys.Operation, MediaOperations.InsertTrack),
                 (MediaKeys.PersistentId, track.Id),

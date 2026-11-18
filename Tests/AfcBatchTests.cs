@@ -19,6 +19,7 @@ public sealed class AfcBatchTests
             AllowPipelinedFileInfo = true,
             BeforeTransportRead = () => readCounts.Add(peer!.Operations.Count)
         };
+
         var paths = Enumerable.Range(0, count).Select(index => $"music/{index}.mp3").ToArray();
         foreach (var path in paths)
         {
@@ -43,6 +44,7 @@ public sealed class AfcBatchTests
         await using var stream = new ScriptedStream([
             .. Status(1, missing ? (ulong)AfcStatusCode.ObjectNotFound : denied),
             .. FileInfo(2), .. FileInfo(3)]);
+
         await using var afc = new AfcClient(stream, TimeSpan.FromSeconds(2));
         if (missing)
         {
@@ -54,6 +56,7 @@ public sealed class AfcBatchTests
         {
             var exception = await Assert.ThrowsAsync<AfcException>(
                 () => afc.GetFileInfosAsync(["first", "second"], CancellationToken.None));
+
             Assert.That(exception!.Code, Is.EqualTo(denied));
         }
 
@@ -69,6 +72,7 @@ public sealed class AfcBatchTests
         await using var afc = new AfcClient(stream, TimeSpan.FromSeconds(2));
         await Assert.ThrowsAsync<InvalidDataException>(
             () => afc.GetFileInfosAsync(["file"], CancellationToken.None));
+
         Assert.That(stream.WasDisposed, Is.True);
         Assert.That(afc.IsBroken, Is.True);
     }
@@ -103,6 +107,7 @@ public sealed class AfcBatchTests
         await using var afc = new AfcClient(stream, TimeSpan.FromSeconds(2));
         await Assert.ThrowsAsync<InvalidDataException>(
             () => afc.GetFileInfosAsync(["valid", "../escape"], CancellationToken.None));
+
         Assert.That(stream.Written.Length, Is.Zero);
         Assert.That(stream.WasDisposed, Is.False);
     }

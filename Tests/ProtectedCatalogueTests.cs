@@ -22,20 +22,22 @@ public sealed class ProtectedCatalogueTests
     public async Task Rejects_Unrequested_Changes_To_Protected_Items_After_A_Batch(string mutation)
     {
         using var fixture = new CatalogueFixture();
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute("""
             DELETE FROM item WHERE item_pid=1;
             DELETE FROM item_store WHERE item_pid=1;
             DELETE FROM item_extra WHERE item_pid=1;
             UPDATE _MLDatabaseProperties SET value='8';
             """);
+
         fixture.Execute(mutation);
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var after = await fixture.ReadAsync();
         var exception = Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after,
             [],
             before.Tracks));
+
         Assert.That(exception!.Message, Does.Contain("Protected"));
     }
 
@@ -44,9 +46,9 @@ public sealed class ProtectedCatalogueTests
     public async Task Rejects_Protected_Item_Changes_Before_A_Batch_Without_Changed_Sync_Ids(string mutation)
     {
         using var fixture = new CatalogueFixture();
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         fixture.Execute(mutation);
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var after = await fixture.ReadAsync();
         Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
         Assert.That(after.OccupiedIds.SetEquals(before.OccupiedIds), Is.True);
         Assert.Throws<IOException>(() => SyncEngine.RequireUnchanged(before, after));
@@ -60,12 +62,13 @@ public sealed class ProtectedCatalogueTests
             UPDATE item SET base_location_id=0 WHERE item_pid=2;
             UPDATE item_extra SET title=NULL,location=NULL,file_size=NULL WHERE item_pid=2;
             """);
+
         if (missingStore)
         {
             fixture.Execute("DELETE FROM item_store WHERE item_pid=2;");
         }
 
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         Assert.That(before.ProtectedItems.Select(item => item.ItemId), Is.EquivalentTo(new long[] { 2, 3, 4, 5 }));
         var purchase = before.ProtectedItems.Single(item => item.ItemId == 2);
         Assert.That(purchase.SyncId, Is.EqualTo(missingStore ? (long?)null : 0L));
@@ -73,12 +76,7 @@ public sealed class ProtectedCatalogueTests
         Assert.That(purchase.BasePath, Is.Null);
         Assert.That(purchase.Location, Is.Null);
         Assert.That(purchase.Size, Is.Null);
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
-        Assert.DoesNotThrow(() => SyncEngine.RequireUnchanged(before, after));
-        Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
-            before,
-            after with { Anchor = before.Anchor + 1 },
-            [],
-            []));
+        var after = await fixture.ReadAsync();
+        CatalogueAssertions.AcceptsUnchanged(before, after);
     }
 }

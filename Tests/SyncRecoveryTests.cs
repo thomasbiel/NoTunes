@@ -10,9 +10,19 @@ public sealed class SyncRecoveryTests
     [Test]
     public void Retries_Only_The_Incomplete_Deletions_Owned_By_The_Pending_Operation([Values] bool revisionAdvanced)
     {
-        var owned = new DeviceTrack(2001, "Owned interrupted insertion", null, 0);
-        var unrelated = new DeviceTrack(2002, "Unrelated interrupted insertion", null, 0);
-        var before = SyncPlannerTests.Catalogue([owned, unrelated]);
+        var owned = new DeviceTrack(
+            2001,
+            "Owned interrupted insertion",
+            null,
+            0);
+
+        var unrelated = new DeviceTrack(
+            2002,
+            "Unrelated interrupted insertion",
+            null,
+            0);
+
+        var before = CatalogueTestData.Create([owned, unrelated]);
         var pending = new PendingSync(
             2,
             new LibraryIdentity("id", "binding"),
@@ -21,28 +31,52 @@ public sealed class SyncRecoveryTests
             [owned],
             SyncOperations.Serialize(before, [], [owned]),
             [1, 2]);
+
         var actual = before with { Anchor = revisionAdvanced ? before.Anchor + 1 : before.Anchor };
         Assert.That(SyncRecovery.Assess(pending, actual, []).Select(track => track.Id), Is.EqualTo([owned.Id]));
         Assert.Throws<IOException>(() => SyncRecovery.Assess(pending,
             actual with { Tracks = [owned, unrelated with { Title = "Foreign change" }] }, []));
     }
 
-    [TestCase(0, false)]
-    [TestCase(0, true)]
-    [TestCase(1, true)]
-    [TestCase(2, true)]
-    public async Task Retains_Unfinished_Compensating_Deletions_Across_Journal_Replacements(
+    [Test]
+    public Task Retains_Unapplied_Compensating_Deletions_Across_Journal_Replacements()
+    {
+        return AssertCompensatingDeletionsAsync(0, revisionAdvanced: false);
+    }
+
+    [Test]
+    public Task Retains_Unfinished_Compensating_Deletions_Across_Journal_Replacements(
+        [Values(0, 1, 2)] int appliedDeletions)
+    {
+        return AssertCompensatingDeletionsAsync(appliedDeletions, revisionAdvanced: true);
+    }
+
+    private static async Task AssertCompensatingDeletionsAsync(
         int appliedDeletions,
         bool revisionAdvanced)
     {
         using var workspace = new SyncWorkspace();
         var incomplete = new[]
         {
-            new DeviceTrack(2001, "First interrupted insertion", null, 0),
-            new DeviceTrack(2002, "Second interrupted insertion", null, 0)
+            new DeviceTrack(
+                2001,
+                "First interrupted insertion",
+                null,
+                0),
+            new DeviceTrack(
+                2002,
+                "Second interrupted insertion",
+                null,
+                0)
         };
-        var retained = new DeviceTrack(2003, "Existing track", "existing.mp3", 5);
-        var before = SyncPlannerTests.Catalogue([.. incomplete, retained]);
+
+        var retained = new DeviceTrack(
+            2003,
+            "Existing track",
+            "existing.mp3",
+            5);
+
+        var before = CatalogueTestData.Create([.. incomplete, retained]);
         var identity = new LibraryIdentity("id", "binding");
         using var journal = new SyncJournal(workspace.Root, "phone");
         await journal.StartBatchAsync(
@@ -51,14 +85,17 @@ public sealed class SyncRecoveryTests
             SyncBatch.Create(before, [], incomplete),
             [1, 2],
             CancellationToken.None);
+
         var actual = before with
         {
             Anchor = revisionAdvanced ? before.Anchor + 1 : before.Anchor,
             Tracks = [.. incomplete.Skip(appliedDeletions), retained]
         };
+
         var remaining = SyncRecovery.Assess(journal.ReadPending(), actual, []);
         Assert.That(remaining.Select(track => track.Id),
             Is.EqualTo(incomplete.Skip(appliedDeletions).Select(track => track.Id)));
+
         if (remaining.Count != 0)
         {
             Assert.Throws<IOException>(() => SyncEngine.RequireCompleteAudio(actual));
@@ -69,9 +106,11 @@ public sealed class SyncRecoveryTests
                 [3, 4],
                 CancellationToken.None,
                 replacePending: true);
+
             var retried = journal.ReadPending();
             Assert.That(SyncRecovery.Assess(retried, actual, []).Select(track => track.Id),
                 Is.EqualTo(remaining.Select(track => track.Id)));
+
             actual = actual with { Anchor = actual.Anchor + 1, Tracks = [retained] };
             Assert.That(SyncRecovery.Assess(retried, actual, []), Is.Empty);
         }
@@ -87,7 +126,7 @@ public sealed class SyncRecoveryTests
         using var workspace = new SyncWorkspace();
         using var stateRoot = new SyncWorkspace();
         using var fixture = new CatalogueFixture();
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         var track = FeatureTestData.Covered() with { LocalPath = Path.Combine(workspace.Root, "copy.mp3") };
         File.Copy(SyncTestData.FixturePath, track.LocalPath);
         using (var journal = new SyncJournal(stateRoot.Root, "phone"))
@@ -113,7 +152,7 @@ public sealed class SyncRecoveryTests
     [Test]
     public void Distinguishes_Completed_And_Unfilled_Insertions_Without_Replaying_Them([Values] bool incomplete)
     {
-        var before = SyncPlannerTests.Catalogue([]);
+        var before = CatalogueTestData.Create([]);
         var addition = SyncTestData.Track();
         var actual = FeatureTestData.Stored(addition);
         if (incomplete) actual = actual with { Path = null, Size = 0 };
@@ -128,6 +167,7 @@ public sealed class SyncRecoveryTests
             },
             Artists = new Dictionary<string, long> { [addition.Metadata.AlbumArtist] = addition.ArtistId }
         };
+
         var pending = new PendingSync(
             2,
             new LibraryIdentity("id", "binding"),
@@ -136,6 +176,7 @@ public sealed class SyncRecoveryTests
             [],
             SyncOperations.Serialize(before, [addition], []),
             [1, 2]);
+
         var repair = SyncRecovery.Assess(pending, after, [addition]);
         Assert.That(repair.Count, Is.EqualTo(incomplete ? 1 : 0));
         Assert.Throws<IOException>(() => SyncRecovery.Assess(pending, after with { Anchor = after.Anchor + 1 }, [addition]));
@@ -149,7 +190,11 @@ public sealed class SyncRecoveryTests
         await using var afc = new AfcClient(files, TimeSpan.FromSeconds(1));
         if (owned)
         {
-            await DeviceStaging.RemoveMatchingAsync(afc, SyncPaths.Metadata, [1, 2, 3], CancellationToken.None);
+            await DeviceStaging.RemoveMatchingAsync(
+                afc,
+                SyncPaths.Metadata,
+                [1, 2, 3],
+                CancellationToken.None);
         }
         else
         {
@@ -166,9 +211,18 @@ public sealed class SyncRecoveryTests
     [Test]
     public void Reconciles_Partially_Applied_Deletions_Without_Replaying_The_Original_Batch()
     {
-        var before = SyncPlannerTests.Catalogue([
-            new DeviceTrack(101, "First", "first.mp3", 1),
-            new DeviceTrack(102, "Second", "second.mp3", 1)]);
+        var before = CatalogueTestData.Create([
+            new DeviceTrack(
+                101,
+                "First",
+                "first.mp3",
+                1),
+            new DeviceTrack(
+                102,
+                "Second",
+                "second.mp3",
+                1)]);
+
         var pending = new PendingSync(
             2,
             new LibraryIdentity("id", "binding"),
@@ -177,6 +231,7 @@ public sealed class SyncRecoveryTests
             [.. before.Tracks],
             SyncOperations.Serialize(before, [], before.Tracks),
             [1, 2]);
+
         var after = before with { Anchor = before.Anchor + 1, Tracks = [before.Tracks[1]] };
         Assert.That(SyncRecovery.Assess(pending, after, []), Is.Empty);
         Assert.Throws<IOException>(() => SyncRecovery.Assess(pending,
@@ -186,7 +241,7 @@ public sealed class SyncRecoveryTests
     [Test]
     public void Reconciles_An_Insert_Whose_Revision_Advanced_Without_Creating_The_Row()
     {
-        var before = SyncPlannerTests.Catalogue([]);
+        var before = CatalogueTestData.Create([]);
         var addition = SyncTestData.Track();
         var pending = new PendingSync(
             2,
@@ -196,6 +251,7 @@ public sealed class SyncRecoveryTests
             [],
             SyncOperations.Serialize(before, [addition], []),
             [1, 2]);
+
         Assert.That(SyncRecovery.Assess(pending, before with { Anchor = before.Anchor + 1 }, [addition]), Is.Empty);
     }
 }

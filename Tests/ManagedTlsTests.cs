@@ -28,6 +28,7 @@ public sealed class ManagedTlsTests
                 Keys.Value.Identity,
                 TimeSpan.FromSeconds(5),
                 CancellationToken.None);
+
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             var echoed = new byte[payload.Length];
             var read = tls.ReadExactlyAsync(echoed, deadline.Token).AsTask();
@@ -50,11 +51,13 @@ public sealed class ManagedTlsTests
                 credentials.Identity,
                 TimeSpan.FromSeconds(5),
                 CancellationToken.None);
+
             await tls.WriteAsync(payload);
             var echoed = new byte[payload.Length];
             await tls.ReadExactlyAsync(echoed);
             Assert.That(echoed, Is.EqualTo(payload));
         });
+
         Assert.That(server.AuthenticatedClient, Is.True);
     }
 
@@ -88,6 +91,7 @@ public sealed class ManagedTlsTests
             Keys.Value.Identity,
             TimeSpan.FromMilliseconds(100),
             CancellationToken.None), Throws.TypeOf<IOException>().With.Message.Contains("Timed out"));
+
         Assert.That(raw.WasDisposed, Is.True);
     }
 
@@ -102,6 +106,7 @@ public sealed class ManagedTlsTests
             Keys.Value.Identity,
             TimeSpan.FromSeconds(5),
             cancellation.Token), Throws.InstanceOf<OperationCanceledException>());
+
         Assert.That(raw.WasDisposed, Is.True);
     }
 
@@ -156,6 +161,7 @@ public sealed class ManagedTlsTests
         var identity = PairingIdentity.FromRecord(record);
         var actual = StringComparer.Ordinal.Equals(field, "RootCertificate")
             ? identity.ClientCertificate : identity.DeviceCertificate;
+
         Assert.That(actual, Is.EqualTo(encoded));
     }
 
@@ -192,11 +198,13 @@ public sealed class ManagedTlsTests
                 identity,
                 TimeSpan.FromSeconds(5),
                 CancellationToken.None);
+
             await tls.WriteAsync(payload);
             var echoed = new byte[payload.Length];
             await tls.ReadExactlyAsync(echoed);
             Assert.That(echoed, Is.EqualTo(payload));
         });
+
         Assert.That(server.AuthenticatedClient, Is.True);
     }
 
@@ -251,6 +259,7 @@ public sealed class ManagedTlsTests
             new UsbDevice(1, "test", 1),
             TimeSpan.FromSeconds(2),
             CancellationToken.None);
+
         await Assert.ThatAsync(async () => await lockdown.StartPairedSessionAsync(CancellationToken.None), failure);
         Assert.That(raw.WasDisposed, Is.True);
         await Assert.ThatAsync(async () => await lockdown.OpenServiceAsync("com.apple.afc", CancellationToken.None), Throws.InstanceOf<IOException>().With.Message.Contains("required"));
@@ -268,6 +277,7 @@ public sealed class ManagedTlsTests
             .. ProtocolFrames.PlistMessage(Plist.Dict(("Request", "QueryType"), ("Type", "com.apple.mobile.lockdown"))),
             .. ProtocolFrames.PlistMessage(sessionReply)
         ], maxReadBytes: int.MaxValue);
+
         var pairing = new ScriptedStream(ProtocolFrames.UsbMux(2, Plist.Dict(("PairRecordData", Plist.ToXml(record)))), maxReadBytes: int.MaxValue);
         return (new ReplyUsbMuxTransport(raw, pairing), raw);
     }
@@ -300,6 +310,7 @@ public sealed class ManagedTlsTests
                 protocol.Close();
             }
         });
+
         try
         {
             await clientSocket.ConnectAsync((IPEndPoint)listener.LocalEndpoint, deadline.Token);

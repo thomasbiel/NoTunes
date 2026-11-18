@@ -86,7 +86,9 @@ public static class BinaryPlist
         int Add(object item, int depth)
         {
             if (depth > Plist.MaxNestingDepth || objects.Count >= Plist.MaxObjectCount)
+            {
                 throw new InvalidDataException("Property list is too complex.");
+            }
 
             var index = objects.Count;
             objects.Add(false);

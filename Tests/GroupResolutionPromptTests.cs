@@ -37,6 +37,7 @@ public sealed class GroupResolutionPromptTests
         var prompt = services.GetRequiredService<SyncEngine>().PromptForGroupName!;
         Assert.That(await prompt("Ambiguous artist in one.mp3", CancellationToken.None),
             Is.EqualTo("Chosen Artist"));
+
         Assert.That(output.ToString(), Is.Empty);
         Assert.That(error.ToString(), Does.Contain("one.mp3").And.Contain("Target name"));
     }

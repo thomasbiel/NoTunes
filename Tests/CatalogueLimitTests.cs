@@ -11,7 +11,7 @@ public sealed class CatalogueLimitTests
     {
         using var fixture = new CatalogueFixture();
         fixture.ReplaceLocalTracks(CatalogueReader.MaximumTracks);
-        var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var before = await fixture.ReadAsync();
         Assert.That(before.Tracks, Has.Count.EqualTo(CatalogueReader.MaximumTracks));
         fixture.Execute("""
             INSERT INTO item(item_pid,media_type,remote_location_id,base_location_id)
@@ -20,7 +20,8 @@ public sealed class CatalogueLimitTests
             INSERT INTO item_extra(item_pid,title,location,file_size)
             VALUES(50001,'Video','video.mp4',5),(50002,'Remote','remote.mp3',5);
             """);
-        var after = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+
+        var after = await fixture.ReadAsync();
         Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
     }
 
@@ -29,8 +30,7 @@ public sealed class CatalogueLimitTests
     {
         using var fixture = new CatalogueFixture();
         fixture.ReplaceLocalTracks(CatalogueReader.MaximumTracks + 1);
-        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(
-            fixture.Snapshot(), CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ReadAsync());
         Assert.That(exception!.Message, Does.Contain("track limit"));
     }
 }

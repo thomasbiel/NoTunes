@@ -25,6 +25,7 @@ public sealed class SourceSettingsTests
               <add key="MusicSourceFolder" value="\\192.168.0.150\music" />
             </appSettings></configuration>
             """);
+
         Assert.That(SourceSettings.ResolveFolder(null, this.config), Is.EqualTo(@"\\192.168.0.150\music"));
     }
 

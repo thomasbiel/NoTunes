@@ -17,7 +17,8 @@ public sealed class SyncBatchTests
         template.Metadata.Item[MediaKeys.Comment] = new string('c', textLength);
         var tracks = Enumerable.Range(0, SyncProtocol.MaxTrackChanges)
             .Select(index => template with { Id = template.Id - index }).ToArray();
-        var catalogue = SyncPlannerTests.Catalogue([]);
+
+        var catalogue = CatalogueTestData.Create([]);
         var batch = SyncBatch.Create(catalogue, tracks, []);
         Assert.That(batch.Additions.Count, Is.InRange(1, tracks.Length - 1));
         Assert.That(batch.Operation.Length, Is.LessThanOrEqualTo(SyncProtocol.MaxOperationBytes));
@@ -25,6 +26,7 @@ public sealed class SyncBatchTests
             catalogue,
             [.. tracks.Take(batch.Additions.Count + 1)],
             []), Is.Null);
+
         Assert.That(BinaryPlist.Read(batch.Operation).AsDict()[MediaKeys.Operations],
             Has.Length.EqualTo(batch.Additions.Count + 1));
     }
@@ -41,7 +43,8 @@ public sealed class SyncBatchTests
         metadata.Item[MediaKeys.Comment] = new string('c', textLength);
         var tracks = Enumerable.Range(0, trackCount)
             .Select(index => template with { Id = template.Id - index, Metadata = metadata }).ToArray();
-        var catalogue = SyncPlannerTests.Catalogue([]);
+
+        var catalogue = CatalogueTestData.Create([]);
         Assert.That(SyncOperations.Serialize(catalogue, tracks, []).Length, Is.GreaterThan(SyncProtocol.MaxOperationBytes));
         var received = new List<long>();
         var batches = 0;
@@ -49,7 +52,7 @@ public sealed class SyncBatchTests
         {
             var batch = SyncBatch.Create(catalogue, [.. tracks.Skip(received.Count)], []);
             Assert.That(batch.Operation.Length, Is.LessThanOrEqualTo(SyncProtocol.MaxOperationBytes));
-            using var signer = new GrappaSigner(GrappaSignerTests.Reply());
+            using var signer = new GrappaSigner(GrappaTestData.Reply());
             Assert.That(signer.Sign(batch.Operation), Has.Length.EqualTo(21));
             var document = BinaryPlist.Read(batch.Operation).AsDict();
             Assert.That(document.Number(MediaKeys.Revision), Is.EqualTo(catalogue.Anchor + 1));
@@ -72,7 +75,8 @@ public sealed class SyncBatchTests
                 "Track",
                 "track.mp3",
                 5)).ToArray();
-        var batch = SyncBatch.Create(SyncPlannerTests.Catalogue(tracks), [], tracks);
+
+        var batch = SyncBatch.Create(CatalogueTestData.Create(tracks), [], tracks);
         Assert.That(batch.Deletions, Has.Count.EqualTo(SyncProtocol.MaxTrackChanges));
         Assert.That(batch.Deletions.Select(track => track.Id), Is.EqualTo(tracks.Take(SyncProtocol.MaxTrackChanges)
             .Select(track => track.Id)));
@@ -83,6 +87,6 @@ public sealed class SyncBatchTests
     {
         var track = SyncTestData.Track();
         track.Metadata.Item[MediaKeys.Comment] = new string('c', SyncProtocol.MaxOperationBytes);
-        Assert.Throws<InvalidDataException>(() => SyncBatch.Create(SyncPlannerTests.Catalogue([]), [track], []));
+        Assert.Throws<InvalidDataException>(() => SyncBatch.Create(CatalogueTestData.Create([]), [track], []));
     }
 }

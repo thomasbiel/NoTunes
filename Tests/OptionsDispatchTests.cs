@@ -18,9 +18,11 @@ public sealed class OptionsDispatchTests
         using var parser = new Parser(settings => settings.HelpWriter = null);
         var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions>(
             ["scan", source.Root]);
+
         var code = await result.MapResult(
             options => ((CommandOptions)options).Execute(services.GetRequiredService<CommandContext>(), CancellationToken.None),
             _ => Task.FromResult(ExitCodes.InvalidArguments));
+
         Assert.That(code, Is.Zero);
         Assert.That(output.ToString(), Does.Contain("0 MP3 file(s)"));
     }
@@ -33,9 +35,11 @@ public sealed class OptionsDispatchTests
     {
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
             .BuildServiceProvider();
+
         using var parser = new Parser(settings => settings.HelpWriter = null);
         var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions>(
             [verb, "--timeout", "0"]);
+
         await Assert.ThrowsAsync<InvalidArgumentsException>(() => result.MapResult(
             options => ((CommandOptions)options).Execute(services.GetRequiredService<CommandContext>(), CancellationToken.None),
             _ => Task.FromResult(ExitCodes.InvalidArguments)));

@@ -37,6 +37,7 @@ public sealed class AtcKeepAliveTests
                 }
             }
         };
+
         await using var client = new AtcClient(peer, RequestTimeout, KeepAliveInterval);
         await client.ReadSyncStatusAsync(CancellationToken.None);
         var session = new AtcSyncSession(client, TextWriter.Null);
@@ -46,6 +47,7 @@ public sealed class AtcKeepAliveTests
         Assert.That(peer.WasDisposed, Is.True);
         Assert.That(peer.SentMessages().Any(message =>
             message.Text(AtcKeys.Command) == AtcCommands.FinishedMetadata), Is.False);
+
         await Assert.DoesNotThrowAsync(async () => await client.DisposeAsync());
     }
 
@@ -77,6 +79,7 @@ public sealed class AtcKeepAliveTests
                 }
             }
         };
+
         var files = new AfcPeer
         {
             AllowWrites = true,
@@ -86,6 +89,7 @@ public sealed class AtcKeepAliveTests
                 await readbackPing.Task.WaitAsync(token);
             }
         };
+
         await using var afc = new AfcClient(files, RequestTimeout);
         await using var client = new AtcClient(peer, RequestTimeout, KeepAliveInterval);
         await client.ReadSyncStatusAsync(deadline.Token);
@@ -97,6 +101,7 @@ public sealed class AtcKeepAliveTests
             [track],
             new HashSet<long>(),
             deadline.Token);
+
         Assert.That(readbackPing.Task.IsCompletedSuccessfully, Is.True);
         Assert.That(files.Files[SyncPaths.Airlock + track.AssetId], Is.EqualTo(File.ReadAllBytes(track.LocalPath)));
     }

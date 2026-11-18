@@ -52,7 +52,7 @@ public sealed class SourceHashCacheTests
         var result = await this.CreateScanner().ScanAsync(this.source, CancellationToken.None);
         var cached = this.CreateCache().Load(this.source);
         Assert.That(result.Tracks.Single().RelativePath, Is.EqualTo("new.mp3"));
-        Assert.That(cached.Keys, Is.EquivalentTo(["new.mp3"]));
+        Assert.That(cached.Keys, Is.EquivalentTo(["new.mp3"]), this.error.ToString());
         Assert.That(cached["new.mp3"], Is.EqualTo(result.Tracks.Single()));
     }
 
@@ -80,6 +80,7 @@ public sealed class SourceHashCacheTests
         var invalidTrack = library.Tracks.Single() with { Sha256 = "invalid" };
         await File.WriteAllTextAsync(this.CreateCache().PathFor(this.source), JsonSerializer.Serialize(
             new SourceHashSnapshot(1, this.source, [invalidTrack])));
+
         var result = await this.CreateScanner().ScanAsync(this.source, CancellationToken.None);
         Assert.That(result.Tracks, Is.EqualTo(library.Tracks));
         Assert.That(this.error.ToString(), Does.Contain("Source hash cache could not be read"));
@@ -115,6 +116,7 @@ public sealed class SourceHashCacheTests
         ISourceFileSystem fileSystem = OperatingSystem.IsWindows()
             ? new WindowsSourceFileSystem()
             : new LinuxSourceFileSystem();
+
         return new SourceScanner(fileSystem, this.CreateCache());
     }
 

@@ -151,12 +151,14 @@ internal static class CatalogueVerification
             albumKey,
             expected.AlbumId,
             actual.Metadata.AlbumRowId);
+
         var sameArtist = MatchesGroup(
             artists,
             catalogue.Artists,
             expected.Metadata.AlbumArtist,
             expected.ArtistId,
             actual.Metadata.AlbumArtistRowId);
+
         return sameAlbum && sameArtist;
     }
 
@@ -220,12 +222,14 @@ internal static class CatalogueVerification
     {
         var completeRows = before.AlbumGroups is not null && before.ArtistGroups is not null
             && after.AlbumGroups is not null && after.ArtistGroups is not null;
+
         // Name maps classify insertion targets; collection can change that classification without changing a row.
         var preservesNames = completeRows
             ? after.SortNames.PreservesItemGroups(before.SortNames, allowRemovedGroups)
             : after.SortNames.Preserves(before.SortNames, allowRemovedGroups)
                 && PreservesGroupIds(before.Albums, after.Albums, allowRemovedGroups)
                 && PreservesGroupIds(before.Artists, after.Artists, allowRemovedGroups);
+
         return preservesNames
             && PreservesGroupRows(
                 before.AlbumGroups,

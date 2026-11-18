@@ -39,7 +39,9 @@ internal static class SavedHostAnchors
             || Number(content, HeaderLengthOffset) != RootHeaderBytes || Number(content, FileLengthOffset) != content.Length
             || Number(content, MinorVersionOffset) is not (CurrentMinorVersion or LegacyMinorVersion)
             || BinaryPrimitives.ReadInt64LittleEndian(content.AsSpan(DatabaseIdentityOffset)) != databaseId)
+        {
             throw new InvalidDataException("Unsupported or mismatched saved iTunes catalogue.");
+        }
 
         var count = Number(content, SectionCountOffset);
         if (count is < 1 or > MaximumSections) throw new InvalidDataException("Invalid saved catalogue section count.");
@@ -55,34 +57,43 @@ internal static class SavedHostAnchors
             while ((read = compressed.Read(buffer)) != 0)
             {
                 if (output.Length + read > MaximumDecompressedBytes)
+                {
                     throw new InvalidDataException("Saved catalogue decompression limit exceeded.");
+                }
 
                 output.Write(buffer, 0, read);
             }
 
             sections = output.ToArray();
         }
-
         else if (Number(content, MajorVersionOffset) != UncompressedVersion || content[CompressionFlagOffset] != CompressionDisabled)
+        {
             throw new InvalidDataException("Unsupported saved catalogue compression.");
+        }
 
         var offset = 0;
         var found = false;
         for (var i = 0; i < count; i++)
         {
             if (sections.Length - offset < MinimumSectionHeaderBytes || Number(sections, offset) != SectionMagic)
+            {
                 throw new InvalidDataException("Invalid saved catalogue section.");
+            }
 
             var header = Number(sections, offset + HeaderLengthOffset);
             var length = Number(sections, offset + FileLengthOffset);
             if (header < MinimumSectionHeaderBytes || length < header || length > sections.Length - offset)
+            {
                 throw new InvalidDataException("Invalid saved catalogue section size.");
+            }
 
             if (Number(sections, offset + SectionTypeOffset) == AnchorSectionType)
             {
                 if (found || header != AnchorSectionHeaderBytes || length != AnchorSectionBytes
                     || Number(sections, offset + VoiceMemoAnchorOffset) != QualifiedVoiceMemoAnchor)
+                {
                     throw new InvalidDataException("Unsupported saved VoiceMemo anchor; refusing to overwrite non-Media state.");
+                }
 
                 found = true;
             }

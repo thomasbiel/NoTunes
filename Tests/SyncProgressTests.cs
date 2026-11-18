@@ -16,17 +16,11 @@ public sealed class SyncProgressTests
         using var state = new SyncWorkspace();
         await using var error = new StringWriter();
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
-        var path = SourceTestData.WriteTrack(
+        var path = SourceTestData.WriteSyncTrack(
             source.Root,
             "new.mp3",
-            "Album",
-            "Artist",
-            file =>
-            {
-                file.Tag.Title = "New";
-                file.Tag.Composers = ["Composer"];
-                file.Tag.Genres = ["Genre"];
-            });
+            configure: file => file.Tag.Title = "New");
+
         var oldAudio = await File.ReadAllBytesAsync(path);
         oldAudio[^1] ^= 1;
         device.SetExistingAudio(oldAudio);
@@ -35,6 +29,7 @@ public sealed class SyncProgressTests
             services.GetRequiredService<SourceScanner>(),
             services.GetRequiredService<ISourceFileSystem>(),
             error);
+
         var result = await engine.RunAsync(new SyncOptions
         {
             Folder = source.Root,
@@ -69,8 +64,7 @@ public sealed class SyncProgressTests
         await using var error = new StringWriter();
         if (artworkOnly)
         {
-            SourceTestData.WriteTrack(source.Root, "invalid.mp3",
-                file => file.Tag.Pictures = [FeatureTestData.FrontCover([1, 2, 3, 4])]);
+            SourceTestData.WriteCoveredTrack(source.Root, "invalid.mp3", coverBytes: [1, 2, 3, 4]);
         }
         else
         {
@@ -79,13 +73,14 @@ public sealed class SyncProgressTests
 
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, error).BuildServiceProvider();
         var library = await services.GetRequiredService<SourceScanner>().ScanAsync(source.Root, CancellationToken.None);
-        var catalogue = SyncPlannerTests.Catalogue([]) with { ArtworkAvailable = true };
+        var catalogue = CatalogueTestData.Create([]) with { ArtworkAvailable = true };
         var plan = new SyncPlan(
             "phone",
             catalogue.Anchor,
             library.Tracks,
             [],
             0);
+
         var skipped = new List<SkippedSourceFile>();
         var prepared = await SourcePreparation.PrepareAsync(
             library,
@@ -94,9 +89,7 @@ public sealed class SyncProgressTests
             services.GetRequiredService<ISourceFileSystem>(),
             workspace,
             CancellationToken.None,
-            artworkOnly: artworkOnly,
-            onSkipped: skipped.Add,
-            error: error);
+            new SourcePreparationOptions { ArtworkOnly = artworkOnly, OnSkipped = skipped.Add, Error = error });
 
         Assert.That(prepared, Is.Empty);
         Assert.That(skipped, Has.Count.EqualTo(1));

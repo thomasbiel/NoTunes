@@ -76,6 +76,7 @@ internal sealed record TrackMetadata
         // The receiver can retain the supplied milliseconds or derive them from rounded audio samples.
         var milliseconds = Math.Floor((long)audio[MediaKeys.Duration]
             * (double)TimeSpan.MillisecondsPerSecond / (double)audio[MediaKeys.SampleRate]);
+
         var suppliedMilliseconds = Number(item, MediaKeys.TotalMilliseconds);
         var sameMilliseconds = this.TotalMilliseconds == milliseconds
             || this.TotalMilliseconds == suppliedMilliseconds

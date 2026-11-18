@@ -33,6 +33,7 @@ internal sealed class SyncJournal : IDisposable
             FileMode.OpenOrCreate,
             FileAccess.ReadWrite,
             FileShare.None);
+
         if (this.HasPending && !allowPending)
         {
             this.lease.Dispose();
@@ -49,7 +50,9 @@ internal sealed class SyncJournal : IDisposable
         if (state is null || state.Version != RecoverableFormatVersion || state.Before is null || state.Identity is null
             || state.Operation is null || state.Operation.Length is < 1 or > SyncProtocol.MaxOperationBytes
             || state.Signature is null || state.Additions is null || state.Deletions is null)
+        {
             throw new IOException("This journal cannot be recovered automatically; retain it for manual reconciliation.");
+        }
 
         return state;
     }
@@ -78,6 +81,7 @@ internal sealed class SyncJournal : IDisposable
             [.. batch.Deletions],
             batch.Operation,
             signature);
+
         var directory = this.Assets(state);
         try
         {
@@ -119,7 +123,10 @@ internal sealed class SyncJournal : IDisposable
 
             await using var copy = File.OpenRead(path);
             if (copy.Length != track.Source.Size || Convert.ToHexString(await SHA256.HashDataAsync(copy, cancellationToken))
-                != track.Source.Sha256) throw new IOException("Durable recovery audio failed verification.");
+                != track.Source.Sha256)
+            {
+                throw new IOException("Durable recovery audio failed verification.");
+            }
 
             if (track.Metadata.Artwork is { } artwork)
             {
@@ -128,6 +135,7 @@ internal sealed class SyncJournal : IDisposable
                     FileMode.CreateNew,
                     FileAccess.Write,
                     FileShare.None);
+
                 cover.Write(artwork.Bytes);
                 cover.Flush(flushToDisk: true);
             }
@@ -136,15 +144,18 @@ internal sealed class SyncJournal : IDisposable
 
     public void ResolveUnapplied()
     {
-        var state = this.ReadPending();
-        File.Move(this.pending, Path.Combine(this.DirectoryPath, UnappliedPrefix + Guid.NewGuid().ToString("N") + JournalExtension));
-        this.CleanAssets(state);
+        this.ArchivePending(UnappliedPrefix);
     }
 
     public void ResolveObserved()
     {
+        this.ArchivePending(ReconciledPrefix);
+    }
+
+    private void ArchivePending(string prefix)
+    {
         var state = this.ReadPending();
-        File.Move(this.pending, Path.Combine(this.DirectoryPath, ReconciledPrefix + Guid.NewGuid().ToString("N") + JournalExtension));
+        File.Move(this.pending, Path.Combine(this.DirectoryPath, prefix + Guid.NewGuid().ToString("N") + JournalExtension));
         this.CleanAssets(state);
     }
 
@@ -155,6 +166,7 @@ internal sealed class SyncJournal : IDisposable
             FileMode.CreateNew,
             FileAccess.Write,
             FileShare.None);
+
         JsonSerializer.Serialize(file, new
         {
             Version = FormatVersion,
@@ -164,6 +176,7 @@ internal sealed class SyncJournal : IDisposable
             Operation = operation,
             Signature = signature
         });
+
         file.Flush(flushToDisk: true);
     }
 

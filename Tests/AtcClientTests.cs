@@ -16,6 +16,7 @@ public sealed class AtcClientTests
             MusicMetrics(Plist.Dict(("_Count", 42L), ("_PhysicalSize", 2048L))),
             Plist.Dict(("Command", "UnrelatedStartupMessage")),
             Permissions());
+
         await using var client = new AtcClient(peer, RequestTimeout);
         var status = await client.ReadSyncStatusAsync(CancellationToken.None);
         Assert.That(status.SyncAllowed, Is.True);
@@ -51,6 +52,7 @@ public sealed class AtcClientTests
             MusicMetrics(Plist.Dict(("_Count", 43L))),
             MusicMetrics(Plist.Dict(("_Count", "unavailable"), ("_PhysicalSize", 2000L))),
             Permissions());
+
         await using var client = new AtcClient(peer, RequestTimeout);
         var status = await client.ReadSyncStatusAsync(CancellationToken.None);
         Assert.That(status.MusicTrackCount, Is.EqualTo(43));
@@ -66,6 +68,7 @@ public sealed class AtcClientTests
             Plist.Dict(("Command", "AssetMetrics"), ("Params", Plist.Dict(("Media", Plist.Dict())))),
             MusicMetrics(Plist.Dict(("_Count", "unknown"), ("_PhysicalSize", true))),
             Permissions());
+
         await using var client = new AtcClient(peer, RequestTimeout);
         var status = await client.ReadSyncStatusAsync(CancellationToken.None);
         Assert.That(status.MusicTrackCount, Is.Null);
@@ -133,6 +136,7 @@ public sealed class AtcClientTests
         {
             StallAtEnd = true
         };
+
         await using var client = new AtcClient(peer, TimeSpan.FromMilliseconds(100));
         await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(CancellationToken.None), Throws.TypeOf<IOException>().With.Message.Contains("Timed out"));
         Assert.That(peer.WasDisposed, Is.True);
@@ -147,6 +151,7 @@ public sealed class AtcClientTests
             StallAtEnd = true,
             BeforeRead = cancellation.Cancel
         };
+
         await using var client = new AtcClient(peer, RequestTimeout);
         await Assert.ThatAsync(async () => await client.ReadSyncStatusAsync(cancellation.Token), Throws.InstanceOf<OperationCanceledException>());
         Assert.That(cancellation.IsCancellationRequested, Is.True);

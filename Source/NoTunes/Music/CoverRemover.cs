@@ -33,6 +33,23 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
         var covers = CountPictures(tags.Tag);
         if (covers == 0) return new CoverRemovalResult(file.FullName, 0);
 
+        await RemovePicturesAsync(
+            stream,
+            tags,
+            file.FullName,
+            modified,
+            cancellationToken);
+
+        return new CoverRemovalResult(file.FullName, covers);
+    }
+
+    private static async Task RemovePicturesAsync(
+        FileStream stream,
+        TagLib.File tags,
+        string path,
+        DateTime modified,
+        CancellationToken cancellationToken)
+    {
         var audioStart = tags.InvariantStartPosition;
         var audioEnd = tags.InvariantEndPosition;
         var originalLength = stream.Length;
@@ -49,13 +66,12 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
         var edited = false;
         try
         {
-            stream.Position = 0;
-            await stream.CopyToAsync(backup, cancellationToken);
-            backup.Flush(flushToDisk: true);
-            if (backup.Length != originalLength || stream.Length != originalLength || File.GetLastWriteTimeUtc(stream.SafeFileHandle) != modified)
-            {
-                throw new IOException("The source changed while its cover-removal backup was created.");
-            }
+            await CreateBackupAsync(
+                stream,
+                backup,
+                originalLength,
+                modified,
+                cancellationToken);
 
             var audioHash = await HashAudioAsync(
                 backup,
@@ -72,26 +88,17 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
             stream.Flush(flushToDisk: true);
             cancellationToken.ThrowIfCancellationRequested();
 
-            using var verified = TagLib.File.Create(new SourceTagFile(stream, file.FullName), TagLib.ReadStyle.Average);
-            if (CountPictures(verified.Tag) != 0) throw new IOException("Embedded covers remain after saving the MP3.");
-
-            var verifiedHash = await HashAudioAsync(
+            await VerifySavedAudioAsync(
                 stream,
-                verified.InvariantStartPosition,
-                verified.InvariantEndPosition,
+                path,
+                (audioEnd - audioStart, audioHash),
                 cancellationToken);
-
-            if (verified.InvariantEndPosition - verified.InvariantStartPosition != audioEnd - audioStart || !StringComparer.Ordinal.Equals(verifiedHash, audioHash))
-            {
-                throw new IOException("The MP3 audio changed while removing its embedded covers.");
-            }
 
             cancellationToken.ThrowIfCancellationRequested();
 
             var updated = DateTime.UtcNow;
             File.SetLastWriteTimeUtc(stream.SafeFileHandle, updated == modified ? updated.AddTicks(1) : updated);
             stream.Flush(flushToDisk: true);
-            return new CoverRemovalResult(file.FullName, covers);
         }
         catch (Exception failure)
         {
@@ -99,12 +106,7 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
             {
                 try
                 {
-                    backup.Position = 0;
-                    stream.Position = 0;
-                    await backup.CopyToAsync(stream, CancellationToken.None);
-                    stream.SetLength(backup.Length);
-                    File.SetLastWriteTimeUtc(stream.SafeFileHandle, modified);
-                    stream.Flush(flushToDisk: true);
+                    await RestoreBackupAsync(stream, backup, modified);
                 }
                 catch (Exception restoreFailure)
                 {
@@ -123,6 +125,57 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
         }
     }
 
+    private static async Task CreateBackupAsync(
+        FileStream stream,
+        FileStream backup,
+        long length,
+        DateTime modified,
+        CancellationToken cancellationToken)
+    {
+        stream.Position = 0;
+        await stream.CopyToAsync(backup, cancellationToken);
+        backup.Flush(flushToDisk: true);
+        if (backup.Length != length || stream.Length != length
+            || File.GetLastWriteTimeUtc(stream.SafeFileHandle) != modified)
+        {
+            throw new IOException("The source changed while its cover-removal backup was created.");
+        }
+
+    }
+
+    private static async Task VerifySavedAudioAsync(
+        FileStream stream,
+        string path,
+        (long Length, string Hash) audio,
+        CancellationToken cancellationToken)
+    {
+        using var verified = TagLib.File.Create(new SourceTagFile(stream, path), TagLib.ReadStyle.Average);
+        if (CountPictures(verified.Tag) != 0) throw new IOException("Embedded covers remain after saving the MP3.");
+
+        var verifiedHash = await HashAudioAsync(
+            stream,
+            verified.InvariantStartPosition,
+            verified.InvariantEndPosition,
+            cancellationToken);
+
+        if (verified.InvariantEndPosition - verified.InvariantStartPosition != audio.Length
+            || !StringComparer.Ordinal.Equals(verifiedHash, audio.Hash))
+        {
+            throw new IOException("The MP3 audio changed while removing its embedded covers.");
+        }
+
+    }
+
+    private static async Task RestoreBackupAsync(FileStream stream, FileStream backup, DateTime modified)
+    {
+        backup.Position = 0;
+        stream.Position = 0;
+        await backup.CopyToAsync(stream, CancellationToken.None);
+        stream.SetLength(backup.Length);
+        File.SetLastWriteTimeUtc(stream.SafeFileHandle, modified);
+        stream.Flush(flushToDisk: true);
+    }
+
     private static int CountPictures(TagLib.Tag tag)
     {
         return tag is TagLib.CombinedTag combined ? combined.Tags.Sum(CountPictures) : tag.Pictures.Length;
@@ -134,7 +187,10 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
         long end,
         CancellationToken cancellationToken)
     {
-        if (start < 0 || end <= start || end > stream.Length) throw new InvalidDataException("The MP3 audio boundaries could not be verified.");
+        if (start < 0 || end <= start || end > stream.Length)
+        {
+            throw new InvalidDataException("The MP3 audio boundaries could not be verified.");
+        }
 
         stream.Position = start;
         var remaining = end - start;
@@ -144,7 +200,9 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
         {
             while (remaining != 0)
             {
-                var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(remaining, buffer.Length)), cancellationToken);
+                var read = await stream.ReadAsync(
+                    buffer.AsMemory(0, (int)Math.Min(remaining, buffer.Length)), cancellationToken);
+
                 if (read == 0) throw new EndOfStreamException("The MP3 audio ended before its verified boundary.");
 
                 hash.AppendData(buffer, 0, read);

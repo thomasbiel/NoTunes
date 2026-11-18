@@ -162,6 +162,7 @@ internal sealed class BinaryPlistReader(byte[] data)
         {
             var key = this.Object(this.Reference(position + i * this.refWidth), depth + 1) as string
                 ?? throw new InvalidDataException("Property list key is not a string.");
+
             var value = this.Object(this.Reference(position + (entries + i) * this.refWidth), depth + 1);
             if (!dictionary.TryAdd(key, value)) throw new InvalidDataException("Duplicate property list key.");
         }
@@ -184,6 +185,7 @@ internal sealed class BinaryPlistReader(byte[] data)
     private void ReserveDecodedBytes(long bytes)
     {
         if (bytes > MaxDecodedBytes - this.decodedBytes) throw new InvalidDataException("Decoded binary property list is too large.");
+
         this.decodedBytes += bytes;
     }
 

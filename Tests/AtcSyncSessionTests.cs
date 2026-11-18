@@ -57,7 +57,7 @@ public sealed class AtcSyncSessionTests
         using var cancellation = new CancellationTokenSource();
         var track = SyncTestData.Track();
         var peer = CreatePeer(track);
-        
+
         var files = new AfcPeer
         {
             AllowWrites = true,
@@ -67,11 +67,11 @@ public sealed class AtcSyncSessionTests
                 await Task.Delay(Timeout.Infinite, token);
             }
         };
-        
+
         await using var sync = new AtcSyncTestSession(peer, files);
         await sync.StartAsync();
         var exception = await Assert.CatchAsync<OperationCanceledException>(() => sync.TransferAsync([track], cancellation.Token));
-        
+
         Assert.That(exception!.CancellationToken, Is.EqualTo(cancellation.Token));
         Assert.That(peer.WasDisposed, Is.True);
         Assert.That(files.WasDisposed, Is.True);
@@ -84,13 +84,10 @@ public sealed class AtcSyncSessionTests
         var peer = new AtcPeer(SyncTestData.SessionMessages(
             AudioManifestMessage(track.AssetId),
             SyncTestData.Message(AtcCommands.SyncFinished)));
-        
+
         var files = new AfcPeer { AllowWrites = true };
         await using var sync = new AtcSyncTestSession(peer, files);
-        await sync.StartAsync();
-        var exception = await Assert.ThrowsAsync<IOException>(() => sync.TransferAsync([track]));
-        
-        Assert.That(exception!.Message, Does.Contain("before every requested asset"));
+        await AssertTransferFailureAsync(sync, track, "before every requested asset");
         Assert.That(files.WritePackets.Count, Is.Zero);
     }
 
@@ -115,7 +112,7 @@ public sealed class AtcSyncSessionTests
                 if (message.Text(AtcKeys.Command) == AtcCommands.Pong) pongSent = true;
             }
         };
-        
+
         var files = new AfcPeer
         {
             AllowWrites = true,
@@ -125,11 +122,11 @@ public sealed class AtcSyncSessionTests
                 await Task.Delay(Timeout.Infinite, token);
             }
         };
-        
+
         await using var sync = new AtcSyncTestSession(peer, files);
         await sync.StartAsync();
         var exception = await Assert.ThrowsAsync<IOException>(() => sync.TransferAsync([track]));
-        
+
         Assert.That(exception!.Message, Does.Contain(command == AtcCommands.SyncFailed ? command : "revoked"));
         Assert.That(pongSent, Is.True);
         Assert.That(files.WritePackets.Count, Is.EqualTo(1));
@@ -149,16 +146,16 @@ public sealed class AtcSyncSessionTests
             AllowWrites = true,
             BeforeFileWriteReplyAsync = token => Task.Delay(TimeSpan.FromMilliseconds(300), token)
         };
-        
+
         await using var sync = new AtcSyncTestSession(
             peer,
             files,
             atcTimeout: TimeSpan.FromMilliseconds(100),
             afcTimeout: TimeSpan.FromSeconds(3));
-        
+
         await sync.StartAsync();
         await sync.TransferAsync([track]);
-        
+
         Assert.That(completed.IsCompletedSuccessfully, Is.True);
     }
 
@@ -167,12 +164,9 @@ public sealed class AtcSyncSessionTests
     {
         var track = SyncTestData.Track();
         var peer = CreatePeer(track);
-        
+
         await using var sync = new AtcSyncTestSession(peer, atcTimeout: TimeSpan.FromMilliseconds(100));
-        await sync.StartAsync();
-        var exception = await Assert.ThrowsAsync<IOException>(() => sync.TransferAsync([track]));
-        
-        Assert.That(exception!.Message, Does.Contain("Timed out"));
+        await AssertTransferFailureAsync(sync, track, "Timed out");
         Assert.That(peer.WasDisposed, Is.True);
     }
 
@@ -186,12 +180,12 @@ public sealed class AtcSyncSessionTests
         var peer = new AtcPeer(SyncTestData.SessionMessages(
             AudioManifestMessage(first.AssetId, second.AssetId),
             SyncTestData.Message(command)));
-        
+
         var files = new AfcPeer { AllowWrites = true };
         await using var sync = new AtcSyncTestSession(peer, files);
         await sync.StartAsync();
         await Assert.ThrowsAsync<IOException>(() => sync.TransferAsync([first, second]));
-        
+
         Assert.That(files.WritePackets.Count, Is.Zero);
         Assert.That(
             peer.SentMessages().Any(message => message.Text(AtcKeys.Command) == AtcCommands.FileComplete),
@@ -207,15 +201,15 @@ public sealed class AtcSyncSessionTests
             out _,
             SyncTestData.Message(AtcCommands.SyncFinished, session: 1),
             SyncTestData.Message(AtcCommands.Ping));
-        
+
         var files = new AfcPeer { AllowWrites = true };
         await using var sync = new AtcSyncTestSession(peer, files);
         await sync.StartAsync();
         await sync.TransferAsync([track]);
-        
+
         Assert.That(files.Files[SyncPaths.Airlock + track.AssetId], Is.EqualTo(await File.ReadAllBytesAsync(track.LocalPath)));
         Assert.That(files.OpenHandles, Is.Zero);
-        
+
         var messages = peer.SentMessages();
         Assert.That(messages.Select(message => message.Text(AtcKeys.Command)), Does.Contain(AtcCommands.Pong));
         var fileComplete = messages.Single(message => message.Text(AtcKeys.Command) == AtcCommands.FileComplete);
@@ -245,7 +239,7 @@ public sealed class AtcSyncSessionTests
         ready.Dictionary(AtcKeys.Parameters).Dictionary(AtcKeys.Anchors)[AtcKeys.VoiceMemo] = anchor;
         var peer = new AtcPeer(SyncTestData.Capabilities(), SyncTestData.Allowed(), ready);
         await using var sync = new AtcSyncTestSession(peer);
-        
+
         var exception = await Assert.ThrowsAsync<IOException>(sync.BeginAsync);
         Assert.That(exception!.Message, Does.Contain("VoiceMemo"));
         Assert.That(
@@ -275,11 +269,11 @@ public sealed class AtcSyncSessionTests
     {
         var track = SyncTestData.Track();
         var peer = CreatePeer(track);
-        
+
         await using var sync = new AtcSyncTestSession(peer, new AfcPeer { AllowWrites = true, CorruptWrite = true });
         await sync.StartAsync();
         await Assert.ThrowsAsync<IOException>(() => sync.TransferAsync([track]));
-        
+
         Assert.That(
             peer.SentMessages().Any(message => message.Text(AtcKeys.Command) == AtcCommands.FileComplete),
             Is.False);
@@ -291,7 +285,7 @@ public sealed class AtcSyncSessionTests
         var peer = new AtcPeer(SyncTestData.SessionMessages(
             SyncTestData.Message(AtcCommands.Progress),
             SyncTestData.Message(AtcCommands.SyncFinished)));
-        
+
         await using var sync = new AtcSyncTestSession(peer, new AfcPeer());
         await sync.StartAsync();
         await sync.TransferAsync([]);
@@ -303,13 +297,23 @@ public sealed class AtcSyncSessionTests
         var track = SyncTestData.Track();
         var peer = new AtcPeer(SyncTestData.SessionMessages(
             AudioManifestMessage(track.AssetId, "999999")));
-        
+
         var files = new AfcPeer { AllowWrites = true };
         await using var sync = new AtcSyncTestSession(peer, files);
         await sync.StartAsync();
         await Assert.ThrowsAsync<InvalidDataException>(() => sync.TransferAsync([track]));
-        
+
         Assert.That(files.Opens, Is.Zero);
+    }
+
+    private static async Task AssertTransferFailureAsync(
+        AtcSyncTestSession sync,
+        PreparedTrack track,
+        string expectedMessage)
+    {
+        await sync.StartAsync();
+        var exception = await Assert.ThrowsAsync<IOException>(() => sync.TransferAsync([track]));
+        Assert.That(exception!.Message, Does.Contain(expectedMessage));
     }
 
     private static AtcPeer CreatePeer(PreparedTrack track)

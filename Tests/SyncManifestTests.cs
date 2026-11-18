@@ -12,6 +12,7 @@ public sealed class SyncManifestTests
         var track = SyncTestData.Track();
         var result = SyncManifest.Validate(SyncTestData.Manifest(
             SyncTestData.Asset(track.AssetId), SyncTestData.Asset("101", SyncProtocol.ArtworkPart)), [track], new HashSet<long> { 101 });
+
         Assert.That(result[0].Track, Is.SameAs(track));
         Assert.That(result[1].Track, Is.Null);
     }

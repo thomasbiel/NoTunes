@@ -28,7 +28,7 @@ public sealed class WindowsUsbMuxTransport : IUsbMuxTransport
         catch (SocketException e)
         {
             socket.Dispose();
-            throw new IOException($"Cannot connect to Apple Mobile Device Service ({this.endpoint}). " 
+            throw new IOException($"Cannot connect to Apple Mobile Device Service ({this.endpoint}). "
                                   + "Install Apple device support, start its service and reconnect the unlocked iPhone over USB.", e);
         }
         catch

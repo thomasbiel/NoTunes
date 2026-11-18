@@ -6,6 +6,56 @@ namespace NoTunes.Tests;
 
 internal static class SourceTestData
 {
+    public static string WriteSyncTracks(
+        string root,
+        int count,
+        bool artwork = false,
+        Action<TagLib.File>? configure = null)
+    {
+        var path = WriteSyncTrack(
+            root,
+            "0000.mp3",
+            artwork,
+            configure);
+
+        for (var index = 1; index < count; index++)
+        {
+            File.Copy(path, Path.Combine(root, $"{index:0000}.mp3"));
+        }
+
+        return path;
+    }
+
+    public static string WriteSyncTrack(
+        string root,
+        string name,
+        bool artwork = false,
+        Action<TagLib.File>? configure = null)
+    {
+        return WriteTrack(
+            root,
+            name,
+            "Album",
+            "Artist",
+            file =>
+            {
+                file.Tag.Composers = ["Composer"];
+                file.Tag.Genres = ["Genre"];
+                if (artwork)
+                {
+                    file.Tag.Pictures = [FeatureTestData.FrontCover()];
+                }
+
+                configure?.Invoke(file);
+            });
+
+    }
+
+    public static string WriteCoveredTrack(string root, string name = "covered.mp3", byte[]? coverBytes = null)
+    {
+        return WriteTrack(root, name, file => file.Tag.Pictures = [FeatureTestData.FrontCover(coverBytes)]);
+    }
+
     public static string WriteTrack(
         string root,
         string name,
@@ -105,8 +155,6 @@ internal static class SourceTestData
             fileSystem,
             output,
             CancellationToken.None,
-            artworkOnly,
-            prompt: prompt,
-            onSkipped: onSkipped);
+            new SourcePreparationOptions { ArtworkOnly = artworkOnly, Prompt = prompt, OnSkipped = onSkipped });
     }
 }

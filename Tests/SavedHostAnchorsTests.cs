@@ -13,11 +13,8 @@ public sealed class SavedHostAnchorsTests
     private const int SectionHeaderBytes = 96;
     private const long DatabaseId = 1001;
 
-    [TestCase(115, false)]
-    [TestCase(115, true)]
-    [TestCase(117, false)]
-    [TestCase(117, true)]
-    public void Reads_Qualified_Legacy_And_Current_Layouts(int version, bool compressed)
+    [Test]
+    public void Reads_Qualified_Legacy_And_Current_Layouts([Values(115, 117)] int version, [Values] bool compressed)
     {
         Assert.DoesNotThrow(() => SavedHostAnchors.Validate(Catalogue(version, compressed), DatabaseId));
     }

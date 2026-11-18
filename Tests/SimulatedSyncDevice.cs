@@ -66,6 +66,7 @@ internal sealed class SimulatedSyncDevice : IDisposable
                     (UsbMuxKeys.SerialNumber, Udid),
                     (UsbMuxKeys.ProductId, ProductId))))
         }));
+
         return new ReplyUsbMuxTransport(new ScriptedStream(ProtocolFrames.UsbMux(1, reply)));
     }
 
@@ -77,10 +78,12 @@ internal sealed class SimulatedSyncDevice : IDisposable
     {
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
             .BuildServiceProvider();
+
         var engine = this.CreateEngine(
             services.GetRequiredService<SourceScanner>(),
             services.GetRequiredService<ISourceFileSystem>(),
             TextWriter.Null);
+
         var options = new SyncOptions
         {
             Folder = source,
@@ -88,6 +91,7 @@ internal sealed class SimulatedSyncDevice : IDisposable
             Timeout = RequestTimeoutSeconds,
             DryRun = dryRun
         };
+
         return await engine.RunAsync(options, cancellationToken);
     }
 
@@ -135,67 +139,15 @@ internal sealed class SimulatedSyncDevice : IDisposable
                         this.StartedSessions++;
                         break;
                     case AtcCommands.FinishedMetadata:
-                        var document = Plist.Parse(this.Files[SyncPaths.Metadata]).AsDict();
-                        using (var signer = new GrappaSigner(GrappaSignerTests.Reply()))
-                        {
-                            Assert.That(this.Files[SyncPaths.Metadata + SyncPaths.SignatureSuffix],
-                                Is.EqualTo(signer.Sign(this.Files[SyncPaths.Metadata])));
-                        }
-
-                        var changes = ((object[])document[MediaKeys.Operations]).Select(value => value.AsDict())
-                            .Where(operation => operation.Text(MediaKeys.Operation) != MediaOperations.UpdateDatabase)
-                            .ToArray();
-                        this.Batches.Add(changes);
-                        foreach (var operation in changes)
-                        {
-                            var id = operation.Number(MediaKeys.PersistentId);
-                            if (operation.Text(MediaKeys.Operation) == MediaOperations.DeleteTrack)
-                            {
-                                if (this.audioPaths.Remove(id, out var path)) this.Files.Remove(path);
-                            }
-                            else
-                            {
-                                assets.Add(id.ToString(CultureInfo.InvariantCulture), operation);
-                            }
-                        }
-
-                        this.catalogue.Apply(document);
-                        this.RefreshCatalogue();
-                        this.Interrupt(SyncInterruptionPoint.AfterMetadata);
-                        if (assets.Count == 0)
-                        {
-                            this.ClearMetadata();
-                            peer!.Enqueue(SyncTestData.Message(AtcCommands.SyncFinished));
-                        }
-                        else
-                        {
-                            var entries = assets.Select(pair => SyncTestData.Asset(pair.Key, AssetParts(pair.Value)))
-                                .Cast<object>().ToArray();
-                            peer!.Enqueue(
-                                SyncTestData.Message(AtcCommands.AssetManifest, SyncTestData.Manifest(entries)),
-                                SyncTestData.Message(AtcCommands.SyncFinished));
-                            terminalFrame = peer.ResponsesRead + 1;
-                        }
-
+                        terminalFrame = this.FinishMetadata(peer!, assets);
                         break;
                     case AtcCommands.FileComplete:
-                        var parameters = message.Dictionary(AtcKeys.Parameters);
-                        var assetId = parameters.Text(AtcKeys.AssetId);
-                        var asset = assets[assetId];
-                        this.CompleteAsset(assetId, asset, parameters.Text(AtcKeys.AssetPath));
-                        assets.Remove(assetId);
-                        this.RefreshCatalogue();
-                        if (assets.Count == 0)
-                        {
-                            this.ClearMetadata();
-                            this.Interrupt(SyncInterruptionPoint.AfterAssets);
-                            assetsFinished.TrySetResult();
-                        }
-
+                        this.FinishAsset(message, assets, assetsFinished);
                         break;
                 }
             }
         };
+
         var files = new AfcPeer
         {
             AllowWrites = true,
@@ -203,6 +155,7 @@ internal sealed class SimulatedSyncDevice : IDisposable
             Directories = this.directories,
             ReadFragmentBytes = SourceFileDefaults.ReadBufferBytes
         };
+
         this.ConfigureFileConnection?.Invoke(files);
         var connection = new SimulatedSyncConnection(files, peer, timeout);
         this.Connections.Add(connection);
@@ -231,7 +184,83 @@ internal sealed class SimulatedSyncDevice : IDisposable
             syncId,
             name,
             sortName);
+
         this.RefreshCatalogue();
+    }
+
+    private int FinishMetadata(AtcPeer peer, Dictionary<string, Dictionary<string, object>> assets)
+    {
+        this.ApplyMetadata(assets);
+        if (assets.Count == 0)
+        {
+            this.ClearMetadata();
+            peer.Enqueue(SyncTestData.Message(AtcCommands.SyncFinished));
+        }
+        else
+        {
+            var entries = assets.Select(pair => SyncTestData.Asset(pair.Key, AssetParts(pair.Value)))
+                .Cast<object>().ToArray();
+
+            peer.Enqueue(
+                SyncTestData.Message(AtcCommands.AssetManifest, SyncTestData.Manifest(entries)),
+                SyncTestData.Message(AtcCommands.SyncFinished));
+
+            return peer.ResponsesRead + 1;
+        }
+
+        return int.MaxValue;
+    }
+
+    private void ApplyMetadata(Dictionary<string, Dictionary<string, object>> assets)
+    {
+        var document = Plist.Parse(this.Files[SyncPaths.Metadata]).AsDict();
+        using (var signer = new GrappaSigner(GrappaTestData.Reply()))
+        {
+            Assert.That(this.Files[SyncPaths.Metadata + SyncPaths.SignatureSuffix],
+                Is.EqualTo(signer.Sign(this.Files[SyncPaths.Metadata])));
+        }
+
+        var changes = ((object[])document[MediaKeys.Operations]).Select(value => value.AsDict())
+            .Where(operation => operation.Text(MediaKeys.Operation) != MediaOperations.UpdateDatabase)
+            .ToArray();
+
+        this.Batches.Add(changes);
+        foreach (var operation in changes)
+        {
+            var id = operation.Number(MediaKeys.PersistentId);
+            if (operation.Text(MediaKeys.Operation) == MediaOperations.DeleteTrack)
+            {
+                if (this.audioPaths.Remove(id, out var path)) this.Files.Remove(path);
+            }
+            else
+            {
+                assets.Add(id.ToString(CultureInfo.InvariantCulture), operation);
+            }
+        }
+
+        this.catalogue.Apply(document);
+        this.RefreshCatalogue();
+        this.Interrupt(SyncInterruptionPoint.AfterMetadata);
+    }
+
+    private void FinishAsset(
+        Dictionary<string, object> message,
+        Dictionary<string, Dictionary<string, object>> assets,
+        TaskCompletionSource assetsFinished)
+    {
+        var parameters = message.Dictionary(AtcKeys.Parameters);
+        var assetId = parameters.Text(AtcKeys.AssetId);
+        var asset = assets[assetId];
+        this.CompleteAsset(assetId, asset, parameters.Text(AtcKeys.AssetPath));
+        assets.Remove(assetId);
+        this.RefreshCatalogue();
+        if (assets.Count == 0)
+        {
+            this.ClearMetadata();
+            this.Interrupt(SyncInterruptionPoint.AfterAssets);
+            assetsFinished.TrySetResult();
+        }
+
     }
 
     private void CompleteAsset(string assetId, Dictionary<string, object> operation, string path)
@@ -267,6 +296,7 @@ internal sealed class SimulatedSyncDevice : IDisposable
         var audio = operation.Text(MediaKeys.Operation) == MediaOperations.InsertTrack ? SyncProtocol.AudioPart : 0;
         var artwork = operation.Dictionary(MediaKeys.Item).ContainsKey(MediaKeys.ArtworkCacheId)
             ? SyncProtocol.ArtworkPart : 0;
+
         return audio | artwork;
     }
 

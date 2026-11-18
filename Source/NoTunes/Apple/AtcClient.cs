@@ -36,7 +36,7 @@ public sealed class AtcClient : IAsyncDisposable
         await this.Connection.SendAsync(
             Plist.Dict((AtcKeys.Command, AtcCommands.Ping), (AtcKeys.Session, ProbeSession)),
             cancellationToken);
-        
+
         long? count = null;
         long? bytes = null;
         // Bound unsolicited startup frames rather than waiting indefinitely for a particular message.
@@ -44,8 +44,8 @@ public sealed class AtcClient : IAsyncDisposable
         {
             var message = await this.Connection.ReceiveAsync(cancellationToken);
             var command = message.Text(AtcKeys.Command);
-            if (command == AtcCommands.Capabilities && 
-                message.TryGetValue(AtcKeys.Parameters, out var capabilities) && 
+            if (command == AtcCommands.Capabilities &&
+                message.TryGetValue(AtcKeys.Parameters, out var capabilities) &&
                 capabilities.AsDict().TryGetValue(AtcKeys.Capabilities, out var grappa))
             {
                 var values = grappa.AsDict();
@@ -58,7 +58,7 @@ public sealed class AtcClient : IAsyncDisposable
                 await this.Connection.SendAsync(
                     Plist.Dict((AtcKeys.Command, AtcCommands.Pong), (AtcKeys.Session, message.Number(AtcKeys.Session))),
                     cancellationToken);
-                
+
                 continue;
             }
 
@@ -141,7 +141,7 @@ public sealed class AtcClient : IAsyncDisposable
             while (await timer.WaitForNextTickAsync(stop.Token))
             {
                 await this.Connection.SendAsync(
-                    Plist.Dict((AtcKeys.Command, AtcCommands.Ping), (AtcKeys.Session, SyncProtocol.Session)), 
+                    Plist.Dict((AtcKeys.Command, AtcCommands.Ping), (AtcKeys.Session, SyncProtocol.Session)),
                     stop.Token);
             }
         }

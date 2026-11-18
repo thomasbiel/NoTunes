@@ -71,6 +71,7 @@ public sealed class LinuxUsbMuxTests
                     "ReadBUID" => Plist.Dict(("BUID", "test-buid")),
                     _ => Plist.Dict(("Number", 0L))
                 };
+
                 await stream.WriteAsync(ProtocolFrames.UsbMux(BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(12)), reply), deadline.Token);
                 if (operation != "Connect")
                     continue;

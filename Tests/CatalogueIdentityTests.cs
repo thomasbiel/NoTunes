@@ -1,4 +1,3 @@
-using NoTunes.Music;
 using NUnit.Framework;
 
 namespace NoTunes.Tests;
@@ -11,8 +10,7 @@ public sealed class CatalogueIdentityTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute("UPDATE container SET container_pid=2002 WHERE sync_id=1002;");
-        var exception = await Assert.ThrowsAsync<IOException>(() => CatalogueReader.ReadAsync(
-            fixture.Snapshot(), CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<IOException>(() => fixture.ReadAsync());
         Assert.That(exception!.Message, Does.Contain("primary container is missing"));
     }
 
@@ -22,7 +20,7 @@ public sealed class CatalogueIdentityTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute($"UPDATE container SET sync_id={syncId} WHERE container_pid=1002;");
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         Assert.That(catalogue.ContainerId, Is.EqualTo(1002));
         Assert.That(catalogue.OccupiedIds.Contains(0), Is.False);
         if (syncId != 0)
@@ -40,8 +38,7 @@ public sealed class CatalogueIdentityTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(mutation);
-        await Assert.ThrowsAsync<InvalidDataException>(() => CatalogueReader.ReadAsync(
-            fixture.Snapshot(), CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ReadAsync());
     }
 
     [TestCase("INSERT INTO album VALUES(13,1012,'Other album',11,'Other sort');")]
@@ -52,7 +49,7 @@ public sealed class CatalogueIdentityTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(mutation);
-        var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var catalogue = await fixture.ReadAsync();
         var album = mutation.Contains("INSERT INTO album VALUES", StringComparison.Ordinal);
         var groups = album ? catalogue.Albums : catalogue.Artists;
         Assert.That(groups.Values, Is.All.Zero);
@@ -64,10 +61,10 @@ public sealed class CatalogueIdentityTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute("UPDATE item_store SET sync_id=0 WHERE item_pid IN (3,4,5);");
-        var result = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        var result = await fixture.ReadAsync();
         Assert.That(result.ProtectedItems, Has.Count.EqualTo(4));
         fixture.Execute("DELETE FROM item_store WHERE item_pid IN (3,4,5);");
-        result = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+        result = await fixture.ReadAsync();
         Assert.That(result.ProtectedItems, Has.Count.EqualTo(4));
     }
 
@@ -79,7 +76,8 @@ public sealed class CatalogueIdentityTests
             INSERT INTO album_artist VALUES(22,0,'Other artist','Other artist'),(23,0,'Third artist','Third artist');
             INSERT INTO album VALUES(24,0,'Other album',22,'Other album'),(25,0,'Third album',23,'Third album');
             """);
-        var result = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
+
+        var result = await fixture.ReadAsync();
         Assert.That(result.Artists.Values, Is.EqualTo(new long[] { 1011 }));
         Assert.That(result.Albums.Values, Is.EqualTo(new long[] { 1012 }));
     }
