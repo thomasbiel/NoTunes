@@ -105,6 +105,7 @@ public sealed class CliProcessTests
     [TestCase("devices")]
     [TestCase("probe")]
     [TestCase("init")]
+    [TestCase("enable-wifi")]
     public async Task Rejects_Positional_Arguments_For_Device_Commands(string command)
     {
         var result = await RunAsync(
@@ -114,6 +115,14 @@ public sealed class CliProcessTests
             "0");
 
         AssertArgumentError(result, "unexpected");
+    }
+
+    [TestCase("--wifi")]
+    [TestCase("--address=192.168.1.42")]
+    public async Task Wifi_Setup_Requires_A_Usb_Connection(string option)
+    {
+        var result = await RunAsync("enable-wifi", option, "--json");
+        AssertArgumentError(result, "requires USB");
     }
 
     [TestCase("devices", "0")]
@@ -133,6 +142,7 @@ public sealed class CliProcessTests
     [TestCase("devices")]
     [TestCase("probe")]
     [TestCase("remove-cover")]
+    [TestCase("enable-wifi")]
     public async Task Help_Still_Succeeds(string command)
     {
         var result = await RunAsync(command, "--help");
@@ -164,7 +174,7 @@ public sealed class CliProcessTests
 
     [Test]
     public async Task Rejects_Options_Without_A_Value_Before_Scanning(
-        [Values("--timeout", "--device", "--state-folder", "--timeout=", "--device=", "--state-folder=")] string option,
+        [Values("--timeout", "--device", "--state-folder", "--address", "--timeout=", "--device=", "--state-folder=", "--address=")] string option,
         [Values] bool beforeJson)
     {
         var missing = Path.Combine(Path.GetTempPath(), "NoTunes-missing-" + Guid.NewGuid().ToString("N"));
@@ -172,6 +182,55 @@ public sealed class CliProcessTests
         var result = await RunAsync(arguments);
         AssertArgumentError(result, option.TrimEnd('='));
         Assert.That(result.Error, Does.Not.Contain("Scanning"));
+    }
+
+    [Test]
+    public async Task Wifi_Uses_The_Configured_Device_And_Address_Through_The_Cli()
+    {
+        var result = await RunAsync("devices", "--wifi", "--json");
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        using var document = System.Text.Json.JsonDocument.Parse(result.Output);
+        var device = document.RootElement.EnumerateArray().Single();
+        Assert.That(device.GetProperty("Udid").GetString(), Is.EqualTo("00008030-00112CE23A86402E"));
+        Assert.That(device.GetProperty("NetworkAddress").GetString(), Is.EqualTo("192.168.0.42"));
+        Assert.That(device.GetProperty("ConnectionType").GetString(), Is.EqualTo("Network"));
+    }
+
+    [Test]
+    public async Task Explicit_Wifi_Arguments_Override_Configured_Defaults_Through_The_Cli()
+    {
+        var result = await RunAsync(
+            "devices",
+            "--wifi",
+            "--address",
+            "192.168.0.43",
+            "--device",
+            "other-phone",
+            "--json");
+
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        using var document = System.Text.Json.JsonDocument.Parse(result.Output);
+        var device = document.RootElement.EnumerateArray().Single();
+        Assert.That(device.GetProperty("Udid").GetString(), Is.EqualTo("other-phone"));
+        Assert.That(device.GetProperty("NetworkAddress").GetString(), Is.EqualTo("192.168.0.43"));
+    }
+
+    [TestCase("not-an-ip")]
+    [TestCase("0.0.0.0")]
+    [TestCase("224.0.0.1")]
+    [TestCase("::")]
+    [TestCase("ff02::1")]
+    public async Task Rejects_Invalid_Wifi_Addresses_Before_Opening_The_Device(string address)
+    {
+        var result = await RunAsync(
+            "probe",
+            "--address",
+            address,
+            "--device",
+            "test",
+            "--json");
+
+        AssertArgumentError(result, "--address");
     }
 
     private static void AssertScanResult((int ExitCode, string Output, string Error) result, int expectedTracks)

@@ -29,7 +29,7 @@ public sealed class SyncOptions : DeviceOptions
     public override async Task<int> Execute(CommandContext context, CancellationToken token)
     {
         ValidateAdditionalArguments(this.AdditionalArguments);
-        this.ValidateTimeout();
+        this.ValidateDeviceOptions();
         var result = await context.SyncEngine.RunAsync(this, token);
         if (this.Json)
         {

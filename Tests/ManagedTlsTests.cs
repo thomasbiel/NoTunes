@@ -39,30 +39,34 @@ public sealed class ManagedTlsTests
     }
 
     [Test]
-    public async Task Authenticates_Both_Peers_And_Transfers_Multiple_Tls_Records()
+    public async Task Authenticates_Both_Peers_And_Transfers_Multiple_Tls_Records([Values] bool wifi)
     {
         var credentials = Keys.Value;
         var payload = Enumerable.Range(0, 80_000).Select(i => (byte)i).ToArray();
         var server = new PairedTlsServer(credentials);
-        await WithPeer(server, payload, async raw =>
-        {
-            await using var tls = await ManagedTlsStream.ConnectAsync(
-                raw,
-                credentials.Identity,
-                TimeSpan.FromSeconds(5),
-                CancellationToken.None);
+        await WithPeer(
+            server,
+            payload,
+            async raw =>
+            {
+                await using var tls = await ManagedTlsStream.ConnectAsync(
+                    raw,
+                    credentials.Identity,
+                    TimeSpan.FromSeconds(5),
+                    CancellationToken.None);
 
-            await tls.WriteAsync(payload);
-            var echoed = new byte[payload.Length];
-            await tls.ReadExactlyAsync(echoed);
-            Assert.That(echoed, Is.EqualTo(payload));
-        });
+                await tls.WriteAsync(payload);
+                var echoed = new byte[payload.Length];
+                await tls.ReadExactlyAsync(echoed);
+                Assert.That(echoed, Is.EqualTo(payload));
+                },
+            network: wifi);
 
         Assert.That(server.AuthenticatedClient, Is.True);
     }
 
     [Test]
-    public async Task Rejects_A_Device_Certificate_That_Does_Not_Match_The_Pairing_Record()
+    public async Task Rejects_A_Device_Certificate_That_Does_Not_Match_The_Pairing_Record([Values] bool wifi)
     {
         var credentials = Keys.Value;
         var wrongRecord = credentials.Record();
@@ -79,7 +83,8 @@ public sealed class ManagedTlsTests
                     TimeSpan.FromSeconds(5),
                     CancellationToken.None), Throws.InstanceOf<IOException>().Or.InstanceOf<AuthenticationException>());
             },
-            expectHandshakeFailure: true);
+            expectHandshakeFailure: true,
+            network: wifi);
     }
 
     [Test]
@@ -282,7 +287,12 @@ public sealed class ManagedTlsTests
         return (new ReplyUsbMuxTransport(raw, pairing), raw);
     }
 
-    private static async Task WithPeer(PairedTlsServer peer, byte[] payload, Func<Stream, Task> client, bool expectHandshakeFailure = false)
+    private static async Task WithPeer(
+        PairedTlsServer peer,
+        byte[] payload,
+        Func<Stream, Task> client,
+        bool expectHandshakeFailure = false,
+        bool network = false)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -313,8 +323,21 @@ public sealed class ManagedTlsTests
 
         try
         {
-            await clientSocket.ConnectAsync((IPEndPoint)listener.LocalEndpoint, deadline.Token);
-            await client(clientSocket.GetStream()).WaitAsync(deadline.Token);
+            var endpoint = (IPEndPoint)listener.LocalEndpoint;
+            if (network)
+            {
+                var mux = new UsbMuxClient(new ReplyUsbMuxTransport(), TimeSpan.FromSeconds(2));
+                await using var raw = await mux.ConnectDeviceAsync(
+                    new UsbDevice(1, "wifi", 0) { NetworkAddress = endpoint.Address.ToString() },
+                    (ushort)endpoint.Port, deadline.Token);
+
+                await client(raw).WaitAsync(deadline.Token);
+            }
+            else
+            {
+                await clientSocket.ConnectAsync(endpoint, deadline.Token);
+                await client(clientSocket.GetStream()).WaitAsync(deadline.Token);
+            }
         }
         finally
         {

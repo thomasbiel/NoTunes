@@ -9,10 +9,13 @@ namespace NoTunes.Tests;
 public sealed class CommandTests
 {
     [Test]
-    public void Parses_Sync_Folder_And_Device_Options()
+    public void Parses_Sync_Folder_And_Device_Options([Values] bool wifi)
     {
         using var parser = new Parser(settings => settings.HelpWriter = null);
-        var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>(["sync", @"D:\Music collection", "--dry-run", "--device", "00008030-0011223344556677", "--timeout", "30", "--json"]);
+        string[] arguments = ["sync", @"D:\Music collection", "--dry-run", "--device", "00008030-0011223344556677", "--timeout", "30", "--json"];
+        var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions>(
+            wifi ? [.. arguments, "--wifi"] : arguments);
+
         Assert.That(result, Is.TypeOf<Parsed<object>>());
         var options = (SyncOptions)((Parsed<object>)result).Value;
         Assert.That(options.Folder, Is.EqualTo(@"D:\Music collection"));
@@ -20,6 +23,7 @@ public sealed class CommandTests
         Assert.That(options.DryRun, Is.True);
         Assert.That(options.Json, Is.True);
         Assert.That(options.Device, Is.EqualTo("00008030-0011223344556677"));
+        Assert.That(options.Wifi, Is.EqualTo(wifi));
     }
 
     [TestCase("unknown")]

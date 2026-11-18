@@ -15,7 +15,27 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
     {
         var timeout = TimeSpan.FromSeconds(options.Timeout);
         var mux = new UsbMuxClient(transport, timeout);
-        var device = DeviceOptions.SelectDevice(await mux.ListUsbDevicesAsync(cancellationToken), options.Device);
+        var device = await options.SelectDeviceAsync(mux, cancellationToken);
+        return await WirelessSession.RunAsync(
+            mux,
+            device,
+            timeout,
+            cancellationToken,
+            token => this.InitializeDeviceAsync(
+                mux,
+                device,
+                timeout,
+                options,
+                token));
+    }
+
+    private async Task<InitializationResult> InitializeDeviceAsync(
+        UsbMuxClient mux,
+        UsbDevice device,
+        TimeSpan timeout,
+        InitOptions options,
+        CancellationToken cancellationToken)
+    {
         await using var phone = await DeviceSyncConnection.OpenAsync(
             mux,
             device,

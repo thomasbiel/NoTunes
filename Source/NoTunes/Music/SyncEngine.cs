@@ -35,7 +35,29 @@ public sealed class SyncEngine(
         var source = await scanner.ScanAsync(SourceSettings.ResolveFolder(options.Folder), cancellationToken);
         var timeout = TimeSpan.FromSeconds(options.Timeout);
         var mux = new UsbMuxClient(transport, timeout);
-        var device = DeviceOptions.SelectDevice(await mux.ListUsbDevicesAsync(cancellationToken), options.Device);
+        var device = await options.SelectDeviceAsync(mux, cancellationToken);
+        return await WirelessSession.RunAsync(
+            mux,
+            device,
+            timeout,
+            cancellationToken,
+            token => this.RunOnDeviceAsync(
+                options,
+                source,
+                mux,
+                device,
+                timeout,
+                token));
+    }
+
+    private async Task<SyncResult> RunOnDeviceAsync(
+        SyncOptions options,
+        SourceLibrary source,
+        UsbMuxClient mux,
+        UsbDevice device,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
         var context = new SyncDeviceContext(
             mux,
             device,

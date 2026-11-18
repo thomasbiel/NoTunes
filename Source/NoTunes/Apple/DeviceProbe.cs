@@ -4,6 +4,26 @@ public static class DeviceProbe
 {
     public static async Task<ProbeResult> RunAsync(UsbMuxClient mux, UsbDevice device, TimeSpan timeout, CancellationToken cancellationToken, bool readCatalogue = false)
     {
+        return await WirelessSession.RunAsync(
+            mux,
+            device,
+            timeout,
+            cancellationToken,
+            token => ProbeAsync(
+                mux,
+                device,
+                timeout,
+                token,
+                readCatalogue));
+    }
+
+    private static async Task<ProbeResult> ProbeAsync(
+        UsbMuxClient mux,
+        UsbDevice device,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        bool readCatalogue)
+    {
         await using var lockdown = await LockdownClient.ConnectAsync(
             mux,
             device,

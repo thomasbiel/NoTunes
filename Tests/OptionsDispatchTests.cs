@@ -31,13 +31,14 @@ public sealed class OptionsDispatchTests
     [TestCase("probe")]
     [TestCase("sync")]
     [TestCase("init")]
+    [TestCase("enable-wifi")]
     public async Task Validates_Device_Options_Through_The_Common_Dispatch(string verb)
     {
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
             .BuildServiceProvider();
 
         using var parser = new Parser(settings => settings.HelpWriter = null);
-        var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions>(
+        var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions, EnableWifiOptions>(
             [verb, "--timeout", "0"]);
 
         await Assert.ThrowsAsync<InvalidArgumentsException>(() => result.MapResult(

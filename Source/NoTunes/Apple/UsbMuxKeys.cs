@@ -6,6 +6,7 @@ internal static class UsbMuxKeys
     public const string DeviceList = "DeviceList";
     public const string Properties = "Properties";
     public const string ConnectionType = "ConnectionType";
+    public const string NetworkAddress = "NetworkAddress";
     public const string DeviceId = "DeviceID";
     public const string SerialNumber = "SerialNumber";
     public const string ProductId = "ProductID";

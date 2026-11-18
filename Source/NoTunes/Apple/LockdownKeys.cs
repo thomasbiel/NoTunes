@@ -21,4 +21,7 @@ internal static class LockdownKeys
     public const string Label = "Label";
     public const string Request = "Request";
     public const string Error = "Error";
+    public const string WirelessDomain = "com.apple.mobile.wireless_lockdown";
+    public const string SupportsWifiSyncing = "SupportsWifiSyncing";
+    public const string EnableWifiConnections = "EnableWifiConnections";
 }

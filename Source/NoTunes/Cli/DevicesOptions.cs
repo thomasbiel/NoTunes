@@ -2,7 +2,7 @@ using CommandLine;
 
 namespace NoTunes.Cli;
 
-[Verb(CliSyntax.Devices, HelpText = "List Apple devices connected over USB.")]
+[Verb(CliSyntax.Devices, HelpText = "List Apple devices connected over USB or, with --wifi, Wi-Fi.")]
 public sealed class DevicesOptions : DeviceOptions
 {
     [Value(0, Hidden = true)]
@@ -12,8 +12,8 @@ public sealed class DevicesOptions : DeviceOptions
     {
         ValidateAdditionalArguments(this.AdditionalArguments);
         var mux = this.CreateMux(context);
-        var devices = await mux.ListUsbDevicesAsync(token);
-        if (this.Device is not null) devices = [SelectDevice(devices, this.Device)];
+        var devices = await this.ListDevicesAsync(mux, token);
+        if (this.Device is not null) devices = [SelectDevice(devices, this.Device, this.Wifi || this.Address is not null)];
 
         if (this.Json)
         {
@@ -21,13 +21,16 @@ public sealed class DevicesOptions : DeviceOptions
         }
         else if (devices.Count == 0)
         {
-            await context.Output.WriteLineAsync("No USB Apple devices found. Connect and unlock the iPhone.");
+            await context.Output.WriteLineAsync(this.Wifi
+                ? "No Wi-Fi Apple devices found. Unlock the paired iPhone on the same network or use --address <IP> --device <UDID>."
+                : "No USB Apple devices found. Connect and unlock the iPhone.");
         }
         else
         {
             foreach (var device in devices)
             {
-                await context.Output.WriteLineAsync($"{device.Udid}  USB  product=0x{device.ProductId:X4}");
+                await context.Output.WriteLineAsync($"{device.Udid}  {device.ConnectionType}  product=0x{device.ProductId:X4}"
+                    + (device.NetworkAddress is null ? string.Empty : $"  address={device.NetworkAddress}"));
             }
         }
 

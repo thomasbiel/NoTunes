@@ -12,6 +12,7 @@ internal static class Program
     private static readonly HashSet<string> ValueOptions = new(StringComparer.Ordinal)
     {
         LongOptionPrefix + CliSyntax.Device,
+        LongOptionPrefix + CliSyntax.Address,
         LongOptionPrefix + CliSyntax.Timeout,
         LongOptionPrefix + CliSyntax.StateFolder,
         LongOptionPrefix + CliSyntax.SourceFolder
@@ -46,8 +47,12 @@ internal static class Program
             var context = services.GetRequiredService<CommandContext>();
             await using var parserOutput = new StringWriter(CultureInfo.InvariantCulture);
             using var parser = new Parser(settings => settings.HelpWriter = parserOutput);
-            var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions, RemoveCoverOptions>(args);
-            if (result is Parsed<object>) ValidateOptionValues(args);
+            var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions, RemoveCoverOptions, EnableWifiOptions>(args);
+            if (result is Parsed<object> parsed)
+            {
+                ValidateOptionValues(args);
+                if (parsed.Value is DeviceOptions deviceOptions) DeviceSettings.ApplyDefaults(deviceOptions);
+            }
 
             return await result.MapResult<CommandOptions, Task<int>>(
                 options => options.Execute(context, cancellation.Token),

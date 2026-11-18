@@ -3,10 +3,10 @@
 A .NET 10 command-line application with Windows and Linux platform providers.
 The intended behavior is to mirror
 all MP3 files in a source folder and its subfolders to the iPhone's built-in Music
-app over USB. No GUI, playlists, transcoding, WSL or external sync executable.
+app over USB or Wi-Fi. No GUI, playlists, transcoding, WSL or external sync executable.
 
 `sync` mirrors MP3 files to an existing, initialized iPhone Music library over
-USB. It preserves byte-identical tracks, transfers additions through AFC and
+USB or Wi-Fi. It preserves byte-identical tracks, transfers additions through AFC and
 removes obsolete computer-synced music through signed ATC delta sessions.
 `sync --dry-run` reads the source and device and prints the actual change plan
 without starting a write session.
@@ -17,6 +17,23 @@ without starting a write session.
 dotnet build NoTunes.slnx
 dotnet test Tests/NoTunes.Tests.csproj
 ```
+
+Supported native runtime variants are `win-x86`, `win-x64`, `win-arm64`,
+`linux-x64` and `linux-arm64`. A build without `-r` includes only these native
+variants, plus shared Windows/Linux runtime assets. The filter also applies to
+test and publish output; other explicit runtime identifiers are rejected.
+Linux targets use glibc; musl/Alpine and 32-bit Linux are outside this support set.
+
+For a smaller output containing just one native variant, specify its runtime:
+
+```powershell
+dotnet build Source/NoTunes/NoTunes.csproj -r win-x64 --no-self-contained
+dotnet publish Source/NoTunes/NoTunes.csproj -c Release -r linux-x64 --self-contained false
+```
+
+The runtime-specific build is under `bin/Debug/net10.0/<RID>/`; the publish
+output is under `bin/Release/net10.0/<RID>/publish/`. These framework-dependent
+outputs require the matching .NET 10 runtime on the destination machine.
 
 CLI parsing uses `CommandLineParser` 2.9.1. Tests use NUnit 5.0.0,
 `NUnit3TestAdapter` 6.3.1 and `Microsoft.NET.Test.Sdk` 18.12.0 with `dotnet test`
@@ -157,8 +174,12 @@ After building, the equivalent executable is
   reconciliation. `--dry-run` sends no sync request
   and writes no device files. The initial iOS database must exist; open Music on
   the phone first if iOS has not created it yet.
-- `devices` lists USB devices through Apple's local USB multiplexer; network
-  devices are excluded. It does not require a music library.
+- `devices` lists USB devices through Apple's local USB multiplexer, filtered by
+  the supplied or configured UDID. `devices --wifi` describes the configured
+  direct target, or lists known network devices when no address is configured.
+  USB remains the default; choosing Wi-Fi never silently falls back to USB.
+  It does not require a music library. `devices --address <IP> --device <UDID>`
+  describes the supplied target without checking its reachability.
 - `probe` validates the saved pairing, opens an encrypted lockdown session,
   verifies the iPhone's identity and opens AFC and ATC. It checks whether the
   music database exists and whether the phone permits music sync. It only reads
@@ -214,12 +235,67 @@ After building, the equivalent executable is
   the changed MP3 can be transferred as a replacement on the next write sync.
 
 Device commands take `--timeout` (1–300 seconds per request) and `--json`.
-With multiple USB devices, `probe` requires `--device`; it never chooses one
-arbitrarily. Errors go to stderr. JSON results go to stdout.
+`DeviceUdid` in `app.config` selects the default iPhone. With multiple devices and
+no configured default, `probe` requires `--device`; it never chooses one arbitrarily.
+Errors go to stderr. JSON results go to stdout.
+
+### Wi-Fi synchronization
+
+Pair the iPhone over USB first: unlock it and trust this computer. With USB still
+connected, run `enable-wifi` once to enable `EnableWifiConnections` in the phone's
+wireless lockdown settings. This verifies the saved pairing and reads the setting
+back after writing it. It does not enable wireless debugging or change the music
+library. Apple Devices/iTunes' Wi-Fi synchronization setting is an alternative.
+
+```powershell
+dotnet run --project Source/NoTunes/NoTunes.csproj -- enable-wifi
+dotnet run --project Source/NoTunes/NoTunes.csproj -- devices --wifi
+dotnet run --project Source/NoTunes/NoTunes.csproj -- sync --wifi --dry-run
+```
+
+`app.config` supplies the defaults `DeviceUdid=00008030-00112CE23A86402E` and
+`DeviceAddress=192.168.0.42`. Device commands use the configured UDID when
+`--device` is omitted. `--wifi` also uses the configured address, so
+`sync --wifi --dry-run` is sufficient for this iPhone. Explicit `--device` and
+`--address` arguments override their corresponding defaults independently.
+Without `--wifi` or an explicit `--address`, USB remains the selected transport.
+
+When no address is configured or supplied, Wi-Fi selection uses the network
+devices published by the local multiplexer; availability depends on Apple device
+support/usbmuxd. NoTunes does not run its own Bonjour browser. `--address` implies
+Wi-Fi and requires either `--device` or a configured `DeviceUdid` to choose the
+existing trusted pairing. It accepts IPv4 and IPv6, including scoped link-local
+addresses. Both devices must be on a network that permits direct connections.
+Missing or blank device settings preserve discovery. `devices --wifi --json`
+describes a configured direct target without checking reachability; use `probe`
+to verify the connection.
+
+```powershell
+dotnet run --project Source/NoTunes/NoTunes.csproj -- probe --address 192.168.0.42 --device 00008030-00112CE23A86402E --read-catalog
+dotnet run --project Source/NoTunes/NoTunes.csproj -- sync --address 192.168.0.42 --device 00008030-00112CE23A86402E --dry-run
+dotnet run --project Source/NoTunes/NoTunes.csproj -- sync --address 192.168.0.42 --device 00008030-00112CE23A86402E
+```
+
+`probe`, `init` and `sync` support the same connection options. Lockdown and all
+device services connect directly over TCP on Wi-Fi and use TLS with the saved
+pairing certificate. The phone's UDID is checked inside the encrypted session.
+The local multiplexer is still needed to retrieve the pairing record; no pairing
+keys are exported or printed. Journals and verified hash caches keep the same
+device identity when switching between USB and Wi-Fi.
+
+Unlock the phone when connecting. One heartbeat and a renewable wireless power
+assertion stay open for the entire command, including all batches and reconnects.
+An initial six-second settling period detects an already pending sleep before
+the device operation starts. Sleep notifications, lost heartbeats or failed power
+assertion renewals cancel the operation; write outcomes continue to use the existing
+recovery journal. A per-device local lock excludes overlapping NoTunes Wi-Fi commands,
+including probes and dry-runs, even with different `--state-folder` values.
+Other Apple synchronization programs should finish before starting NoTunes.
+NoTunes does not automatically wake a sleeping phone or track changing IP addresses.
 
 ### Synchronization and recovery
 
-Each comparison can take time: candidate device files are read over USB and
+Each comparison can take time: candidate device files are read over the selected connection and
 hashed on the host. Only files whose size occurs in the source need hashing.
 Verified device hashes are cached under the local NoTunes data folder in
 `device-hash-cache`, separately from source hashes and recovery journals.
@@ -425,6 +501,13 @@ running on Windows. The application connects to the service at
 not used. Installation of device support and the initial trust relationship can
 be handled by Apple's Windows device software.
 
+[Apple Devices](https://apps.microsoft.com/detail/9np83lwlpz9k) supports x64
+and ARM64; the ARM64 package requires Windows 11 24H2 or later. Apple's
+[iTunes downloads](https://www.apple.com/itunes/) also provide x86 device
+support. The runtime set was checked against these sources on 18 November 2026.
+Only Windows x64 has been exercised on a physical iPhone; Windows x86 and ARM64
+remain unverified with hardware.
+
 ### Linux (automated tests passed; physical-device validation pending)
 
 Install and start [usbmuxd](https://github.com/libimobiledevice/usbmuxd) using your
@@ -435,7 +518,10 @@ for example [`idevicepair pair`](https://github.com/libimobiledevice/libimobiled
 NoTunes reads pairing records through usbmuxd instead of opening its private
 pairing files directly.
 
-The Linux source provider supports x64 and ARM64. It requires readable procfs at
+The Linux source provider supports x64 and ARM64 on glibc distributions.
+[Debian's usbmuxd package](https://packages.debian.org/trixie/usbmuxd) is available
+for both architectures. Linux uses usbmuxd/libimobiledevice instead of an
+Apple-supplied Windows driver. The source provider requires readable procfs at
 `/proc/self/fd`, libc support for `openat`, `statx` and `flock`, and a filesystem
 that supports the requested metadata and advisory file locks. It opens each path
 component without following symbolic links and rejects non-regular MP3 entries.
@@ -496,6 +582,18 @@ or pending test journal remained. No artwork was uploaded in this physical test.
 iOS retained one additional empty album row named `NoTunes USB verification`;
 no track references it. That receiver-managed row was not deleted directly.
 
+On 18 November 2026, Wi-Fi synchronization was tested on the same iPhone at
+`192.168.0.42`. Enabling `EnableWifiConnections` over the existing USB pairing
+allowed direct TCP lockdown connections; wireless debugging remained disabled.
+The Wi-Fi probe passed pinned TLS, AFC, ATC and matching catalogue captures
+(16,486,400 database bytes and 2,430,832 WAL bytes). A full Wi-Fi dry-run against
+the configured music share completed with 1,908 unchanged tracks at Media anchor
+9, no additions, deletions, skipped files or cover repairs, and zero write batches.
+The cover check covered 1,230 candidates. The cable remained attached for this
+test, but the selected device streams connected to the phone's Wi-Fi IP directly;
+the multiplexer supplied only the saved pairing record. This validates the Wi-Fi
+read path and keep-alive; no music write over Wi-Fi was exercised on the phone.
+
 Apple pairing certificates may have an empty issuer name. BouncyCastle 2.7
 [rejects that form during ordinary X.509 parsing](https://github.com/bcgit/bc-csharp/blob/release-2.7.0/crypto/src/asn1/x509/TBSCertificateStructure.cs).
 NoTunes uses a compatibility
@@ -523,7 +621,7 @@ The iPhone catalogue must be updated through its sync service, never by editing
 - [Linux statx metadata](https://man7.org/linux/man-pages/man2/statx.2.html)
 - [libimobiledevice lockdown and AFC](https://github.com/libimobiledevice/libimobiledevice)
 - [ATC protocol observations](https://github.com/fbiba/rustunes/blob/master/docs/02-atc-sync-protocol.md)
-- [USB transport observations](https://github.com/fbiba/rustunes/blob/master/docs/03-transport-usb-and-wifi.md)
+- [USB and Wi-Fi transport observations](https://github.com/fbiba/rustunes/blob/master/docs/03-transport-usb-and-wifi.md)
 
 ## Exit codes
 

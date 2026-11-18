@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Net;
+using System.Net.Sockets;
 using NoTunes.Platform;
 
 namespace NoTunes.Apple;
@@ -15,6 +17,7 @@ public sealed class UsbMuxClient
     private const long LibraryVersion = 3;
     private const long SuccessResultCode = 0;
     private const string UsbConnectionType = "USB";
+    private const string NetworkConnectionType = "Network";
     private readonly IUsbMuxTransport transport;
     private readonly TimeSpan timeout;
     private int nextTag;
@@ -26,7 +29,12 @@ public sealed class UsbMuxClient
         this.transport = transport;
     }
 
-    public async Task<IReadOnlyList<UsbDevice>> ListUsbDevicesAsync(CancellationToken cancellationToken)
+    public Task<IReadOnlyList<UsbDevice>> ListUsbDevicesAsync(CancellationToken cancellationToken)
+    {
+        return this.ListDevicesAsync(network: false, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<UsbDevice>> ListDevicesAsync(bool network, CancellationToken cancellationToken)
     {
         var request = Plist.Dict((UsbMuxKeys.MessageType, UsbMuxMessages.ListDevices));
         var reply = await this.RequestAsync(request, cancellationToken);
@@ -46,18 +54,20 @@ public sealed class UsbMuxClient
             }
 
             var properties = propertiesValue.AsDict();
-            if (properties.Text(UsbMuxKeys.ConnectionType) != UsbConnectionType) continue;
+            var expectedType = network ? NetworkConnectionType : UsbConnectionType;
+            if (properties.Text(UsbMuxKeys.ConnectionType) != expectedType) continue;
 
             var id = record.Number(UsbMuxKeys.DeviceId);
             if (id is < 1 or > uint.MaxValue) throw new InvalidDataException("Invalid USB device ID.");
 
-            var udid = properties.Text(UsbMuxKeys.SerialNumber);
-            if (udid.Length == DeviceUdid.ModernCompactLength)
-            {
-                udid = udid.Insert(DeviceUdid.ModernPrefixLength, DeviceUdid.Separator);
-            }
+            var udid = DeviceUdid.Format(properties.Text(UsbMuxKeys.SerialNumber));
+            var productId = network && !properties.ContainsKey(UsbMuxKeys.ProductId)
+                ? 0 : properties.Number(UsbMuxKeys.ProductId);
 
-            result.Add(new UsbDevice((uint)id, udid, properties.Number(UsbMuxKeys.ProductId)));
+            result.Add(new UsbDevice((uint)id, udid, productId)
+            {
+                NetworkAddress = network ? DeviceNetworkAddress.Read(properties) : null
+            });
         }
 
         return [.. result.OrderBy(d => d.Udid, StringComparer.Ordinal)];
@@ -90,6 +100,11 @@ public sealed class UsbMuxClient
 
     public async Task<Stream> ConnectDeviceAsync(UsbDevice device, ushort port, CancellationToken cancellationToken)
     {
+        if (device.NetworkAddress is not null)
+        {
+            return await this.ConnectNetworkDeviceAsync(device.NetworkAddress, port, cancellationToken);
+        }
+
         var stream = await this.ConnectAsync(cancellationToken);
         try
         {
@@ -112,6 +127,34 @@ public sealed class UsbMuxClient
         catch
         {
             await stream.DisposeAsync();
+            throw;
+        }
+    }
+
+    private async Task<Stream> ConnectNetworkDeviceAsync(string address, ushort port, CancellationToken cancellationToken)
+    {
+        var ip = IPAddress.Parse(address);
+        var socket = new Socket(ip.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(this.timeout);
+        try
+        {
+            await socket.ConnectAsync(new IPEndPoint(ip, port), deadline.Token);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch (OperationCanceledException e) when (!cancellationToken.IsCancellationRequested)
+        {
+            socket.Dispose();
+            throw new IOException($"Timed out connecting to the iPhone over Wi-Fi ({address}:{port}). Unlock it and check the network.", e);
+        }
+        catch (SocketException e)
+        {
+            socket.Dispose();
+            throw new IOException($"Cannot connect to the iPhone over Wi-Fi ({address}:{port}). Unlock it and check the network.", e);
+        }
+        catch
+        {
+            socket.Dispose();
             throw;
         }
     }

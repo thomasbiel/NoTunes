@@ -1,0 +1,21 @@
+<Project>
+    <Target Name="ValidateNoTunesRuntime" BeforeTargets="CollectPackageReferences;PrepareForBuild"
+            Condition="'$(RuntimeIdentifier)' != ''">
+        <Error Condition="!$([System.String]::Copy(';$(NoTunesSupportedRuntimeIdentifiers);').Contains(';$(RuntimeIdentifier);'))"
+               Text="Unsupported NoTunes runtime '$(RuntimeIdentifier)'. Supported runtimes: $(NoTunesSupportedRuntimeIdentifiers)." />
+    </Target>
+
+    <!-- Apply to every project so test output and transitive project references use the same assets.
+         Keep generic fallback assets used by the supported Windows and Linux runtimes. -->
+    <Target Name="FilterNoTunesRuntimeAssets" AfterTargets="ResolvePackageAssets"
+            Condition="'$(RuntimeIdentifier)' == ''">
+        <PropertyGroup>
+            <_NoTunesRuntimeAssetIdentifiers>;$(NoTunesSupportedRuntimeIdentifiers);win;linux;unix;unix-x64;unix-arm64;any;base;</_NoTunesRuntimeAssetIdentifiers>
+        </PropertyGroup>
+        <ItemGroup>
+            <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+                Condition="'%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' != '' and
+                           !$([System.String]::Copy('$(_NoTunesRuntimeAssetIdentifiers)').Contains(';%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier);'))" />
+        </ItemGroup>
+    </Target>
+</Project>

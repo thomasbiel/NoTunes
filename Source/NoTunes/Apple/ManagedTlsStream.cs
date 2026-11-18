@@ -4,7 +4,7 @@ using Org.BouncyCastle.Tls;
 
 namespace NoTunes.Apple;
 
-// Managed TLS over an async USB tunnel. No Windows key storage, native TLS DLLs or global TLS changes.
+// Managed TLS over an async device stream. No Windows key storage, native TLS DLLs or global TLS changes.
 // TLS state changes are serialized; a pending socket read does not block outgoing records.
 public sealed class ManagedTlsStream : Stream
 {

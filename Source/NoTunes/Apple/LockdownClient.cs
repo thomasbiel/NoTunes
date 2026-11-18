@@ -11,7 +11,7 @@ public sealed class LockdownClient : IAsyncDisposable
     private PairingIdentity? identity;
     private string? sessionId;
 
-    private LockdownClient(UsbMuxClient mux, UsbDevice device, TimeSpan timeout, Stream stream)
+    internal LockdownClient(UsbMuxClient mux, UsbDevice device, TimeSpan timeout, Stream stream)
     {
         this.mux = mux;
         this.device = device;
@@ -52,7 +52,7 @@ public sealed class LockdownClient : IAsyncDisposable
         var udid = info.Text(LockdownKeys.Udid);
         if (!StringComparer.OrdinalIgnoreCase.Equals(DeviceUdid.Normalize(udid), DeviceUdid.Normalize(this.device.Udid)))
         {
-            throw new IOException("The connected iPhone identity does not match the selected USB device.");
+            throw new IOException("The connected iPhone identity does not match the selected device.");
         }
 
         return new DeviceInfo(
@@ -106,6 +106,11 @@ public sealed class LockdownClient : IAsyncDisposable
         if (this.sessionId is null) throw new IOException("A trusted iPhone pairing session is required.");
 
         var reply = await this.RequestAsync(LockdownRequests.StartService, Plist.Dict((LockdownKeys.Service, name)), cancellationToken);
+        if (this.device.NetworkAddress is not null && !reply.Flag(LockdownKeys.EnableServiceSsl))
+        {
+            throw new IOException($"The iPhone did not enable TLS for Wi-Fi service '{name}'.");
+        }
+
         var port = reply.Number(LockdownKeys.Port);
         if (port is < 1 or > ushort.MaxValue)
         {
@@ -122,6 +127,27 @@ public sealed class LockdownClient : IAsyncDisposable
             await stream.DisposeAsync();
             throw;
         }
+    }
+
+    public async Task EnableWifiSyncAsync(CancellationToken cancellationToken)
+    {
+        if (this.sessionId is null) throw new IOException("A trusted iPhone pairing session is required.");
+        if (this.device.NetworkAddress is not null) throw new IOException("Enable Wi-Fi synchronization over USB first.");
+
+        var supported = await this.GetValueAsync(LockdownKeys.WirelessDomain, LockdownKeys.SupportsWifiSyncing,
+            cancellationToken);
+
+        if (supported is not true) throw new IOException("This iPhone does not support Wi-Fi synchronization.");
+
+        await this.RequestAsync(LockdownRequests.SetValue, Plist.Dict(
+            (LockdownKeys.Domain, LockdownKeys.WirelessDomain),
+            (LockdownKeys.Key, LockdownKeys.EnableWifiConnections),
+            (LockdownKeys.Value, true)), cancellationToken);
+
+        var enabled = await this.GetValueAsync(LockdownKeys.WirelessDomain, LockdownKeys.EnableWifiConnections,
+            cancellationToken);
+
+        if (enabled is not true) throw new IOException("The iPhone did not retain the Wi-Fi synchronization setting.");
     }
 
     private async Task<Dictionary<string, object>> RequestAsync(string request, Dictionary<string, object> fields, CancellationToken cancellationToken)
