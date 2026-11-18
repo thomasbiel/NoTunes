@@ -140,7 +140,6 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
                 before,
                 cancellationToken);
         }
-
     }
 
     private static async Task RequireEmptyLibraryAsync(
@@ -166,7 +165,6 @@ public sealed class LibraryInitializer(IUsbMuxTransport transport, TextWriter er
         {
             throw new IOException("Initialization refuses an occupied music directory.");
         }
-
     }
 
     private static async Task<InitializationState> CreateStateAsync(

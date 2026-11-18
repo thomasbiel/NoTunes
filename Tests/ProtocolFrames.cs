@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using NoTunes.Apple;
+using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
@@ -11,6 +12,7 @@ internal static class ProtocolFrames
     private const int UsbMuxTagOffset = 12;
     private const uint UsbMuxVersion = 1;
     private const uint UsbMuxPlistMessageType = 8;
+    private const int MaximumUsbMuxRequestBytes = 4 * 1024;
     private const int PlistHeaderBytes = sizeof(int);
     internal const int AfcTotalLengthOffset = 8;
     internal const int AfcThisLengthOffset = 16;
@@ -30,6 +32,23 @@ internal static class ProtocolFrames
         BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(UsbMuxTagOffset), tag);
         payload.CopyTo(packet, UsbMuxHeaderBytes);
         return packet;
+    }
+
+    public static async Task<(uint Tag, Dictionary<string, object> Request)> ReadUsbMuxRequestAsync(
+        Stream stream,
+        CancellationToken cancellationToken = default)
+    {
+        var header = new byte[UsbMuxHeaderBytes];
+        await stream.ReadExactlyAsync(header, cancellationToken);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(UsbMuxVersionOffset)), Is.EqualTo(UsbMuxVersion));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(UsbMuxMessageTypeOffset)),
+            Is.EqualTo(UsbMuxPlistMessageType));
+
+        var size = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(header) - UsbMuxHeaderBytes);
+        Assert.That(size, Is.InRange(1, MaximumUsbMuxRequestBytes));
+        var payload = new byte[size];
+        await stream.ReadExactlyAsync(payload, cancellationToken);
+        return (BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(UsbMuxTagOffset)), Plist.Parse(payload).AsDict());
     }
 
     public static byte[] PlistMessage(Dictionary<string, object> message, bool atc = false)

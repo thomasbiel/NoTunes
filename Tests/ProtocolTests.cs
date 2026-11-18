@@ -37,7 +37,7 @@ public sealed class ProtocolTests
     {
         await WithMuxServer(async stream =>
         {
-            var (tag, request) = await ReadMuxRequest(stream);
+            var (tag, request) = await ProtocolFrames.ReadUsbMuxRequestAsync(stream);
             Assert.That(request.Text("MessageType"), Is.EqualTo("ListDevices"));
             await Reply(stream, tag, Plist.Dict(("DeviceList", new object[] { Plist.Dict(("DeviceID", 7L), ("Properties", Plist.Dict(("ConnectionType", "USB"), ("SerialNumber", "000080300011223344556677"), ("ProductID", 4776L)))), Plist.Dict(("DeviceID", 8L), ("Properties", Plist.Dict(("ConnectionType", "Network"), ("SerialNumber", "wifi"), ("ProductID", 4776L)))) })));
         }, async endpoint =>
@@ -54,7 +54,7 @@ public sealed class ProtocolTests
     {
         await WithMuxServer(async stream =>
         {
-            var (tag, request) = await ReadMuxRequest(stream);
+            var (tag, request) = await ProtocolFrames.ReadUsbMuxRequestAsync(stream);
             Assert.That(request.Text("MessageType"), Is.EqualTo("Connect"));
             Assert.That(request.Number("DeviceID"), Is.EqualTo(7));
             // 62078 = 0xF27E; the plist must contain 0x7EF2 = 32498.
@@ -76,7 +76,7 @@ public sealed class ProtocolTests
     {
         await WithMuxServer(async stream =>
         {
-            var (tag, _) = await ReadMuxRequest(stream);
+            var (tag, _) = await ProtocolFrames.ReadUsbMuxRequestAsync(stream);
             await Reply(stream, tag + 1, Plist.Dict(("DeviceList", Array.Empty<object>())));
         }, async endpoint =>
         {
@@ -90,7 +90,7 @@ public sealed class ProtocolTests
     {
         await WithMuxServer(async stream =>
         {
-            var (tag, _) = await ReadMuxRequest(stream);
+            var (tag, _) = await ProtocolFrames.ReadUsbMuxRequestAsync(stream);
             await Reply(stream, tag, Plist.Dict(("Number", 3L)));
         }, async endpoint =>
         {
@@ -176,19 +176,6 @@ public sealed class ProtocolTests
             using var socket = await listener.AcceptTcpClientAsync(cancellation.Token);
             await server(socket.GetStream());
         }
-    }
-
-    private static async Task<(uint Tag, Dictionary<string, object> Request)> ReadMuxRequest(Stream stream)
-    {
-        var header = new byte[16];
-        await stream.ReadExactlyAsync(header);
-        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4)), Is.EqualTo(1));
-        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(8)), Is.EqualTo(8));
-        var size = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(header) - 16);
-        Assert.That(size, Is.InRange(1, 4096));
-        var payload = new byte[size];
-        await stream.ReadExactlyAsync(payload);
-        return (BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(12)), Plist.Parse(payload).AsDict());
     }
 
     private static async Task Reply(Stream stream, uint tag, Dictionary<string, object> message)

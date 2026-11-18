@@ -131,9 +131,7 @@ public sealed class AtcSyncSessionTests
         Assert.That(pongSent, Is.True);
         Assert.That(files.WritePackets.Count, Is.EqualTo(1));
         Assert.That(files.WasDisposed, Is.True);
-        Assert.That(
-            peer.SentMessages().Any(message => message.Text(AtcKeys.Command) == AtcCommands.FileComplete),
-            Is.False);
+        AssertNoCompletedAssets(peer);
     }
 
     [Test]
@@ -187,9 +185,7 @@ public sealed class AtcSyncSessionTests
         await Assert.ThrowsAsync<IOException>(() => sync.TransferAsync([first, second]));
 
         Assert.That(files.WritePackets.Count, Is.Zero);
-        Assert.That(
-            peer.SentMessages().Any(message => message.Text(AtcKeys.Command) == AtcCommands.FileComplete),
-            Is.False);
+        AssertNoCompletedAssets(peer);
     }
 
     [Test]
@@ -274,9 +270,7 @@ public sealed class AtcSyncSessionTests
         await sync.StartAsync();
         await Assert.ThrowsAsync<IOException>(() => sync.TransferAsync([track]));
 
-        Assert.That(
-            peer.SentMessages().Any(message => message.Text(AtcKeys.Command) == AtcCommands.FileComplete),
-            Is.False);
+        AssertNoCompletedAssets(peer);
     }
 
     [Test]
@@ -304,6 +298,11 @@ public sealed class AtcSyncSessionTests
         await Assert.ThrowsAsync<InvalidDataException>(() => sync.TransferAsync([track]));
 
         Assert.That(files.Opens, Is.Zero);
+    }
+
+    private static void AssertNoCompletedAssets(AtcPeer peer)
+    {
+        Assert.That(peer.SentMessages().Any(message => message.Text(AtcKeys.Command) == AtcCommands.FileComplete), Is.False);
     }
 
     private static async Task AssertTransferFailureAsync(

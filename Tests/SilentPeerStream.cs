@@ -1,6 +1,6 @@
 namespace NoTunes.Tests;
 
-internal sealed class SilentPeerStream : Stream
+internal sealed class SilentPeerStream : NonSeekableTestStream
 {
     public bool WasDisposed { get; private set; }
 
@@ -8,18 +8,13 @@ internal sealed class SilentPeerStream : Stream
 
     public override bool CanWrite => !this.WasDisposed;
 
-    public override bool CanSeek => false;
 
-    public override long Length => throw new NotSupportedException();
 
-    public override long Position
-    {
-        get => throw new NotSupportedException(); set => throw new NotSupportedException();
-    }
 
-    public override void Flush()
-    {
-    }
+
+
+
+
 
     public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
@@ -39,9 +34,9 @@ internal sealed class SilentPeerStream : Stream
         return ValueTask.CompletedTask;
     }
 
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
-    public override void SetLength(long value) => throw new NotSupportedException();
+
+
 
     protected override void Dispose(bool disposing)
     {

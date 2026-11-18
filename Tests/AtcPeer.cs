@@ -4,7 +4,7 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
-internal sealed class AtcPeer : Stream
+internal sealed class AtcPeer : NonSeekableTestStream
 {
     private readonly MemoryStream incoming = new();
     private readonly MemoryStream written = new();
@@ -60,22 +60,17 @@ internal sealed class AtcPeer : Stream
 
     public override bool CanWrite => !this.WasDisposed;
 
-    public override bool CanSeek => false;
 
-    public override long Length => throw new NotSupportedException();
 
-    public override long Position
-    {
-        get => throw new NotSupportedException(); set => throw new NotSupportedException();
-    }
 
-    public override void Flush()
-    {
-    }
 
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
-    public override void SetLength(long value) => throw new NotSupportedException();
+
+
+
+
+
+
 
     public override int Read(byte[] buffer, int offset, int count)
     {

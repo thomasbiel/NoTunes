@@ -207,7 +207,6 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
                 (AtcKeys.ErrorCode, SyncProtocol.AssetUnavailable),
                 (AtcKeys.ErrorIsVisible, false)), cancellationToken);
         }
-
     }
 
     private async Task TransferAudioAsync(

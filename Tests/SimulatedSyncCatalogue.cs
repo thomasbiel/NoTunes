@@ -115,10 +115,7 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
             ("artwork_variant_type", DefaultArtworkVariant),
             ("relative_path", path));
 
-        foreach (var table in new[] { "artwork_token", "best_artwork_token" })
-        {
-            this.Execute($"DELETE FROM {table} WHERE entity_pid=$id", ("id", itemId));
-        }
+        this.RemoveArtworkTokens(itemId);
 
         this.Insert(
             "artwork_token",
@@ -211,6 +208,11 @@ internal sealed class SimulatedSyncCatalogue : IDisposable
             this.Execute($"DELETE FROM {table} WHERE item_pid=$id", ("id", itemId));
         }
 
+        this.RemoveArtworkTokens(itemId);
+    }
+
+    private void RemoveArtworkTokens(long itemId)
+    {
         foreach (var table in new[] { "artwork_token", "best_artwork_token" })
         {
             this.Execute($"DELETE FROM {table} WHERE entity_pid=$id", ("id", itemId));

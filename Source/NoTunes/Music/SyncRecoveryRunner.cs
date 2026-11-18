@@ -206,7 +206,6 @@ internal sealed class SyncRecoveryRunner(
 
             cleanupProgress.Advance();
         }
-
     }
 
     private void SettleRecoveryJournal(

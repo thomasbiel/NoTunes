@@ -22,74 +22,9 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
         try
         {
             using var file = TagLib.File.Create(path, TagLib.ReadStyle.Average);
-            var header = file.Properties.Codecs.OfType<TagLib.Mpeg.AudioHeader>().SingleOrDefault();
-            if (header.AudioLayer != LayerThree || file.Properties.Duration <= TimeSpan.Zero
-                || file.Properties.AudioSampleRate <= 0 || file.Properties.AudioChannels is < MinimumChannels or > MaximumChannels)
-            {
-                throw new InvalidDataException($"Not a supported MP3 audio stream: {relativePath}");
-            }
-
-            var format = header.Version switch
-            {
-                TagLib.Mpeg.Version.Version1 => Mpeg1Layer3,
-                TagLib.Mpeg.Version.Version2 => Mpeg2Layer3,
-                TagLib.Mpeg.Version.Version25 => Mpeg25Layer3,
-                _ => throw new InvalidDataException($"Unsupported MPEG version: {relativePath}")
-            };
-
-            var tag = file.Tag;
-            var compilation = file.GetTag(TagLib.TagTypes.Id3v2, false) is TagLib.Id3v2.Tag { IsCompilation: true };
-            var title = Text(tag.Title, Path.GetFileNameWithoutExtension(relativePath));
-            var artist = Text(tag.FirstPerformer, UnknownArtist);
-            var artistSort = Text(tag.FirstPerformerSort, artist);
-            var album = Text(tag.Album, UnknownAlbum);
-            var explicitAlbumArtist = !string.IsNullOrWhiteSpace(tag.FirstAlbumArtist);
-            if (compilation && !explicitAlbumArtist)
-            {
-                throw new InvalidDataException($"Compilation requires an explicit album artist before sync: {relativePath}");
-            }
-
-            var albumArtist = Text(tag.FirstAlbumArtist, artist);
-            var albumArtistSort = Text(tag.FirstAlbumArtistSort, explicitAlbumArtist ? albumArtist : artistSort);
-            var item = Plist.Dict(
-                (MediaKeys.Title, title),
-                (MediaKeys.Artist, artist),
-                (MediaKeys.Album, album),
-                (MediaKeys.AlbumArtist, albumArtist),
-                (MediaKeys.SortTitle, Text(tag.TitleSort, title)),
-                (MediaKeys.SortArtist, artistSort),
-                (MediaKeys.SortAlbum, Text(tag.AlbumSort, album)),
-                (MediaKeys.SortAlbumArtist, albumArtistSort),
-                (MediaKeys.Genre, Text(tag.FirstGenre, string.Empty)),
-                (MediaKeys.IsSong, true),
-                (MediaKeys.RememberBookmark, false),
-                (MediaKeys.TotalMilliseconds, (long)file.Properties.Duration.TotalMilliseconds),
-                (MediaKeys.ArtworkChecksum, 0L));
-
-            if (compilation)
-            {
-                item[MediaKeys.IsCompilation] = true;
-            }
-
-            AddNumber(item, MediaKeys.TrackNumber, tag.Track);
-            AddNumber(item, MediaKeys.TrackCount, tag.TrackCount);
-            AddNumber(item, MediaKeys.DiscNumber, tag.Disc);
-            AddNumber(item, MediaKeys.DiscCount, tag.DiscCount);
-            AddNumber(item, MediaKeys.Year, tag.Year);
-            if (!string.IsNullOrWhiteSpace(tag.FirstComposer))
-            {
-                item[MediaKeys.Composer] = Text(tag.FirstComposer, string.Empty);
-                item[MediaKeys.SortComposer] = Text(tag.FirstComposerSort, tag.FirstComposer);
-            }
-
-            if (!string.IsNullOrWhiteSpace(tag.Comment))
-                item[MediaKeys.Comment] = Text(tag.Comment, string.Empty);
-            var audio = Plist.Dict(
-                (MediaKeys.AudioFormat, format),
-                (MediaKeys.SampleRate, (double)file.Properties.AudioSampleRate),
-                (MediaKeys.Channels, (long)file.Properties.AudioChannels),
-                (MediaKeys.BitRate, (long)file.Properties.AudioBitrate),
-                (MediaKeys.Duration, (long)Math.Round(file.Properties.Duration.TotalSeconds * file.Properties.AudioSampleRate)));
+            var format = ReadAudioFormat(file.Properties, relativePath);
+            var (item, album, albumArtist) = ReadItem(file, relativePath);
+            var audio = ReadAudio(file.Properties, format);
 
             return new Mp3Metadata(
                 item,
@@ -97,13 +32,95 @@ internal sealed record Mp3Metadata(Dictionary<string, object> Item, Dictionary<s
                 album,
                 albumArtist)
             {
-                Artwork = ReadArtwork(tag, artworkCache)
+                Artwork = ReadArtwork(file.Tag, artworkCache)
             };
         }
         catch (Exception e) when (e is TagLib.CorruptFileException or TagLib.UnsupportedFormatException)
         {
             throw new InvalidDataException($"Cannot read MP3 metadata: {relativePath}", e);
         }
+    }
+
+    private static long ReadAudioFormat(TagLib.Properties properties, string relativePath)
+    {
+        var header = properties.Codecs.OfType<TagLib.Mpeg.AudioHeader>().SingleOrDefault();
+        if (header.AudioLayer != LayerThree || properties.Duration <= TimeSpan.Zero
+            || properties.AudioSampleRate <= 0 || properties.AudioChannels is < MinimumChannels or > MaximumChannels)
+        {
+            throw new InvalidDataException($"Not a supported MP3 audio stream: {relativePath}");
+        }
+
+        return header.Version switch
+        {
+            TagLib.Mpeg.Version.Version1 => Mpeg1Layer3,
+            TagLib.Mpeg.Version.Version2 => Mpeg2Layer3,
+            TagLib.Mpeg.Version.Version25 => Mpeg25Layer3,
+            _ => throw new InvalidDataException($"Unsupported MPEG version: {relativePath}")
+        };
+    }
+
+    private static (Dictionary<string, object> Item, string Album, string AlbumArtist) ReadItem(
+        TagLib.File file,
+        string relativePath)
+    {
+        var tag = file.Tag;
+        var compilation = file.GetTag(TagLib.TagTypes.Id3v2, false) is TagLib.Id3v2.Tag { IsCompilation: true };
+        var title = Text(tag.Title, Path.GetFileNameWithoutExtension(relativePath));
+        var artist = Text(tag.FirstPerformer, UnknownArtist);
+        var artistSort = Text(tag.FirstPerformerSort, artist);
+        var album = Text(tag.Album, UnknownAlbum);
+        var explicitAlbumArtist = !string.IsNullOrWhiteSpace(tag.FirstAlbumArtist);
+        if (compilation && !explicitAlbumArtist)
+        {
+            throw new InvalidDataException($"Compilation requires an explicit album artist before sync: {relativePath}");
+        }
+
+        var albumArtist = Text(tag.FirstAlbumArtist, artist);
+        var albumArtistSort = Text(tag.FirstAlbumArtistSort, explicitAlbumArtist ? albumArtist : artistSort);
+        var item = Plist.Dict(
+            (MediaKeys.Title, title),
+            (MediaKeys.Artist, artist),
+            (MediaKeys.Album, album),
+            (MediaKeys.AlbumArtist, albumArtist),
+            (MediaKeys.SortTitle, Text(tag.TitleSort, title)),
+            (MediaKeys.SortArtist, artistSort),
+            (MediaKeys.SortAlbum, Text(tag.AlbumSort, album)),
+            (MediaKeys.SortAlbumArtist, albumArtistSort),
+            (MediaKeys.Genre, Text(tag.FirstGenre, string.Empty)),
+            (MediaKeys.IsSong, true),
+            (MediaKeys.RememberBookmark, false),
+            (MediaKeys.TotalMilliseconds, (long)file.Properties.Duration.TotalMilliseconds),
+            (MediaKeys.ArtworkChecksum, 0L));
+
+        if (compilation)
+        {
+            item[MediaKeys.IsCompilation] = true;
+        }
+
+        AddNumber(item, MediaKeys.TrackNumber, tag.Track);
+        AddNumber(item, MediaKeys.TrackCount, tag.TrackCount);
+        AddNumber(item, MediaKeys.DiscNumber, tag.Disc);
+        AddNumber(item, MediaKeys.DiscCount, tag.DiscCount);
+        AddNumber(item, MediaKeys.Year, tag.Year);
+        if (!string.IsNullOrWhiteSpace(tag.FirstComposer))
+        {
+            item[MediaKeys.Composer] = Text(tag.FirstComposer, string.Empty);
+            item[MediaKeys.SortComposer] = Text(tag.FirstComposerSort, tag.FirstComposer);
+        }
+
+        if (!string.IsNullOrWhiteSpace(tag.Comment))
+            item[MediaKeys.Comment] = Text(tag.Comment, string.Empty);
+        return (item, album, albumArtist);
+    }
+
+    private static Dictionary<string, object> ReadAudio(TagLib.Properties properties, long format)
+    {
+        return Plist.Dict(
+            (MediaKeys.AudioFormat, format),
+            (MediaKeys.SampleRate, (double)properties.AudioSampleRate),
+            (MediaKeys.Channels, (long)properties.AudioChannels),
+            (MediaKeys.BitRate, (long)properties.AudioBitrate),
+            (MediaKeys.Duration, (long)Math.Round(properties.Duration.TotalSeconds * properties.AudioSampleRate)));
     }
 
     public static bool HasArtwork(FileStream source)

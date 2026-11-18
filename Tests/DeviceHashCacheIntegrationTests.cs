@@ -80,7 +80,7 @@ public sealed class DeviceHashCacheIntegrationTests
         Assert.That(second.Plan.Delete, Is.Empty);
         Assert.That(reads > 0, Is.EqualTo(fullReadback));
         Assert.That(this.device.StartedSessions, Is.Zero);
-        Assert.That(this.device.FileConnections.SelectMany(peer => peer.WritePackets), Is.Empty);
+        SimulatedSyncDeviceAssertions.HasNoWrites(this.device);
         Assert.That(Directory.GetFiles(this.cache.Root, "*.json"), Has.Length.EqualTo(1));
         Assert.That(Directory.EnumerateFileSystemEntries(this.state.Root), Is.Empty);
     }
@@ -112,7 +112,7 @@ public sealed class DeviceHashCacheIntegrationTests
         await Assert.ThrowsAsync<IOException>(() => this.RunAsync());
         Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(before));
         Assert.That(this.device.StartedSessions, Is.Zero);
-        Assert.That(this.device.FileConnections.SelectMany(peer => peer.WritePackets), Is.Empty);
+        SimulatedSyncDeviceAssertions.HasNoWrites(this.device);
     }
 
     private Task<SyncResult> RunAsync()

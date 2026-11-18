@@ -281,7 +281,8 @@ internal static class CatalogueReader
             OptionalText(reader, TitleColumn),
             OptionalText(reader, BasePathColumn),
             OptionalText(reader, FilenameColumn),
-            OptionalNumber(reader, FileSizeColumn)) { Metadata = ReadTrackMetadata(reader) };
+            OptionalNumber(reader, FileSizeColumn))
+        { Metadata = ReadTrackMetadata(reader) };
     }
 
     private static DeviceTrack ReadLocalTrack(DbDataReader reader, long id, ISet<string> paths)
@@ -307,7 +308,8 @@ internal static class CatalogueReader
             id,
             reader.GetString(TitleColumn),
             fullPath,
-            size) { Metadata = ReadTrackMetadata(reader) };
+            size)
+        { Metadata = ReadTrackMetadata(reader) };
     }
 
     private static void ReadContainers(

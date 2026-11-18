@@ -27,42 +27,7 @@ public static class BinaryPlist
         foreach (var item in objects)
         {
             offsets.Add((ulong)stream.Position);
-            switch (item)
-            {
-                case bool flag:
-                    stream.WriteByte(flag ? TrueMarker : FalseMarker);
-                    break;
-                case long number:
-                    WriteInteger(stream, number);
-                    break;
-                case double number:
-                    stream.WriteByte(DoubleMarker);
-                    WriteNumber(stream, unchecked((ulong)BitConverter.DoubleToInt64Bits(number)), sizeof(ulong));
-                    break;
-                case DateTime date:
-                    stream.WriteByte(DateMarker);
-                    WriteNumber(stream, unchecked((ulong)BitConverter.DoubleToInt64Bits((date.ToUniversalTime() - Epoch).TotalSeconds)), sizeof(ulong));
-                    break;
-                case string text:
-                    var ascii = IsAscii(text);
-                    WriteLength(stream, (int)(ascii ? BinaryPlistObjectType.AsciiString : BinaryPlistObjectType.UnicodeString) << TypeShift, text.Length);
-                    stream.Write((ascii ? Encoding.ASCII : Encoding.BigEndianUnicode).GetBytes(text));
-                    break;
-                case byte[] bytes:
-                    WriteLength(stream, (int)BinaryPlistObjectType.Data << TypeShift, bytes.Length);
-                    stream.Write(bytes);
-                    break;
-                case BinaryPlistReferences references:
-                    WriteLength(stream, (int)(references.Dictionary ? BinaryPlistObjectType.Dictionary : BinaryPlistObjectType.Array) << TypeShift, references.Dictionary ? references.Indices.Length / 2 : references.Indices.Length);
-                    foreach (var index in references.Indices)
-                    {
-                        WriteNumber(stream, (ulong)index, refWidth);
-                    }
-
-                    break;
-                default:
-                    throw new InvalidDataException("Unsupported binary property list object.");
-            }
+            WriteObject(stream, item, refWidth);
 
             if (stream.Length > maxBytes) return null;
         }
@@ -104,6 +69,62 @@ public static class BinaryPlist
             };
 
             return index;
+        }
+    }
+
+    private static void WriteObject(Stream stream, object item, int referenceWidth)
+    {
+        switch (item)
+        {
+            case bool flag:
+                stream.WriteByte(flag ? TrueMarker : FalseMarker);
+                break;
+            case long number:
+                WriteInteger(stream, number);
+                break;
+            case double number:
+                WriteReal(stream, DoubleMarker, number);
+                break;
+            case DateTime date:
+                WriteReal(stream, DateMarker, (date.ToUniversalTime() - Epoch).TotalSeconds);
+                break;
+            case string text:
+                WriteString(stream, text);
+                break;
+            case byte[] bytes:
+                WriteLength(stream, (int)BinaryPlistObjectType.Data << TypeShift, bytes.Length);
+                stream.Write(bytes);
+                break;
+            case BinaryPlistReferences references:
+                WriteReferences(stream, references, referenceWidth);
+                break;
+            default:
+                throw new InvalidDataException("Unsupported binary property list object.");
+        }
+    }
+
+    private static void WriteReal(Stream stream, byte marker, double value)
+    {
+        stream.WriteByte(marker);
+        WriteNumber(stream, unchecked((ulong)BitConverter.DoubleToInt64Bits(value)), sizeof(ulong));
+    }
+
+    private static void WriteString(Stream stream, string text)
+    {
+        var ascii = IsAscii(text);
+        var kind = ascii ? BinaryPlistObjectType.AsciiString : BinaryPlistObjectType.UnicodeString;
+        WriteLength(stream, (int)kind << TypeShift, text.Length);
+        stream.Write((ascii ? Encoding.ASCII : Encoding.BigEndianUnicode).GetBytes(text));
+    }
+
+    private static void WriteReferences(Stream stream, BinaryPlistReferences references, int width)
+    {
+        var kind = references.Dictionary ? BinaryPlistObjectType.Dictionary : BinaryPlistObjectType.Array;
+        var count = references.Dictionary ? references.Indices.Length / 2 : references.Indices.Length;
+        WriteLength(stream, (int)kind << TypeShift, count);
+        foreach (var index in references.Indices)
+        {
+            WriteNumber(stream, (ulong)index, width);
         }
     }
 

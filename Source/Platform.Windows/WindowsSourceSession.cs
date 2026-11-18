@@ -69,14 +69,7 @@ internal sealed class WindowsSourceSession : ISourceEditSession
 
     public IEnumerable<SourceEntry> EnumerateDirectory(DirectoryInfo directory)
     {
-        var options = new EnumerationOptions
-        {
-            IgnoreInaccessible = false,
-            AttributesToSkip = 0
-        };
-
-        return directory.EnumerateFileSystemInfos(SourceFileDefaults.AllEntriesPattern, options)
-                        .Select(entry => new SourceEntry(entry.Name, entry.Attributes));
+        return SourceDirectoryEntries.Enumerate(directory);
     }
 
     public FileStream OpenRead(FileInfo file) => OpenFile(file, FileAccess.Read);
@@ -152,5 +145,12 @@ internal sealed class WindowsSourceSession : ISourceEditSession
     }
 
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
-    private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, FileShare shareMode, IntPtr securityAttributes, FileMode creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+    private static extern SafeFileHandle CreateFile(
+        string fileName,
+        uint desiredAccess,
+        FileShare shareMode,
+        IntPtr securityAttributes,
+        FileMode creationDisposition,
+        uint flagsAndAttributes,
+        IntPtr templateFile);
 }

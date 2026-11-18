@@ -46,9 +46,7 @@ public sealed class ProtectedCatalogueTests
     public async Task Rejects_Protected_Item_Changes_Before_A_Batch_Without_Changed_Sync_Ids(string mutation)
     {
         using var fixture = new CatalogueFixture();
-        var before = await fixture.ReadAsync();
-        fixture.Execute(mutation);
-        var after = await fixture.ReadAsync();
+        var (before, after) = await fixture.ReadTransitionAsync(mutation);
         Assert.That(after.Tracks, Is.EqualTo(before.Tracks));
         Assert.That(after.OccupiedIds.SetEquals(before.OccupiedIds), Is.True);
         Assert.Throws<IOException>(() => SyncEngine.RequireUnchanged(before, after));

@@ -140,7 +140,6 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
         {
             throw new IOException("The source changed while its cover-removal backup was created.");
         }
-
     }
 
     private static async Task VerifySavedAudioAsync(
@@ -163,7 +162,6 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
         {
             throw new IOException("The MP3 audio changed while removing its embedded covers.");
         }
-
     }
 
     private static async Task RestoreBackupAsync(FileStream stream, FileStream backup, DateTime modified)

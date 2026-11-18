@@ -208,10 +208,7 @@ public sealed class CatalogueGroupCompatibilityTests
             UPDATE album SET sort_album='Album, The';
             """);
 
-        var before = await fixture.ReadAsync();
-        fixture.Execute(mutation);
-
-        var after = await fixture.ReadAsync();
+        var (before, after) = await fixture.ReadTransitionAsync(mutation);
         Assert.That(after.Albums, Is.EquivalentTo(before.Albums));
         Assert.That(after.Artists, Is.EquivalentTo(before.Artists));
         Assert.That(after.OccupiedIds.SetEquals(before.OccupiedIds), Is.True);
@@ -223,9 +220,7 @@ public sealed class CatalogueGroupCompatibilityTests
     public async Task Allows_Deletion_By_Track_Id_While_Shared_Group_Rows_Remain()
     {
         using var fixture = CreateSharedGroups();
-        var before = await fixture.ReadAsync();
-        fixture.Execute("DELETE FROM item WHERE item_pid=1; UPDATE _MLDatabaseProperties SET value='8';");
-        var after = await fixture.ReadAsync();
+        var (before, after) = await fixture.ReadTransitionAsync("DELETE FROM item WHERE item_pid=1; UPDATE _MLDatabaseProperties SET value='8';");
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -245,15 +240,13 @@ public sealed class CatalogueGroupCompatibilityTests
             fixture.Execute("UPDATE album_artist SET album_artist='Artist' WHERE album_artist_pid=22;");
         }
 
-        var before = await fixture.ReadAsync();
-        fixture.Execute("""
+        var (before, after) = await fixture.ReadTransitionAsync("""
             DELETE FROM item WHERE item_pid=1;
             DELETE FROM album WHERE album_pid=12;
             DELETE FROM album_artist WHERE album_artist_pid=11;
             UPDATE _MLDatabaseProperties SET value='8';
             """);
 
-        var after = await fixture.ReadAsync();
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -270,14 +263,12 @@ public sealed class CatalogueGroupCompatibilityTests
     {
         using var fixture = CreateSharedGroups();
         fixture.Execute("DELETE FROM item WHERE item_pid<>1;");
-        var before = await fixture.ReadAsync();
-        fixture.Execute("""
+        var (before, after) = await fixture.ReadTransitionAsync("""
             DELETE FROM item WHERE item_pid=1;
             UPDATE album SET album_pid=23 WHERE album_pid=13;
             UPDATE _MLDatabaseProperties SET value='8';
             """);
 
-        var after = await fixture.ReadAsync();
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -359,8 +350,7 @@ public sealed class CatalogueGroupCompatibilityTests
         Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
         Assert.That(result.Plan.Delete.Select(track => track.Id), Is.EqualTo([101]));
         Assert.That(result.VerifiedBatches, Is.Zero);
-        Assert.That(device.Batches, Is.Empty);
-        Assert.That(device.FileConnections.SelectMany(connection => connection.WritePackets), Is.Empty);
+        SimulatedSyncDeviceAssertions.HasNoWrites(device);
         Assert.That(Directory.EnumerateFileSystemEntries(state.Root), Is.Empty);
     }
 

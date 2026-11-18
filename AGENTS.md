@@ -20,7 +20,8 @@
 - Qualify access to non-static fields, properties, methods and events with `this.`.
 - Put a blank line between property and method declarations.
 - Put a blank line after a multiline expression statement or declaration before
-  subsequent code.
+  subsequent code. At the end of a method, put the closing brace directly on the
+  next line without an intervening blank line.
 - Put a blank line after a closing code-block brace before subsequent code,
   except before `else` (including `else if`) and between the `try`, `catch` and
   `finally` clauses of the same construct.

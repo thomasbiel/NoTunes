@@ -260,7 +260,6 @@ internal sealed class SimulatedSyncDevice : IDisposable
             this.Interrupt(SyncInterruptionPoint.AfterAssets);
             assetsFinished.TrySetResult();
         }
-
     }
 
     private void CompleteAsset(string assetId, Dictionary<string, object> operation, string path)

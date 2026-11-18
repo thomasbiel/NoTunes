@@ -80,13 +80,7 @@ internal sealed class LinuxSourceSession : ISourceEditSession
         // procfs exposes the held directory even if its original pathname has since been renamed.
         var descriptor = handle.DangerousGetHandle().ToInt32().ToString(CultureInfo.InvariantCulture);
         var heldPath = new DirectoryInfo(FileDescriptorDirectory + descriptor);
-        var options = new EnumerationOptions
-        {
-            IgnoreInaccessible = false,
-            AttributesToSkip = 0
-        };
-
-        return heldPath.EnumerateFileSystemInfos(SourceFileDefaults.AllEntriesPattern, options).Select(entry => new SourceEntry(entry.Name, entry.Attributes));
+        return SourceDirectoryEntries.Enumerate(heldPath);
     }
 
     public void ReleaseDirectory(DirectoryInfo directory)

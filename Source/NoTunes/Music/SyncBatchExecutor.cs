@@ -147,7 +147,6 @@ internal sealed class SyncBatchExecutor(SyncDeviceContext context, SyncJournal j
 
             verificationProgress.Advance();
         }
-
     }
 
 }

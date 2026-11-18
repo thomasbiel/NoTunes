@@ -35,6 +35,13 @@ internal static class SavedHostAnchors
 
     public static void Validate(byte[] content, long databaseId)
     {
+        var count = ReadSectionCount(content, databaseId);
+        var sections = ReadSections(content);
+        ValidateSections(sections, count);
+    }
+
+    private static uint ReadSectionCount(byte[] content, long databaseId)
+    {
         if (content.Length < RootHeaderBytes || !content.AsSpan().StartsWith(RootMagic)
             || Number(content, HeaderLengthOffset) != RootHeaderBytes || Number(content, FileLengthOffset) != content.Length
             || Number(content, MinorVersionOffset) is not (CurrentMinorVersion or LegacyMinorVersion)
@@ -46,6 +53,11 @@ internal static class SavedHostAnchors
         var count = Number(content, SectionCountOffset);
         if (count is < 1 or > MaximumSections) throw new InvalidDataException("Invalid saved catalogue section count.");
 
+        return count;
+    }
+
+    private static byte[] ReadSections(byte[] content)
+    {
         var sections = content[RootHeaderBytes..];
         if (Number(content, MajorVersionOffset) == CompressedVersion && content[CompressionFlagOffset] == CompressionEnabled)
         {
@@ -71,6 +83,11 @@ internal static class SavedHostAnchors
             throw new InvalidDataException("Unsupported saved catalogue compression.");
         }
 
+        return sections;
+    }
+
+    private static void ValidateSections(byte[] sections, uint count)
+    {
         var offset = 0;
         var found = false;
         for (var i = 0; i < count; i++)

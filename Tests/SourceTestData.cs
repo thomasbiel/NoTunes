@@ -48,7 +48,6 @@ internal static class SourceTestData
 
                 configure?.Invoke(file);
             });
-
     }
 
     public static string WriteCoveredTrack(string root, string name = "covered.mp3", byte[]? coverBytes = null)

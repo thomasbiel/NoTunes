@@ -17,9 +17,7 @@ public sealed class SyncCatalogueGuardTests
     public async Task Rejects_Reassigned_Group_Ids_Before_A_Batch(string mutation)
     {
         using var fixture = new CatalogueFixture();
-        var before = await fixture.ReadAsync();
-        fixture.Execute(mutation);
-        var changed = await fixture.ReadAsync();
+        var (before, changed) = await fixture.ReadTransitionAsync(mutation);
         Assert.That(changed.Tracks.Select(track => track.Id), Is.EqualTo(before.Tracks.Select(track => track.Id)));
         Assert.That(changed.OccupiedIds.SetEquals(before.OccupiedIds), Is.True);
         Assert.Throws<IOException>(() => SyncEngine.RequireUnchanged(before, changed));
@@ -30,9 +28,7 @@ public sealed class SyncCatalogueGuardTests
     public async Task Rejects_Reassigned_Group_Ids_After_A_Batch(string mutation)
     {
         using var fixture = new CatalogueFixture();
-        var before = await fixture.ReadAsync();
-        fixture.Execute(mutation + "UPDATE _MLDatabaseProperties SET value='8';");
-        var after = await fixture.ReadAsync();
+        var (before, after) = await fixture.ReadTransitionAsync(mutation + "UPDATE _MLDatabaseProperties SET value='8';");
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
             after,
@@ -44,9 +40,7 @@ public sealed class SyncCatalogueGuardTests
     public async Task Accepts_Ascii_Group_Name_Variants_With_Unchanged_Ids()
     {
         using var fixture = new CatalogueFixture();
-        var before = await fixture.ReadAsync();
-        fixture.Execute("UPDATE album SET album='ALBUM'; UPDATE album_artist SET album_artist='ARTIST';");
-        var changed = await fixture.ReadAsync();
+        var (before, changed) = await fixture.ReadTransitionAsync("UPDATE album SET album='ALBUM'; UPDATE album_artist SET album_artist='ARTIST';");
         CatalogueAssertions.AcceptsUnchanged(before, changed);
     }
 }

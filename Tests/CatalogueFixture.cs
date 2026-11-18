@@ -118,6 +118,13 @@ internal sealed class CatalogueFixture : IDisposable
         return CatalogueReader.ReadAsync(this.Snapshot(), CancellationToken.None, allowUninitialized);
     }
 
+    public async Task<(DeviceCatalogue Before, DeviceCatalogue After)> ReadTransitionAsync(string mutation)
+    {
+        var before = await this.ReadAsync();
+        this.Execute(mutation);
+        return (before, await this.ReadAsync());
+    }
+
     private static byte[] ReadShared(string path)
     {
         using var input = new FileStream(

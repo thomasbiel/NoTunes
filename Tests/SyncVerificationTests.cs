@@ -105,8 +105,7 @@ public sealed class SyncVerificationTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute("DELETE FROM item WHERE item_pid<>1;");
-        var before = await fixture.ReadAsync();
-        fixture.Execute("""
+        var (before, after) = await fixture.ReadTransitionAsync("""
             DELETE FROM item WHERE item_pid=1;
             DELETE FROM item_store WHERE item_pid=1;
             DELETE FROM item_extra WHERE item_pid=1;
@@ -117,7 +116,6 @@ public sealed class SyncVerificationTests
             UPDATE _MLDatabaseProperties SET value='8';
             """);
 
-        var after = await fixture.ReadAsync();
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
             after,

@@ -10,7 +10,7 @@ internal sealed class MusicGroupResolver(
     ISet<long> occupied,
     GroupNamePrompt? prompt)
 {
-    private const int MaximumNameLength = 4096;
+    private const int MaximumNameLength = Mp3Metadata.MaximumTextLength;
     private readonly Dictionary<string, ResolvedMusicGroup> resolved = new(GroupNameComparer.Instance);
     private readonly Dictionary<string, long>? groupIds = existingIds is null ? null : new(existingIds, GroupNameComparer.Instance);
     private readonly Dictionary<string, string?> sorts = new(sortNames, GroupNameComparer.Instance);
@@ -34,7 +34,6 @@ internal sealed class MusicGroupResolver(
                 return cached;
             }
 
-            var candidates = this.rowsByKey.GetValueOrDefault(key) ?? [];
             var result = this.TryResolve(key, name, sortName);
             if (result is not null)
             {
@@ -43,32 +42,42 @@ internal sealed class MusicGroupResolver(
                 return result;
             }
 
-            var label = kind switch
-            {
-                MusicGroupKind.Album => "album",
-                MusicGroupKind.AlbumArtist => "album artist",
-                MusicGroupKind.Artist => "artist",
-                MusicGroupKind.Composer => "composer",
-                _ => throw new InvalidOperationException("Unknown music group kind.")
-            };
-
-            var qualified = albumArtist is null ? name : name + " / " + albumArtist;
-            var conflictingRows = candidates.Length == 1 && candidates[0].SyncId != 0 && rows is not null
-                ? rows.Where(group => group.SyncId == candidates[0].SyncId)
-                : candidates;
-
-            var conflicts = string.Join(", ", conflictingRows.Select(group =>
-                $"'{group.DisplayName}' (row {group.RowId}, sync ID {group.SyncId}, sort '{group.SortName}')"));
-
-            var description = $"Cannot uniquely assign {label} '{qualified}' for source '{sourcePath}'. "
-                + (conflicts.Length == 0 ? "The existing identity or sort name is ambiguous. " : conflicts + ". ")
-                + "Enter an unambiguous existing name or a distinct name for a new group. "
-                + "This selection applies to this source group for this run. "
-                + "Existing tracks and source tags will be preserved.";
+            var description = this.DescribeConflict(
+                key,
+                name,
+                sourcePath,
+                albumArtist);
 
             name = await this.ChooseNameAsync(description, cancellationToken);
             sortName = name;
         }
+    }
+
+    private string DescribeConflict(string key, string name, string sourcePath, string? albumArtist)
+    {
+        var candidates = this.rowsByKey.GetValueOrDefault(key) ?? [];
+        var label = kind switch
+        {
+            MusicGroupKind.Album => "album",
+            MusicGroupKind.AlbumArtist => "album artist",
+            MusicGroupKind.Artist => "artist",
+            MusicGroupKind.Composer => "composer",
+            _ => throw new InvalidOperationException("Unknown music group kind.")
+        };
+
+        var qualified = albumArtist is null ? name : name + " / " + albumArtist;
+        var conflictingRows = candidates.Length == 1 && candidates[0].SyncId != 0 && rows is not null
+            ? rows.Where(group => group.SyncId == candidates[0].SyncId)
+            : candidates;
+
+        var conflicts = string.Join(", ", conflictingRows.Select(group =>
+            $"'{group.DisplayName}' (row {group.RowId}, sync ID {group.SyncId}, sort '{group.SortName}')"));
+
+        return $"Cannot uniquely assign {label} '{qualified}' for source '{sourcePath}'. "
+            + (conflicts.Length == 0 ? "The existing identity or sort name is ambiguous. " : conflicts + ". ")
+            + "Enter an unambiguous existing name or a distinct name for a new group. "
+            + "This selection applies to this source group for this run. "
+            + "Existing tracks and source tags will be preserved.";
     }
 
     private static Dictionary<string, CatalogueGroup[]> GroupRowsByKey(IReadOnlyList<CatalogueGroup>? rows)

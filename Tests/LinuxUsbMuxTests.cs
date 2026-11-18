@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Net.Sockets;
 using NoTunes.Apple;
 using NoTunes.Platform.Linux;
@@ -50,19 +49,11 @@ public sealed class LinuxUsbMuxTests
                 "ReadPairRecord",
                 "ReadBUID",
                 "Connect"
-            }
-
-            )
+            })
             {
                 using var socket = await listener.AcceptAsync(deadline.Token);
                 await using var stream = new NetworkStream(socket, ownsSocket: false);
-                var header = new byte[16];
-                await stream.ReadExactlyAsync(header, deadline.Token);
-                var length = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(header) - 16);
-                Assert.That(length, Is.InRange(1, 4096));
-                var payload = new byte[length];
-                await stream.ReadExactlyAsync(payload, deadline.Token);
-                var request = Plist.Parse(payload).AsDict();
+                var (tag, request) = await ProtocolFrames.ReadUsbMuxRequestAsync(stream, deadline.Token);
                 Assert.That(request.Text("MessageType"), Is.EqualTo(operation));
                 var reply = operation switch
                 {
@@ -72,9 +63,12 @@ public sealed class LinuxUsbMuxTests
                     _ => Plist.Dict(("Number", 0L))
                 };
 
-                await stream.WriteAsync(ProtocolFrames.UsbMux(BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(12)), reply), deadline.Token);
+                await stream.WriteAsync(ProtocolFrames.UsbMux(tag, reply), deadline.Token);
                 if (operation != "Connect")
+                {
                     continue;
+                }
+
                 Assert.That(request.Number("DeviceID"), Is.EqualTo(7));
                 Assert.That(request.Number("PortNumber"), Is.EqualTo(32498));
                 var bytes = new byte[3];

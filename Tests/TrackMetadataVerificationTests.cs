@@ -77,9 +77,7 @@ public sealed class TrackMetadataVerificationTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(OtherGroupsSql);
-        var before = await fixture.ReadAsync();
-        fixture.Execute(mutation);
-        var after = await fixture.ReadAsync();
+        var (before, after) = await fixture.ReadTransitionAsync(mutation);
         CatalogueAssertions.RejectsUnrequestedChanges(before, after);
     }
 
@@ -107,9 +105,7 @@ public sealed class TrackMetadataVerificationTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(OtherGroupsSql);
-        var before = await fixture.ReadAsync();
-        fixture.Execute(InsertAdditionSql);
-        var correct = await fixture.ReadAsync();
+        var (before, correct) = await fixture.ReadTransitionAsync(InsertAdditionSql);
         var addition = Addition();
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
             before,
@@ -165,9 +161,7 @@ public sealed class TrackMetadataVerificationTests
     {
         using var fixture = new CatalogueFixture();
         fixture.Execute(OtherGroupsSql);
-        var before = await fixture.ReadAsync();
-        fixture.Execute("UPDATE item SET album_pid=13,track_number=99 WHERE item_pid=5;");
-        var after = await fixture.ReadAsync();
+        var (before, after) = await fixture.ReadTransitionAsync("UPDATE item SET album_pid=13,track_number=99 WHERE item_pid=5;");
         CatalogueAssertions.RejectsUnrequestedChanges(before, after);
     }
 
