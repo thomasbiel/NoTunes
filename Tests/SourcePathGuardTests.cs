@@ -130,6 +130,20 @@ public sealed class SourcePathGuardTests
         this.junctions[0] = Path.Combine(moved, "linked-album");
     }
 
+    [Test]
+    public async Task Cover_Removal_Rejects_A_Junction_Without_Changing_The_Target()
+    {
+        var path = SourceTestData.WriteTrack(this.outside, "covered.mp3", file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
+        var bytes = await File.ReadAllBytesAsync(path);
+        var link = Path.Combine(this.source, "linked-album");
+        this.CreateJunction(link, this.outside);
+        var remover = new CoverRemover(new WindowsSourceFileSystem());
+
+        await Assert.ThrowsAsync<IOException>(() => remover.RemoveAsync(Path.Combine(link, "covered.mp3"), CancellationToken.None));
+
+        Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
+    }
+
     private void MoveWithinFixture(string from, string to)
     {
         this.AssertWithinFixture(from);

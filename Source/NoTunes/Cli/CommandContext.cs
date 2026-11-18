@@ -8,4 +8,5 @@ public sealed record CommandContext(
     IUsbMuxTransport Transport,
     SyncEngine SyncEngine,
     LibraryInitializer Initializer,
+    CoverRemover CoverRemover,
     TextWriter Output);

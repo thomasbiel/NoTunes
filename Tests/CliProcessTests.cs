@@ -8,6 +8,59 @@ namespace NoTunes.Tests;
 public sealed class CliProcessTests
 {
     [Test]
+    public async Task Removes_A_Local_Cover_Through_The_Cli([Values] bool json)
+    {
+        using var source = new Music.SyncWorkspace();
+        var path = SourceTestData.WriteTrack(source.Root, "song.mp3",
+            file => file.Tag.Pictures = [FeatureTestData.FrontCover([1, 2, 3, 4])]);
+
+        var result = await RunAsync(json ? ["remove-cover", path, "--json"] : ["remove-cover", path]);
+
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        Assert.That(result.Error, Is.Empty);
+        if (json)
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(result.Output);
+            Assert.That(document.RootElement.GetProperty("Path").GetString(), Is.EqualTo(path));
+            Assert.That(document.RootElement.GetProperty("RemovedCovers").GetInt32(), Is.EqualTo(1));
+        }
+        else
+        {
+            Assert.That(result.Output, Does.Contain("Removed 1 embedded cover(s)"));
+        }
+
+        using var verified = TagLib.File.Create(path);
+        Assert.That(verified.Tag.Pictures, Is.Empty);
+    }
+
+    [Test]
+    public async Task Resolves_A_Cover_Command_Path_Relative_To_The_Selected_Music_Folder()
+    {
+        using var source = new Music.SyncWorkspace();
+        var path = SourceTestData.WriteTrack(source.Root, "song.mp3",
+            file => file.Tag.Pictures = [FeatureTestData.FrontCover()]);
+
+        var result = await RunAsync(
+            "remove-cover",
+            "song.mp3",
+            "--folder",
+            source.Root);
+
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        using var verified = TagLib.File.Create(path);
+        Assert.That(verified.Tag.Pictures, Is.Empty);
+    }
+
+    [Test]
+    public async Task Requires_A_File_For_Cover_Removal()
+    {
+        var result = await RunAsync("remove-cover");
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.InvalidArguments));
+        Assert.That(result.Output, Is.Empty);
+        Assert.That(result.Error, Is.Not.Empty);
+    }
+
+    [Test]
     public async Task Executes_A_Valid_Scan_Through_The_Shared_MapResult_Callback()
     {
         using var source = new Music.SyncWorkspace();
@@ -20,6 +73,7 @@ public sealed class CliProcessTests
 
     [TestCase("scan")]
     [TestCase("sync")]
+    [TestCase("remove-cover")]
     public async Task Rejects_Additional_Source_Arguments_Before_Scanning(string command)
     {
         var missing = Path.Combine(Path.GetTempPath(), "NoTunes-missing-" + Guid.NewGuid().ToString("N"));
@@ -61,6 +115,7 @@ public sealed class CliProcessTests
     [TestCase("sync")]
     [TestCase("devices")]
     [TestCase("probe")]
+    [TestCase("remove-cover")]
     public async Task Help_Still_Succeeds(string command)
     {
         var result = await RunAsync(command, "--help");

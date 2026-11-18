@@ -13,7 +13,8 @@ internal static class Program
     {
         LongOptionPrefix + CliSyntax.Device,
         LongOptionPrefix + CliSyntax.Timeout,
-        LongOptionPrefix + CliSyntax.StateFolder
+        LongOptionPrefix + CliSyntax.StateFolder,
+        LongOptionPrefix + CliSyntax.SourceFolder
     };
 
     public static async Task<int> Main(string[] args)
@@ -44,7 +45,7 @@ internal static class Program
             var context = services.GetRequiredService<CommandContext>();
             await using var parserOutput = new StringWriter(CultureInfo.InvariantCulture);
             using var parser = new Parser(settings => settings.HelpWriter = parserOutput);
-            var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions>(args);
+            var result = parser.ParseArguments<DevicesOptions, ProbeOptions, ScanOptions, SyncOptions, InitOptions, RemoveCoverOptions>(args);
             if (result is Parsed<object>) ValidateOptionValues(args);
 
             return await result.MapResult<CommandOptions, Task<int>>(

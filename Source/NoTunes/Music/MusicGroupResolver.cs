@@ -56,7 +56,7 @@ internal sealed class MusicGroupResolver(
             var conflictingRows = candidates.Length == 1 && candidates[0].SyncId != 0 && rows is not null
                 ? rows.Where(group => group.SyncId == candidates[0].SyncId)
                 : candidates;
-            
+
             var conflicts = string.Join(", ", conflictingRows.Select(group =>
                 $"'{group.DisplayName}' (row {group.RowId}, sync ID {group.SyncId}, sort '{group.SortName}')"));
 

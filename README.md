@@ -133,6 +133,10 @@ dotnet run --project Source/NoTunes/NoTunes.csproj -- scan "D:\Music"
 dotnet run --project Source/NoTunes/NoTunes.csproj -- scan "D:\Music" --json
 dotnet run --project Source/NoTunes/NoTunes.csproj -- sync "D:\Music" --dry-run --json
 dotnet run --project Source/NoTunes/NoTunes.csproj -- sync "D:\Music"
+
+dotnet run --project Source/NoTunes/NoTunes.csproj -- remove-cover "Seal - Amazing.mp3"
+
+dotnet run --project Source/NoTunes/NoTunes.csproj -- remove-cover "D:\Music\song.mp3" --json
 ```
 
 After building, the equivalent executable is
@@ -192,6 +196,22 @@ After building, the equivalent executable is
   existing tracks are repaired with artwork-only updates that retain their audio,
   metadata and track identities. Dry-run lists these under `Artwork` in JSON or
   as `~ Cover:` entries in text output.
+- `remove-cover <file> [--folder <path>] [--json]` removes all embedded pictures
+  from exactly one local MP3, including pictures that cannot be decoded. Absolute
+  paths select the file directly; relative paths resolve below `MusicSourceFolder`
+  in `app.config`, or below the explicit `--folder`. No iPhone is required or
+  contacted and there is no confirmation prompt. It preserves the MPEG audio
+  bytes and the other tags. A file with no pictures is left unchanged and succeeds
+  with a zero removal count. JSON reports `Path` and `RemovedCovers`.
+  Editing uses the platform's guarded file handles and an exclusive edit lock.
+  A temporary original is retained until the edited file has been reopened and
+  its cover removal and unchanged audio hash verified. On a write or verification
+  failure, the original bytes are restored; if restoration itself fails, the
+  error reports the retained backup path. Successful edits change the file's
+  modification time so the next source scan refreshes its cached hash.
+  The command does not change synchronization's handling of invalid covers or
+  modify the iPhone. Because synchronization compares complete file hashes,
+  the changed MP3 can be transferred as a replacement on the next write sync.
 
 Device commands take `--timeout` (1–300 seconds per request) and `--json`.
 With multiple USB devices, `probe` requires `--device`; it never chooses one

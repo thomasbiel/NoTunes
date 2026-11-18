@@ -80,7 +80,7 @@ internal sealed record TrackMetadata
         var sameMilliseconds = this.TotalMilliseconds == milliseconds
             || this.TotalMilliseconds == suppliedMilliseconds
                 && Math.Abs(suppliedMilliseconds - milliseconds) <= MaximumMillisecondRoundingDifference;
-        
+
         return this.AlbumId == track.AlbumId && this.AlbumArtistId == track.ArtistId
             && GroupNameComparer.Instance.Equals(this.Album, track.Metadata.Album)
             && GroupNameComparer.Instance.Equals(this.AlbumArtist, track.Metadata.AlbumArtist)

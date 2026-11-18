@@ -27,7 +27,7 @@ public sealed class GroupAliasRecoveryTests
             after,
             [addition],
             []));
-        
+
         Assert.That(SyncRecovery.Assess(pending, after, [addition]), Is.Empty);
         Assert.That(pending.Operation, Is.EqualTo(originalOperation));
         Assert.That(addition.Metadata.AlbumArtist, Is.EqualTo(alias));
@@ -54,7 +54,7 @@ public sealed class GroupAliasRecoveryTests
                 _ => throw new AssertionException("Unknown mutation.")
             }
         };
-        
+
         var incorrect = after with { Tracks = [.. before.Tracks, wrong] };
 
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
@@ -62,7 +62,7 @@ public sealed class GroupAliasRecoveryTests
             incorrect,
             [addition],
             []));
-        
+
         Assert.Throws<IOException>(() => SyncRecovery.Assess(pending, incorrect, [addition]));
     }
 
@@ -78,7 +78,7 @@ public sealed class GroupAliasRecoveryTests
             after,
             [addition],
             []));
-        
+
         Assert.Throws<IOException>(() => SyncRecovery.Assess(pending, after, [addition]));
     }
 
@@ -93,7 +93,7 @@ public sealed class GroupAliasRecoveryTests
             UPDATE album_artist SET album_artist='{canonical}',sort_album_artist='{canonical}' WHERE album_artist_pid=11;
             INSERT INTO album_artist VALUES(22,1011,'{alias}','{alias}');
             """);
-        
+
         var before = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
         var addition = LegacyAddition(alias);
         var stored = FeatureTestData.Stored(addition);
@@ -107,7 +107,7 @@ public sealed class GroupAliasRecoveryTests
                 SortAlbumArtist = canonical
             }
         };
-        
+
         var after = before with
         {
             Anchor = before.Anchor + 1,
@@ -120,7 +120,7 @@ public sealed class GroupAliasRecoveryTests
                 CanonicalArtistRow,
                 canonical)]
         };
-        
+
         var pending = new PendingSync(
             RecoverableJournalVersion,
             new LibraryIdentity("id", "binding"),
@@ -129,7 +129,7 @@ public sealed class GroupAliasRecoveryTests
             [],
             SyncOperations.Serialize(before, [addition], []),
             [1, 2]);
-        
+
         return (before, after, addition, pending);
     }
 
@@ -143,7 +143,7 @@ public sealed class GroupAliasRecoveryTests
             [MediaKeys.AlbumArtist] = artist,
             [MediaKeys.SortAlbumArtist] = artist
         };
-        
+
         return track with
         {
             AlbumId = NewAlbumId,

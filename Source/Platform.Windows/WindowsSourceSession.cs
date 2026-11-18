@@ -6,11 +6,12 @@ using Microsoft.Win32.SafeHandles;
 namespace NoTunes.Platform.Windows;
 
 [SupportedOSPlatform("windows")]
-internal sealed class WindowsSourceSession : ISourceSession
+internal sealed class WindowsSourceSession : ISourceEditSession
 {
     private const uint ReadAttributes = 0x80;
     private const uint ListDirectory = 0x1;
     private const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
     private const uint OpenReparsePoint = 0x00200000;
     private const uint BackupSemantics = 0x02000000;
     private const uint SequentialScan = 0x08000000;
@@ -80,16 +81,27 @@ internal sealed class WindowsSourceSession : ISourceSession
 
     public FileStream OpenRead(FileInfo file)
     {
+        return OpenFile(file, FileAccess.Read);
+    }
+
+    public FileStream OpenEdit(FileInfo file)
+    {
+        return OpenFile(file, FileAccess.ReadWrite);
+    }
+
+    private static FileStream OpenFile(FileInfo file, FileAccess access)
+    {
         var handle = Open(
             file.FullName,
-            GenericRead,
+            access == FileAccess.ReadWrite ? GenericRead | GenericWrite : GenericRead,
             Overlapped | SequentialScan,
-            directory: false);
+            directory: false,
+            access == FileAccess.ReadWrite ? FileShare.None : FileShare.Read);
         try
         {
             return new FileStream(
                 handle,
-                FileAccess.Read,
+                access,
                 SourceFileDefaults.ReadBufferBytes,
                 isAsync: true);
         }
@@ -100,13 +112,13 @@ internal sealed class WindowsSourceSession : ISourceSession
         }
     }
 
-    private static SafeFileHandle Open(string path, uint access, uint flags, bool directory)
+    private static SafeFileHandle Open(string path, uint access, uint flags, bool directory, FileShare share = FileShare.Read)
     {
         // Deny write/delete sharing so a validated component cannot become a link or be replaced.
         var handle = CreateFile(
             Path.TrimEndingDirectorySeparator(path),
             access,
-            FileShare.Read,
+            share,
             IntPtr.Zero,
             FileMode.Open,
             flags | OpenReparsePoint,

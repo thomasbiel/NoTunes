@@ -30,6 +30,7 @@ public static class ApplicationServices
             services.AddSingleton(_ => new SourceHashCache(
                 Path.Combine(DeviceState.Root(null), SourceHashCache.DirectoryName), error));
             services.AddTransient<SourceScanner>();
+            services.AddTransient<CoverRemover>();
             services.AddTransient(provider => new LibraryInitializer(
                 provider.GetRequiredService<Platform.IUsbMuxTransport>(), error));
             services.AddTransient(provider => new SyncEngine(
@@ -46,6 +47,7 @@ public static class ApplicationServices
                 provider.GetRequiredService<Platform.IUsbMuxTransport>(),
                 provider.GetRequiredService<SyncEngine>(),
                 provider.GetRequiredService<LibraryInitializer>(),
+                provider.GetRequiredService<CoverRemover>(),
                 output));
         
             return services;

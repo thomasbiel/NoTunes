@@ -7,7 +7,7 @@ using Microsoft.Win32.SafeHandles;
 namespace NoTunes.Platform.Linux;
 
 [SupportedOSPlatform("linux")]
-internal sealed class LinuxSourceSession : ISourceSession
+internal sealed class LinuxSourceSession : ISourceEditSession
 {
     private const int CloseOnExec = 1 << 19;
     private const int NonBlocking = 1 << 11;
@@ -16,6 +16,8 @@ internal sealed class LinuxSourceSession : ISourceSession
     private const int FileTypeMask = 0xf000;
     private const int RegularFile = 0x8000;
     private const int LockShared = 1;
+    private const int LockExclusive = 2;
+    private const int ReadWrite = 2;
     private const int LockNonBlocking = 4;
     private const string LibcName = "libc";
     private const string RootPath = "/";
@@ -96,9 +98,20 @@ internal sealed class LinuxSourceSession : ISourceSession
 
     public FileStream OpenRead(FileInfo file)
     {
+        return this.OpenFile(file, FileAccess.Read);
+    }
+
+    public FileStream OpenEdit(FileInfo file)
+    {
+        return this.OpenFile(file, FileAccess.ReadWrite);
+    }
+
+    private FileStream OpenFile(FileInfo file, FileAccess access)
+    {
         var parent = this.GetDirectory(file.Directory ?? throw new IOException("A source file has no parent directory."));
         // NONBLOCK also prevents a swapped-in FIFO from hanging the scan before its type is checked.
-        var handle = CheckedHandle(OpenAt(parent, file.Name, this.flags.NoFollow | CloseOnExec | NonBlocking), file.FullName);
+        var mode = access == FileAccess.ReadWrite ? ReadWrite : 0;
+        var handle = CheckedHandle(OpenAt(parent, file.Name, this.flags.NoFollow | CloseOnExec | NonBlocking | mode), file.FullName);
         try
         {
             if (Statx(
@@ -109,11 +122,12 @@ internal sealed class LinuxSourceSession : ISourceSession
                 out var status) != 0) throw NativeError(file.FullName);
             if ((status.Mask & StatType) == 0 || (status.Mode & FileTypeMask) != RegularFile)
                 throw new IOException($"Source path is not a regular file: {file.FullName}");
-            if (Flock(handle, LockShared | LockNonBlocking) != 0) throw NativeError(file.FullName);
+            var fileLock = access == FileAccess.ReadWrite ? LockExclusive : LockShared;
+            if (Flock(handle, fileLock | LockNonBlocking) != 0) throw NativeError(file.FullName);
 
             return new FileStream(
                 handle,
-                FileAccess.Read,
+                access,
                 SourceFileDefaults.ReadBufferBytes,
                 isAsync: false);
         }

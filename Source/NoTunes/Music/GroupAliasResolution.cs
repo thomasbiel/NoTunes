@@ -17,7 +17,7 @@ internal static class GroupAliasResolution
         var requestedName = requested[0].Name.Replace(AliasPunctuation, string.Empty, StringComparison.Ordinal);
         var sameName = GroupNameComparer.Instance.Equals(selected.Name, requested[0].Name)
             || selectedName.Length != 0 && GroupNameComparer.Instance.Equals(selectedName, requestedName);
-        
+
         if (!sameName || selected.AlbumArtistRowId != requested[0].AlbumArtistRowId) return null;
 
         if (rows.Count(row => GroupNameComparer.Instance.Equals(row.Key, selected.Key)) != 1) return null;
@@ -31,12 +31,12 @@ internal static class GroupAliasResolution
         var album = Resolve(before.AlbumGroups, CatalogueReader.GroupKey(track.Metadata.Album, track.Metadata.AlbumArtist));
         var useArtist = artist is not null && artist.SyncId == track.ArtistId
             && !GroupNameComparer.Instance.Equals(artist.Name, track.Metadata.AlbumArtist);
-        
+
         var artistName = useArtist ? artist!.Name : track.Metadata.AlbumArtist;
         var useAlbum = album is not null && album.SyncId == track.AlbumId
             && GroupNameComparer.Instance.Equals(album.AlbumArtist, artistName)
             && !GroupNameComparer.Instance.Equals(album.Name, track.Metadata.Album);
-        
+
         if (!useArtist && !useAlbum) return track;
 
         // Project the known receiver spelling; the signed operation and journal remain untouched.

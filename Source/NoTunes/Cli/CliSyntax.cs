@@ -7,6 +7,9 @@ internal static class CliSyntax
     public const string Probe = "probe";
     public const string Scan = "scan";
     public const string Sync = "sync";
+    public const string RemoveCover = "remove-cover";
+    public const string SourceFolder = "folder";
+    public const string File = "FILE";
     public const string Device = "device";
     public const string Timeout = "timeout";
     public const string Json = "json";
