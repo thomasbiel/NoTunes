@@ -6,7 +6,6 @@ public static class ExitCodes
     public const int Error = 1;
     public const int InvalidArguments = 2;
     public const int SyncBlocked = 3;
-    public const int SyncNotImplemented = 4;
     public const int PartialSuccess = 5;
     public const int Cancelled = 130;
 }

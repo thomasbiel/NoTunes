@@ -10,6 +10,7 @@ public abstract class CommandOptions
 
     protected static void ValidateAdditionalArguments(IEnumerable<string> arguments)
     {
+        // The parser silently ignores surplus positional values unless a verb captures them with [Value].
         var additional = arguments.ToArray();
         if (additional.Length != 0)
         {

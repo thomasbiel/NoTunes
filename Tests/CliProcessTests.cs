@@ -104,6 +104,7 @@ public sealed class CliProcessTests
 
     [TestCase("devices")]
     [TestCase("probe")]
+    [TestCase("init")]
     public async Task Rejects_Positional_Arguments_For_Device_Commands(string command)
     {
         var result = await RunAsync(
