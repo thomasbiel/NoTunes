@@ -6,8 +6,33 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class MusicGroupResolverTests
 {
+    [TestCase("Boney M.", "Boney M")]
+    [TestCase("R.E.M.", "REM")]
+    public async Task Chooses_The_First_Receiver_Row_For_A_Dotted_Alias(string canonical, string alias)
+    {
+        const long sharedId = 1011;
+        var resolver = new MusicGroupResolver(
+            MusicGroupKind.AlbumArtist,
+            [Artist(22, sharedId, alias), Artist(11, sharedId, canonical)],
+            new Dictionary<string, long>(),
+            new Dictionary<string, string?>(),
+            new HashSet<long> { sharedId },
+            (_, _) => throw new AssertionException("A dotted alias must be resolved automatically."));
+
+        var result = await resolver.ResolveAsync(
+            alias,
+            alias,
+            "new-song.mp3",
+            null,
+            CancellationToken.None);
+
+        Assert.That(result.Name, Is.EqualTo(canonical));
+        Assert.That(result.SortName, Is.EqualTo(canonical));
+        Assert.That(result.Id, Is.EqualTo(sharedId));
+    }
+
     [Test]
-    public async Task Resolves_The_Exact_Boney_M_Name_Despite_A_Shared_Sync_Id([Values] bool dot)
+    public async Task Uses_The_Receiver_Spelling_For_Either_Requested_Boney_M_Alias([Values] bool dot)
     {
         const long sharedId = 6703696635933110658;
         var rows = new[]
@@ -32,8 +57,39 @@ public sealed class MusicGroupResolverTests
             null,
             CancellationToken.None);
 
-        Assert.That(result.Name, Is.EqualTo(name));
+        Assert.That(result.Name, Is.EqualTo("Boney M"));
         Assert.That(result.Id, Is.EqualTo(sharedId));
+    }
+
+    [Test]
+    public async Task Asks_When_Unrelated_Names_Share_An_Identity([Values] bool newName)
+    {
+        const long sharedId = 1011;
+        var calls = 0;
+        var chosen = newName ? "Separate Artist" : "Artist";
+        var resolver = new MusicGroupResolver(
+            MusicGroupKind.AlbumArtist,
+            [Artist(11, sharedId, "Artist"), Artist(22, sharedId, "Other Artist")],
+            new Dictionary<string, long>(),
+            new Dictionary<string, string?>(),
+            new HashSet<long> { sharedId },
+            (description, _) =>
+            {
+                calls++;
+                Assert.That(description, Does.Contain("Other Artist").And.Contain("row 11").And.Contain("row 22"));
+                return ValueTask.FromResult<string?>(chosen);
+            });
+
+        var result = await resolver.ResolveAsync(
+            "Other Artist",
+            "Other Artist",
+            "affected.mp3",
+            null,
+            CancellationToken.None);
+
+        Assert.That(calls, Is.EqualTo(1));
+        Assert.That(result.Name, Is.EqualTo(chosen));
+        Assert.That(result.Id, newName ? Is.Not.EqualTo(sharedId) : Is.EqualTo(sharedId));
     }
 
     [Test]
@@ -146,6 +202,44 @@ public sealed class MusicGroupResolverTests
 
         Assert.That(failure, endOfInput ? Is.TypeOf<InvalidDataException>() : Is.TypeOf<OperationCanceledException>());
         if (endOfInput) Assert.That(failure!.Message, Does.Contain("affected.mp3").And.Contain("interactive terminal"));
+    }
+
+    [Test]
+    public async Task Does_Not_Resolve_A_Shared_Album_Through_Another_Album_Artist()
+    {
+        const long sharedId = 1012;
+        var resolver = new MusicGroupResolver(
+            MusicGroupKind.Album,
+            [
+                new CatalogueGroup(
+                    12,
+                    sharedId,
+                    "Album",
+                    "Album",
+                    11,
+                    "First Artist"),
+                new CatalogueGroup(
+                    13,
+                    sharedId,
+                    "Album.",
+                    "Album.",
+                    22,
+                    "Second Artist")
+            ],
+            new Dictionary<string, long>(),
+            new Dictionary<string, string?>(),
+            new HashSet<long> { sharedId },
+            (_, _) => ValueTask.FromResult<string?>("Separate Album"));
+
+        var result = await resolver.ResolveAsync(
+            "Album.",
+            "Album.",
+            "affected.mp3",
+            "Second Artist",
+            CancellationToken.None);
+
+        Assert.That(result.Name, Is.EqualTo("Separate Album"));
+        Assert.That(result.Id, Is.Not.EqualTo(sharedId));
     }
 
     private static CatalogueGroup Artist(long rowId, long syncId, string name)

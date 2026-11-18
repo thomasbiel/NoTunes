@@ -11,7 +11,7 @@ public sealed class CatalogueGroupCompatibilityTests
     private const long SharedArtistId = 1011;
     private const long SharedAlbumId = 1012;
     private const string ArtistName = "Artist";
-    private const string ArtistAlias = "Other Artist";
+    private const string ArtistAlias = "Artist.";
     private const string AlbumName = "Album";
 
     [Test]
@@ -53,7 +53,7 @@ public sealed class CatalogueGroupCompatibilityTests
 
     [TestCase(ArtistName)]
     [TestCase(ArtistAlias)]
-    public async Task Resolves_A_Shared_Artist_Sync_Id_By_Its_Unique_Name(string artist)
+    public async Task Resolves_A_Shared_Artist_Sync_Id_To_The_Receiver_Name(string artist)
     {
         using var fixture = CreateSharedGroups();
         var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
@@ -67,7 +67,7 @@ public sealed class CatalogueGroupCompatibilityTests
 
         var prepared = await SourceTestData.PrepareAsync(source.Root, catalogue, output);
         Assert.That(prepared.Single().ArtistId, Is.EqualTo(SharedArtistId));
-        Assert.That(prepared.Single().Metadata.AlbumArtist, Is.EqualTo(artist));
+        Assert.That(prepared.Single().Metadata.AlbumArtist, Is.EqualTo(ArtistName));
     }
 
     [Test]
@@ -95,11 +95,11 @@ public sealed class CatalogueGroupCompatibilityTests
     }
 
     [TestCase(AlbumName)]
-    [TestCase("Other Album")]
-    public async Task Resolves_A_Shared_Album_Sync_Id_By_Its_Qualified_Name(string album)
+    [TestCase("Album.")]
+    public async Task Resolves_A_Shared_Album_Sync_Id_To_The_Qualified_Receiver_Name(string album)
     {
         using var fixture = new CatalogueFixture();
-        fixture.Execute("INSERT INTO album VALUES(13,1012,'Other Album',11,'Other Sort');");
+        fixture.Execute("INSERT INTO album VALUES(13,1012,'Album.',11,'Other Sort');");
         var catalogue = await CatalogueReader.ReadAsync(fixture.Snapshot(), CancellationToken.None);
         using var source = new SyncWorkspace();
         using var output = new SyncWorkspace();
@@ -111,7 +111,7 @@ public sealed class CatalogueGroupCompatibilityTests
 
         var prepared = await SourceTestData.PrepareAsync(source.Root, catalogue, output);
         Assert.That(prepared.Single().AlbumId, Is.EqualTo(SharedAlbumId));
-        Assert.That(prepared.Single().Metadata.Album, Is.EqualTo(album));
+        Assert.That(prepared.Single().Metadata.Album, Is.EqualTo(AlbumName));
     }
 
     [Test]
@@ -130,7 +130,7 @@ public sealed class CatalogueGroupCompatibilityTests
         var stored = FeatureTestData.Stored(addition);
         stored = stored with
         {
-            Metadata = stored.Metadata! with { AlbumRowId = 13, AlbumArtistRowId = 22 }
+            Metadata = stored.Metadata! with { AlbumRowId = 12, AlbumArtistRowId = 11 }
         };
         var after = before with { Anchor = before.Anchor + 1, Tracks = [.. before.Tracks, stored] };
         Assert.DoesNotThrow(() => SyncEngine.VerifyResult(
@@ -141,8 +141,8 @@ public sealed class CatalogueGroupCompatibilityTests
 
         var wrong = stored with
         {
-            Metadata = album ? stored.Metadata! with { AlbumRowId = 12 }
-                : stored.Metadata! with { AlbumArtistRowId = 11 }
+            Metadata = album ? stored.Metadata! with { AlbumRowId = 13 }
+                : stored.Metadata! with { AlbumArtistRowId = 22 }
         };
         Assert.Throws<IOException>(() => SyncEngine.VerifyResult(
             before,
@@ -368,7 +368,7 @@ public sealed class CatalogueGroupCompatibilityTests
     {
         var fixture = new CatalogueFixture();
         fixture.Execute("""
-            INSERT INTO album_artist VALUES(22,1011,'Other Artist','Other Artist, The');
+            INSERT INTO album_artist VALUES(22,1011,'Artist.','Other Artist, The');
             INSERT INTO album VALUES(13,1012,'Album',22,'Other Album Sort');
             UPDATE item SET album_artist_pid=22,album_pid=13 WHERE item_pid=5;
             """);

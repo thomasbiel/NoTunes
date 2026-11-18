@@ -331,10 +331,19 @@ match in each album or artist name.
 Existing album and album-artist rows may share a nonzero host sync ID, including
 rows with different name spellings. NoTunes reads those rows separately by their
 internal database IDs and preserves existing track assignments. Audio additions
-automatically reuse an existing group when its name uniquely identifies a row;
-albums also require the album artist to match. For example, `Boney M` and
-`Boney M.` remain distinguishable even with a shared sync ID. Verification checks
-the new track's internal group rows as well as names and sync IDs.
+reuse the receiver's first internal row for a shared sync ID only when the source
+name uniquely identifies a row and the spellings differ solely by periods or
+ASCII case, such as `Boney M` / `Boney M.` and `REM` / `R.E.M.`. Album aliases
+must also have the same album-artist row. Otherwise the run asks for a different
+unambiguous name. Inserted metadata uses the receiver's existing name and sort
+name; source tags and existing groups remain unchanged. Verification still checks
+the exact internal target row, names, sort names and sync IDs.
+
+Recovery applies the same interpretation to old signed requests using only the
+group rows captured before that operation. It does not rewrite the signed request
+or accept an arbitrary row with the same sync ID. Millisecond verification accepts
+the value derived from rounded samples or the submitted value when they differ
+by at most 1 ms; sample counts and all other audio properties remain exact.
 
 If a name identifies multiple rows or the sort name is ambiguous, an interactive
 run asks for an unambiguous existing target name or a distinct name for a new

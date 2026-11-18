@@ -7,6 +7,31 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class TrackMetadataVerificationTests
 {
+    [TestCase(4886368L, 110802L)]
+    [TestCase(9242610L, 209583L)]
+    [TestCase(15112761L, 342693L)]
+    [TestCase(44100L, 999L)]
+    public void Accepts_The_Submitted_Millisecond_Value_At_A_Sample_Rounding_Boundary(long samples, long milliseconds)
+    {
+        var addition = Addition();
+        addition.Metadata.Audio[MediaKeys.Duration] = samples;
+        addition.Metadata.Item[MediaKeys.TotalMilliseconds] = milliseconds;
+        var stored = FeatureTestData.Stored(addition).Metadata! with { TotalMilliseconds = milliseconds };
+
+        Assert.That(stored.Matches(addition), Is.True);
+    }
+
+    [TestCase(1000L, 1001L)]
+    [TestCase(5000L, 5000L)]
+    public void Rejects_Unrequested_Or_Inconsistent_Millisecond_Values(long submitted, long stored)
+    {
+        var addition = Addition();
+        addition.Metadata.Item[MediaKeys.TotalMilliseconds] = submitted;
+        var metadata = FeatureTestData.Stored(addition).Metadata! with { TotalMilliseconds = stored };
+
+        Assert.That(metadata.Matches(addition), Is.False);
+    }
+
     private const string OtherGroupsSql = """
         INSERT INTO album VALUES(13,1013,'Other album',11,'Other album');
         INSERT INTO album_artist VALUES(22,1022,'Other artist','Other artist');

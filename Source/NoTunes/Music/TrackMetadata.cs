@@ -5,6 +5,7 @@ internal sealed record TrackMetadata
     private const long SongMediaKind = 1;
     private const long DefaultDiscNumber = 1;
     private const long StoredTrue = 1;
+    private const long MaximumMillisecondRoundingDifference = 1;
 
     public long? AlbumRowId { get; init; }
 
@@ -72,9 +73,14 @@ internal sealed record TrackMetadata
     {
         var item = track.Metadata.Item;
         var audio = track.Metadata.Audio;
-        // The receiver derives milliseconds from coded samples and supplies disc 1 for an omitted disc tag.
+        // The receiver can retain the supplied milliseconds or derive them from rounded audio samples.
         var milliseconds = Math.Floor((long)audio[MediaKeys.Duration]
             * (double)TimeSpan.MillisecondsPerSecond / (double)audio[MediaKeys.SampleRate]);
+        var suppliedMilliseconds = Number(item, MediaKeys.TotalMilliseconds);
+        var sameMilliseconds = this.TotalMilliseconds == milliseconds
+            || this.TotalMilliseconds == suppliedMilliseconds
+                && Math.Abs(suppliedMilliseconds - milliseconds) <= MaximumMillisecondRoundingDifference;
+        
         return this.AlbumId == track.AlbumId && this.AlbumArtistId == track.ArtistId
             && GroupNameComparer.Instance.Equals(this.Album, track.Metadata.Album)
             && GroupNameComparer.Instance.Equals(this.AlbumArtist, track.Metadata.AlbumArtist)
@@ -93,7 +99,7 @@ internal sealed record TrackMetadata
             && (this.DiscCount ?? 0) == Number(item, MediaKeys.DiscCount)
             && (this.Year ?? 0) == Number(item, MediaKeys.Year)
             && (this.Compilation ?? 0) == (item.GetValueOrDefault(MediaKeys.IsCompilation) is true ? StoredTrue : 0)
-            && this.TotalMilliseconds == milliseconds && this.MediaKind == SongMediaKind
+            && sameMilliseconds && this.MediaKind == SongMediaKind
             && this.AudioFormat == (long)audio[MediaKeys.AudioFormat]
             && this.BitRate == (long)audio[MediaKeys.BitRate]
             && this.SampleRate == (double)audio[MediaKeys.SampleRate]

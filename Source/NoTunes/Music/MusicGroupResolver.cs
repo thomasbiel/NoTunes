@@ -35,13 +35,9 @@ internal sealed class MusicGroupResolver(
             }
 
             var candidates = this.rowsByKey.GetValueOrDefault(key) ?? [];
-            if (this.TryResolve(
-                key,
-                candidates,
-                out var id,
-                out var existingSort))
+            var result = this.TryResolve(key, name, sortName);
+            if (result is not null)
             {
-                var result = new ResolvedMusicGroup(name, id, existingSort ?? sortName);
                 this.resolved[key] = result;
                 this.resolved[originalKey] = result;
                 return result;
@@ -57,7 +53,11 @@ internal sealed class MusicGroupResolver(
             };
 
             var qualified = albumArtist is null ? name : name + " / " + albumArtist;
-            var conflicts = string.Join(", ", candidates.Select(group =>
+            var conflictingRows = candidates.Length == 1 && candidates[0].SyncId != 0 && rows is not null
+                ? rows.Where(group => group.SyncId == candidates[0].SyncId)
+                : candidates;
+            
+            var conflicts = string.Join(", ", conflictingRows.Select(group =>
                 $"'{group.DisplayName}' (row {group.RowId}, sync ID {group.SyncId}, sort '{group.SortName}')"));
 
             var description = $"Cannot uniquely assign {label} '{qualified}' for source '{sourcePath}'. "
@@ -82,28 +82,26 @@ internal sealed class MusicGroupResolver(
                 group => group.ToArray(), GroupNameComparer.Instance);
     }
 
-    private bool TryResolve(string key, CatalogueGroup[] candidates, out long id, out string? sort)
+    private ResolvedMusicGroup? TryResolve(string key, string name, string sortName)
     {
-        id = 0;
-        this.sorts.TryGetValue(key, out sort);
-        if (candidates.Length != 0)
+        this.sorts.TryGetValue(key, out var sort);
+        if (this.rowsByKey.ContainsKey(key))
         {
-            if (candidates.Length != 1 || candidates[0].SyncId == 0) return false;
-
-            // Inserts match groups by their qualified names, even when another name shares the sync ID.
-            id = candidates[0].SyncId;
-            sort = candidates[0].SortName;
-            return true;
+            var selected = GroupAliasResolution.Resolve(rows, key);
+            return selected is null ? null : new ResolvedMusicGroup(selected.Name, selected.SyncId, selected.SortName);
         }
 
-        if (this.sorts.ContainsKey(key) && sort is null) return false;
+        if (this.sorts.ContainsKey(key) && sort is null) return null;
 
-        if (this.groupIds is null) return true;
+        if (this.groupIds is null) return new ResolvedMusicGroup(name, 0, sort ?? sortName);
 
-        if (this.groupIds.TryGetValue(key, out id)) return rows is null && id != 0;
+        if (this.groupIds.TryGetValue(key, out var id))
+        {
+            return rows is null && id != 0 ? new ResolvedMusicGroup(name, id, sort ?? sortName) : null;
+        }
 
         id = LibraryPreferences.NewId(occupied);
-        return true;
+        return new ResolvedMusicGroup(name, id, sort ?? sortName);
     }
 
     private async Task<string> ChooseNameAsync(string description, CancellationToken cancellationToken)

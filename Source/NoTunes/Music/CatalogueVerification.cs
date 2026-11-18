@@ -41,9 +41,10 @@ internal static class CatalogueVerification
         var artists = after.ArtistGroups?.ToLookup(group => group.Key, GroupNameComparer.Instance);
         foreach (var track in additions.Where(track => !track.IsArtworkOnly))
         {
+            var expected = GroupAliasResolution.ForVerification(track, before);
             if (!MatchesAddition(
                 actualTracks[track.Id],
-                track,
+                expected,
                 after,
                 albums,
                 artists))
