@@ -11,7 +11,9 @@ public sealed class LinuxUsbMuxTransport : IUsbMuxTransport
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(socketPath);
         if (!socketPath.StartsWith('/') && !Path.IsPathFullyQualified(socketPath))
+        {
             throw new ArgumentException("The usbmuxd socket path must be absolute.", nameof(socketPath));
+        }
 
         this.endpoint = new UnixDomainSocketEndPoint(socketPath);
     }
@@ -27,7 +29,8 @@ public sealed class LinuxUsbMuxTransport : IUsbMuxTransport
         catch (SocketException e)
         {
             socket.Dispose();
-            throw new IOException($"Cannot connect to usbmuxd ({this.endpoint}). " + "Install and start usbmuxd, check socket permissions, and establish trust with the unlocked iPhone.", e);
+            throw new IOException($"Cannot connect to usbmuxd ({this.endpoint}). " 
+                                  + "Install and start usbmuxd, check socket permissions, and establish trust with the unlocked iPhone.", e);
         }
         catch
         {

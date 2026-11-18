@@ -12,15 +12,14 @@ public sealed class WindowsUsbMuxTransport : IUsbMuxTransport
     {
         this.endpoint = endpoint ?? new IPEndPoint(IPAddress.Loopback, DefaultPort);
         if (!IPAddress.IsLoopback(this.endpoint.Address))
+        {
             throw new ArgumentException("The USB multiplexer endpoint must be a loopback address.", nameof(endpoint));
+        }
     }
 
     public async Task<Stream> ConnectAsync(CancellationToken cancellationToken)
     {
-        var socket = new Socket(this.endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
-        {
-            NoDelay = true
-        };
+        var socket = new Socket(this.endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         try
         {
             await socket.ConnectAsync(this.endpoint, cancellationToken);
@@ -29,7 +28,8 @@ public sealed class WindowsUsbMuxTransport : IUsbMuxTransport
         catch (SocketException e)
         {
             socket.Dispose();
-            throw new IOException($"Cannot connect to Apple Mobile Device Service ({this.endpoint}). " + "Install Apple device support, start its service and reconnect the unlocked iPhone over USB.", e);
+            throw new IOException($"Cannot connect to Apple Mobile Device Service ({this.endpoint}). " 
+                                  + "Install Apple device support, start its service and reconnect the unlocked iPhone over USB.", e);
         }
         catch
         {

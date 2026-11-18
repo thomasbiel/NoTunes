@@ -16,12 +16,11 @@ internal sealed class WindowsSourceSession : ISourceEditSession
     private const uint BackupSemantics = 0x02000000;
     private const uint SequentialScan = 0x08000000;
     private const uint Overlapped = 0x40000000;
+    
     // Pin different spellings separately because Windows directories can enable case-sensitive names.
     private readonly Dictionary<string, SafeFileHandle> directories = new(StringComparer.Ordinal);
 
-    private WindowsSourceSession()
-    {
-    }
+    private WindowsSourceSession() { }
 
     public static WindowsSourceSession Acquire(DirectoryInfo root, CancellationToken cancellationToken)
     {
@@ -61,13 +60,12 @@ internal sealed class WindowsSourceSession : ISourceEditSession
             ReadAttributes | ListDirectory,
             BackupSemantics,
             directory: true);
+        
         this.directories.Add(path, handle);
     }
 
     // Windows must keep sharing guards until the complete inventory is finished.
-    public void ReleaseDirectory(DirectoryInfo directory)
-    {
-    }
+    public void ReleaseDirectory(DirectoryInfo directory) { }
 
     public IEnumerable<SourceEntry> EnumerateDirectory(DirectoryInfo directory)
     {
@@ -76,18 +74,14 @@ internal sealed class WindowsSourceSession : ISourceEditSession
             IgnoreInaccessible = false,
             AttributesToSkip = 0
         };
-        return directory.EnumerateFileSystemInfos(SourceFileDefaults.AllEntriesPattern, options).Select(entry => new SourceEntry(entry.Name, entry.Attributes));
+        
+        return directory.EnumerateFileSystemInfos(SourceFileDefaults.AllEntriesPattern, options)
+                        .Select(entry => new SourceEntry(entry.Name, entry.Attributes));
     }
 
-    public FileStream OpenRead(FileInfo file)
-    {
-        return OpenFile(file, FileAccess.Read);
-    }
+    public FileStream OpenRead(FileInfo file) => OpenFile(file, FileAccess.Read);
 
-    public FileStream OpenEdit(FileInfo file)
-    {
-        return OpenFile(file, FileAccess.ReadWrite);
-    }
+    public FileStream OpenEdit(FileInfo file) => OpenFile(file, FileAccess.ReadWrite);
 
     private static FileStream OpenFile(FileInfo file, FileAccess access)
     {
@@ -97,6 +91,7 @@ internal sealed class WindowsSourceSession : ISourceEditSession
             Overlapped | SequentialScan,
             directory: false,
             access == FileAccess.ReadWrite ? FileShare.None : FileShare.Read);
+        
         try
         {
             return new FileStream(
@@ -123,6 +118,7 @@ internal sealed class WindowsSourceSession : ISourceEditSession
             FileMode.Open,
             flags | OpenReparsePoint,
             IntPtr.Zero);
+        
         if (handle.IsInvalid)
         {
             var error = new Win32Exception(Marshal.GetLastPInvokeError());
@@ -133,10 +129,8 @@ internal sealed class WindowsSourceSession : ISourceEditSession
         try
         {
             var attributes = File.GetAttributes(handle);
-            if (attributes.HasFlag(FileAttributes.ReparsePoint))
-                throw new IOException($"Symbolic link or junction in source path: {path}. The scan is aborted.");
-            if (attributes.HasFlag(FileAttributes.Directory) != directory)
-                throw new IOException($"Source path changed type during the scan: {path}");
+            if (attributes.HasFlag(FileAttributes.ReparsePoint)) throw new IOException($"Symbolic link or junction in source path: {path}. The scan is aborted.");
+            if (attributes.HasFlag(FileAttributes.Directory) != directory) throw new IOException($"Source path changed type during the scan: {path}");
 
             return handle;
         }

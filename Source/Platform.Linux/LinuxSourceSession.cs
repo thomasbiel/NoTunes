@@ -25,9 +25,7 @@ internal sealed class LinuxSourceSession : ISourceEditSession
     private readonly LinuxOpenFlags flags = LinuxOpenFlags.ForArchitecture(RuntimeInformation.ProcessArchitecture);
     private readonly Dictionary<string, SafeFileHandle> directories = new(StringComparer.Ordinal);
 
-    private LinuxSourceSession()
-    {
-    }
+    private LinuxSourceSession() { }
 
     public static LinuxSourceSession Acquire(DirectoryInfo root, CancellationToken cancellationToken)
     {
@@ -87,24 +85,21 @@ internal sealed class LinuxSourceSession : ISourceEditSession
             IgnoreInaccessible = false,
             AttributesToSkip = 0
         };
+        
         return heldPath.EnumerateFileSystemInfos(SourceFileDefaults.AllEntriesPattern, options).Select(entry => new SourceEntry(entry.Name, entry.Attributes));
     }
 
     public void ReleaseDirectory(DirectoryInfo directory)
     {
         if (this.directories.Remove(Path.TrimEndingDirectorySeparator(directory.FullName), out var handle))
+        {
             handle.Dispose();
+        }
     }
 
-    public FileStream OpenRead(FileInfo file)
-    {
-        return this.OpenFile(file, FileAccess.Read);
-    }
+    public FileStream OpenRead(FileInfo file) => this.OpenFile(file, FileAccess.Read);
 
-    public FileStream OpenEdit(FileInfo file)
-    {
-        return this.OpenFile(file, FileAccess.ReadWrite);
-    }
+    public FileStream OpenEdit(FileInfo file) => this.OpenFile(file, FileAccess.ReadWrite);
 
     private FileStream OpenFile(FileInfo file, FileAccess access)
     {
@@ -120,8 +115,12 @@ internal sealed class LinuxSourceSession : ISourceEditSession
                 EmptyPath,
                 StatType,
                 out var status) != 0) throw NativeError(file.FullName);
+            
             if ((status.Mask & StatType) == 0 || (status.Mode & FileTypeMask) != RegularFile)
+            {
                 throw new IOException($"Source path is not a regular file: {file.FullName}");
+            }
+            
             var fileLock = access == FileAccess.ReadWrite ? LockExclusive : LockShared;
             if (Flock(handle, fileLock | LockNonBlocking) != 0) throw NativeError(file.FullName);
 
@@ -140,7 +139,9 @@ internal sealed class LinuxSourceSession : ISourceEditSession
 
     private SafeFileHandle GetDirectory(DirectoryInfo directory)
     {
-        return this.directories.TryGetValue(Path.TrimEndingDirectorySeparator(directory.FullName), out var handle) ? handle : throw new IOException($"Source directory was not opened safely: {directory.FullName}");
+        return this.directories.TryGetValue(Path.TrimEndingDirectorySeparator(directory.FullName), out var handle)
+            ? handle
+            : throw new IOException($"Source directory was not opened safely: {directory.FullName}");
     }
 
     private static SafeFileHandle CheckedHandle(int descriptor, string path)
