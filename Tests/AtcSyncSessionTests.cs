@@ -8,6 +8,30 @@ namespace NoTunes.Tests;
 public sealed class AtcSyncSessionTests
 {
     [Test]
+    public async Task Reports_Transfer_Completion_Only_After_Successful_Readback([Values] bool corrupt)
+    {
+        var track = SyncTestData.Track();
+        var peer = CreateCompletingAudioPeer(track, out _);
+        await using var error = new StringWriter();
+        var files = new AfcPeer { AllowWrites = true, CorruptWrite = corrupt };
+        await using var sync = new AtcSyncTestSession(peer, files, error: error);
+        await sync.StartAsync();
+        if (corrupt)
+        {
+            await Assert.ThrowsAsync<IOException>(() => sync.TransferAsync([track]));
+        }
+        else
+        {
+            await sync.TransferAsync([track]);
+        }
+
+        var diagnostics = error.ToString();
+        Assert.That(diagnostics, Does.Contain("Transferring assets: 0%"));
+        Assert.That(diagnostics.Contains("Transferring assets: 100%", StringComparison.Ordinal), Is.EqualTo(!corrupt));
+        Assert.That(diagnostics, Does.Not.Contain("Transfer: "));
+    }
+
+    [Test]
     public async Task Transfers_Audio_Without_Cover_With_Or_Without_Existing_Airlock([Values] bool airlockExists)
     {
         var track = SyncTestData.Track();

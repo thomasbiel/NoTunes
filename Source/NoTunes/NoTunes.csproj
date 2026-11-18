@@ -6,9 +6,14 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <Version>0.1.0</Version>
+        <Authors>Thomas Biel</Authors>
         <Description>Native CLI for mirroring MP3 files to an iPhone music library.</Description>
         <AppConfig>app.config</AppConfig>
     </PropertyGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="NoTunes.Tests" />
+    </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="../Platform.Abstractions/NoTunes.Platform.Abstractions.csproj" />

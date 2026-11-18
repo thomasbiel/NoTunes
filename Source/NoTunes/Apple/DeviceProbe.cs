@@ -9,6 +9,7 @@ public static class DeviceProbe
             device,
             timeout,
             cancellationToken);
+        
         await lockdown.StartPairedSessionAsync(cancellationToken);
         var info = await lockdown.GetInfoAsync(cancellationToken);
         if (!info.Model.StartsWith(DeviceInfo.IphoneModelPrefix, StringComparison.Ordinal))

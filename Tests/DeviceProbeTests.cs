@@ -32,6 +32,7 @@ public sealed class DeviceProbeTests
             CatalogueBytes = 256,
             CatalogueWalBytes = null
         };
+        
         var expected = JsonNode.Parse("""
             {
               "Device": { "Udid": "test-udid", "Name": "Test phone", "Model": "iPhone12,8", "IosVersion": "27.2", "BuildVersion": "24B119" },
@@ -40,6 +41,7 @@ public sealed class DeviceProbeTests
               "FreeBytes": "1024", "CatalogueReadVerified": true, "CatalogueBytes": 256, "CatalogueWalBytes": null
             }
             """);
+        
         var actual = JsonSerializer.SerializeToNode(result);
         Assert.That(JsonNode.DeepEquals(actual, expected), Is.True, actual?.ToJsonString());
     }

@@ -3,7 +3,10 @@ using NoTunes.Platform;
 
 namespace NoTunes.Music;
 
-public sealed class SourceScanner(ISourceFileSystem fileSystem, SourceHashCache? hashCache = null)
+public sealed class SourceScanner(
+    ISourceFileSystem fileSystem,
+    SourceHashCache? hashCache = null,
+    TextWriter? error = null)
 {
     private const string Mp3Extension = ".mp3";
 
@@ -12,7 +15,38 @@ public sealed class SourceScanner(ISourceFileSystem fileSystem, SourceHashCache?
         var root = GetSourceDirectory(folder);
         using var paths = fileSystem.OpenSource(root, cancellationToken);
         var cached = hashCache?.Load(root.FullName);
+        if (error is not null) await error.WriteLineAsync("Discovering source MP3 files...");
+
+        var inventory = EnumerateFiles(paths, root, cancellationToken).ToHashSet(StringComparer.Ordinal);
+        var progress = new OperationProgress(error ?? TextWriter.Null, "Scanning and hashing source", inventory.Count);
         var tracks = new List<SourceTrack>();
+        foreach (var fullName in EnumerateFiles(paths, root, cancellationToken))
+        {
+            if (!inventory.Remove(fullName)) throw new IOException("Source inventory changed during the scan.");
+
+            tracks.Add(await ReadTrackAsync(
+                paths,
+                root,
+                fullName,
+                cached,
+                cancellationToken));
+            progress.Advance();
+        }
+
+        if (inventory.Count != 0) throw new IOException("Source inventory changed during the scan.");
+
+        tracks.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.RelativePath, b.RelativePath));
+        cancellationToken.ThrowIfCancellationRequested();
+        var library = new SourceLibrary(root.FullName, tracks);
+        hashCache?.Save(library);
+        return library;
+    }
+
+    private static IEnumerable<string> EnumerateFiles(
+        ISourceSession paths,
+        DirectoryInfo root,
+        CancellationToken cancellationToken)
+    {
         var directories = new Stack<(DirectoryInfo Directory, IEnumerator<SourceEntry> Entries)>();
         directories.Push((root, paths.EnumerateDirectory(root).GetEnumerator()));
         try
@@ -24,7 +58,8 @@ public sealed class SourceScanner(ISourceFileSystem fileSystem, SourceHashCache?
                 {
                     directories.Pop();
                     current.Entries.Dispose();
-                    paths.ReleaseDirectory(current.Directory);
+                    if (current.Directory != root) paths.ReleaseDirectory(current.Directory);
+
                     continue;
                 }
 
@@ -44,12 +79,8 @@ public sealed class SourceScanner(ISourceFileSystem fileSystem, SourceHashCache?
 
                 if (!StringComparer.OrdinalIgnoreCase.Equals(Path.GetExtension(entry.Name), Mp3Extension))
                     continue;
-                tracks.Add(await ReadTrackAsync(
-                    paths,
-                    root,
-                    fullName,
-                    cached,
-                    cancellationToken));
+
+                yield return fullName;
             }
         }
         finally
@@ -59,12 +90,6 @@ public sealed class SourceScanner(ISourceFileSystem fileSystem, SourceHashCache?
                 directory.Entries.Dispose();
             }
         }
-
-        tracks.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.RelativePath, b.RelativePath));
-        cancellationToken.ThrowIfCancellationRequested();
-        var library = new SourceLibrary(root.FullName, tracks);
-        hashCache?.Save(library);
-        return library;
     }
 
     private static DirectoryInfo GetSourceDirectory(string folder)

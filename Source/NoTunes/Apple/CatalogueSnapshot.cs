@@ -12,13 +12,16 @@ public sealed record CatalogueSnapshot(byte[] Database, byte[]? Wal)
 
     private static ReadOnlySpan<byte> SqliteSignature => "SQLite format 3\0"u8;
 
-    internal static async Task<CatalogueSnapshot> CaptureWithRetryAsync(AfcClient afc, CancellationToken cancellationToken)
+    internal static async Task<CatalogueSnapshot> CaptureWithRetryAsync(
+        AfcClient afc,
+        CancellationToken cancellationToken,
+        TextWriter? error = null)
     {
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                return await CaptureAsync(afc, cancellationToken);
+                return await CaptureAsync(afc, cancellationToken, error);
             }
             catch (IOException exception) when (attempt < MaximumCaptureAttempts && !afc.IsBroken
                 && exception is not (AfcException or FileNotFoundException))
@@ -28,9 +31,15 @@ public sealed record CatalogueSnapshot(byte[] Database, byte[]? Wal)
         }
     }
 
-    public static async Task<CatalogueSnapshot> CaptureAsync(AfcClient afc, CancellationToken cancellationToken)
+    public static async Task<CatalogueSnapshot> CaptureAsync(
+        AfcClient afc,
+        CancellationToken cancellationToken,
+        TextWriter? error = null)
     {
+        const int VerificationReads = 2;
+        var progress = new OperationProgress(error ?? TextWriter.Null, "Reading iPhone catalogue", VerificationReads);
         var first = await CaptureOnce(afc, cancellationToken);
+        progress.Advance();
         var second = await CaptureOnce(afc, cancellationToken);
         var sameDatabase = first.Snapshot.Database.AsSpan().SequenceEqual(second.Snapshot.Database);
         var sameWal = SameBytes(first.Snapshot.Wal, second.Snapshot.Wal);
@@ -42,6 +51,7 @@ public sealed record CatalogueSnapshot(byte[] Database, byte[]? Wal)
                 + "Stop playback or other sync software and try again.");
         }
 
+        progress.Advance();
         return second.Snapshot;
     }
 

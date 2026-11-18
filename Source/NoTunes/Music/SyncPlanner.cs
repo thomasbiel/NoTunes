@@ -7,17 +7,25 @@ internal static class SyncPlanner
         SourceLibrary source,
         DeviceCatalogue catalogue,
         Func<DeviceTrack, CancellationToken, Task<string?>> readHash,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TextWriter? error = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var sourceSizes = source.Tracks.Select(track => track.Size).ToHashSet();
         var byHash = new Dictionary<string, Queue<DeviceTrack>>(StringComparer.Ordinal);
+        var progress = new OperationProgress(error ?? TextWriter.Null, "Comparing iPhone tracks", catalogue.Tracks.Count);
         foreach (var track in catalogue.Tracks)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (track.IsIncomplete || !sourceSizes.Contains(track.Size))
+            {
+                progress.Advance();
                 continue;
+            }
+
             var hash = await readHash(track, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            progress.Advance();
             if (hash is null)
                 continue;
             if (!byHash.TryGetValue(hash, out var matches))

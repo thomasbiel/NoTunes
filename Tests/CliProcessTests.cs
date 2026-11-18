@@ -8,6 +8,19 @@ namespace NoTunes.Tests;
 public sealed class CliProcessTests
 {
     [Test]
+    public async Task Reports_Scan_Progress_On_Standard_Error_And_Preserves_Json_Output()
+    {
+        using var source = new Music.SyncWorkspace();
+        await File.WriteAllTextAsync(Path.Combine(source.Root, "song.mp3"), "abc");
+        var result = await RunAsync("scan", source.Root, "--json");
+        Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
+        Assert.That(result.Error, Does.Contain("Scanning and hashing source: 0% (0/1)"));
+        Assert.That(result.Error, Does.Contain("Scanning and hashing source: 100% (1/1)"));
+        using var document = System.Text.Json.JsonDocument.Parse(result.Output);
+        Assert.That(document.RootElement.GetProperty("Tracks").GetArrayLength(), Is.EqualTo(1));
+    }
+
+    [Test]
     public async Task Removes_A_Local_Cover_Through_The_Cli([Values] bool json)
     {
         using var source = new Music.SyncWorkspace();
@@ -66,7 +79,7 @@ public sealed class CliProcessTests
         using var source = new Music.SyncWorkspace();
         var result = await RunAsync("scan", source.Root, "--json");
         Assert.That(result.ExitCode, Is.EqualTo(ExitCodes.Success), result.Error);
-        Assert.That(result.Error, Is.Empty);
+        Assert.That(result.Error, Does.Contain("Scanning and hashing source: 100% (0/0)"));
         using var json = System.Text.Json.JsonDocument.Parse(result.Output);
         Assert.That(json.RootElement.GetProperty("Tracks").GetArrayLength(), Is.Zero);
     }

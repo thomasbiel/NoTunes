@@ -4,9 +4,8 @@ using NoTunes.Music;
 
 namespace NoTunes.Apple;
 
-internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
+internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWriter? debug = null)
 {
-    private readonly TextWriter error = standardError;
     private bool finishedMetadata;
 
     public async Task<GrappaSigner> BeginAsync(LibraryIdentity identity, uint anchor, CancellationToken cancellationToken)
@@ -113,8 +112,7 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
             try
             {
                 await this.WaitAsync([AtcCommands.SyncFinished], stop.Token, transferFinished.Task);
-                if (Volatile.Read(ref repliesRemaining) != 0)
-                    throw new IOException("Sync finished before every requested asset was completed.");
+                if (Volatile.Read(ref repliesRemaining) != 0) throw new IOException("Sync finished before every requested asset was completed.");
             }
             catch (Exception exception)
             {
@@ -151,6 +149,12 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
         Action completingAsset,
         CancellationToken cancellationToken)
     {
+        var total = manifest.Where(asset => asset.Track is not null).Sum(asset =>
+            (asset.Track!.IsArtworkOnly ? 0 : asset.Track.Source.Size)
+            + (asset.Track.Metadata.Artwork?.Length ?? 0) + 1);
+
+        var progress = new OperationProgress(error, "Transferring assets", total);
+        long completed = 0;
         foreach (var asset in manifest.Where(asset => asset.Track is not null))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -163,6 +167,9 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
                     SyncPaths.ArtworkAirlock + track.AssetId,
                     artwork.Bytes,
                     cancellationToken);
+
+                completed += artwork.Length;
+                progress.Report(completed);
             }
 
             if (track.IsArtworkOnly)
@@ -172,17 +179,21 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
                     (AtcKeys.AssetId, track.AssetId),
                     (AtcKeys.Dataclass, AtcKeys.Media),
                     (AtcKeys.AssetPath, string.Empty)), cancellationToken);
+
+                progress.Report(++completed);
                 continue;
             }
 
             await afc.EnsureDirectoryAsync(SyncPaths.Airlock.TrimEnd('/'), cancellationToken);
             var staged = SyncPaths.Airlock + track.AssetId;
-            await this.error.WriteLineAsync($"Transfer: {track.Source.RelativePath}");
+            if (debug is not null) await debug.WriteLineAsync($"Transfer: {track.Source.RelativePath}");
+
             await using var input = new FileStream(
                 track.LocalPath,
                 FileMode.Open,
                 FileAccess.Read,
                 FileShare.Read);
+
             if (await afc.GetFileInfoAsync(track.DevicePath, cancellationToken) is not null
                 || await afc.GetFileInfoAsync(staged, cancellationToken) is not null)
                 throw new IOException("A planned audio destination is occupied.");
@@ -192,18 +203,28 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
                 input,
                 track.Source.Size,
                 cancellationToken,
-                (bytes, token) => this.SendProgressAsync(bytes, track.Source.Size, token));
+                (bytes, token) =>
+                {
+                    progress.Report(completed + bytes);
+                    return this.SendProgressAsync(bytes, track.Source.Size, token);
+                });
+
+            completed += track.Source.Size;
             await VerifyHashAsync(
                 afc,
                 staged + SyncPaths.Mp3Extension,
                 track.Source,
                 cancellationToken);
+
             await afc.RenameNewFileAsync(staged + SyncPaths.Mp3Extension, staged, cancellationToken);
             completingAsset();
+
             await this.SendAsync(AtcCommands.FileComplete, Plist.Dict(
                 (AtcKeys.AssetId, track.AssetId),
                 (AtcKeys.Dataclass, AtcKeys.Media),
                 (AtcKeys.AssetPath, track.DevicePath)), cancellationToken);
+
+            progress.Report(++completed);
         }
 
         foreach (var asset in manifest.Where(asset => asset.Track is null))
@@ -236,7 +257,8 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
     private Task SendAsync(string command, Dictionary<string, object> parameters, CancellationToken cancellationToken)
     {
         return client.Connection.SendAsync(Plist.Dict(
-            (AtcKeys.Command, command), (AtcKeys.Session, SyncProtocol.Session), (AtcKeys.Parameters, parameters)), cancellationToken);
+            (AtcKeys.Command, command), (AtcKeys.Session, SyncProtocol.Session), (AtcKeys.Parameters, parameters)),
+            cancellationToken);
     }
 
     private async Task<Dictionary<string, object>> WaitAsync(
@@ -249,10 +271,14 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter standardError)
             var message = transferFinished is null
                 ? await client.Connection.ReceiveAsync(cancellationToken)
                 : await this.ReceiveDuringTransferAsync(transferFinished, cancellationToken);
+
             var command = message.Text(AtcKeys.Command);
             if (command == AtcCommands.Ping)
             {
-                await client.Connection.SendAsync(Plist.Dict((AtcKeys.Command, AtcCommands.Pong), (AtcKeys.Session, message.Number(AtcKeys.Session))), cancellationToken);
+                await client.Connection.SendAsync(
+                    Plist.Dict((AtcKeys.Command, AtcCommands.Pong), (AtcKeys.Session, message.Number(AtcKeys.Session))),
+                    cancellationToken);
+
                 continue;
             }
 

@@ -31,9 +31,9 @@ public sealed class GroupResolutionPromptTests
     public async Task Reads_The_Injected_Input_And_Keeps_Prompts_Out_Of_Json_Output()
     {
         using var input = new StringReader("Chosen Artist\n");
-        using var output = new StringWriter();
-        using var error = new StringWriter();
-        using var services = new ServiceCollection().AddNoTunes(output, error, input).BuildServiceProvider();
+        await using var output = new StringWriter();
+        await using var error = new StringWriter();
+        await using var services = new ServiceCollection().AddNoTunes(output, error, input).BuildServiceProvider();
         var prompt = services.GetRequiredService<SyncEngine>().PromptForGroupName!;
         Assert.That(await prompt("Ambiguous artist in one.mp3", CancellationToken.None),
             Is.EqualTo("Chosen Artist"));
@@ -44,7 +44,7 @@ public sealed class GroupResolutionPromptTests
     [Test]
     public async Task Returns_No_Answer_When_Interactive_Input_Is_Unavailable()
     {
-        using var error = new StringWriter();
+        await using var error = new StringWriter();
         var prompt = new GroupResolutionPrompt(TextReader.Null, error);
         Assert.That(await prompt.ReadAsync("Ambiguous artist", CancellationToken.None), Is.Null);
         Assert.That(error.ToString(), Is.Empty);

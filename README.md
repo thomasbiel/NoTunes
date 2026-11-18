@@ -224,6 +224,21 @@ hashed on the host. Only files whose size occurs in the source need hashing.
 Device hashes are not cached. No device-side file-hash operation is used. Diagnostics go to stderr; `--json`
 prints the plan, dry-run flag and verified batch count to stdout.
 
+`scan` and `sync` report percentage progress to stderr for each work phase:
+source hashing, catalogue reads, device comparison, source and cover preparation,
+asset transfers, verification and recovery. Transfer progress uses bytes; other
+phases use their known file or read counts. Each percentage is printed once per
+phase. In an interactive terminal, updates replace the current progress line;
+completion, errors and debug messages finish that line. Redirected stderr keeps
+ordinary log lines without cursor-control characters.
+These are phase percentages, not an estimated percentage for the entire sync.
+Source discovery precedes hashing because the number of files is initially unknown.
+It enumerates paths without reading audio; hashing then rechecks the inventory
+through the existing file guards. An inventory change aborts the scan.
+Atomic device deletions show 0% while pending and 100% after verification.
+Use `sync --debug` to also print per-track `Compare:` and `Transfer:` diagnostics.
+Progress and debug output do not change the JSON result on stdout.
+
 Sync catalogue checks retry transient read inconsistencies up to five times.
 Every successful check still requires two matching database/WAL captures and
 stable file attributes. Retries repeat reads, never signed sync operations.

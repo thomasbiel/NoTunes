@@ -30,16 +30,16 @@ public sealed class ProbeOptions : DeviceOptions
         }
         else
         {
-            await context.Output.WriteLineAsync($"Device:          {result.Device.Name} ({result.Device.Model})");
-            await context.Output.WriteLineAsync($"UDID:            {result.Device.Udid}");
-            await context.Output.WriteLineAsync($"iOS:             {result.Device.IosVersion} ({result.Device.BuildVersion})");
-            await context.Output.WriteLineAsync("USB pairing:     OK");
+            await context.Output.WriteLineAsync($"Device:           {result.Device.Name} ({result.Device.Model})");
+            await context.Output.WriteLineAsync($"UDID:             {result.Device.Udid}");
+            await context.Output.WriteLineAsync($"iOS:              {result.Device.IosVersion} ({result.Device.BuildVersion})");
+            await context.Output.WriteLineAsync("USB pairing:      OK");
             await context.Output.WriteLineAsync("AFC file service: OK");
-            await context.Output.WriteLineAsync($"Music database:  {(result.MusicDatabasePresent ? "present" : "not initialized")}");
+            await context.Output.WriteLineAsync($"Music database:   {(result.MusicDatabasePresent ? "present" : "not initialized")}");
             await context.Output.WriteLineAsync("ATC sync service: OK");
-            await context.Output.WriteLineAsync($"Music sync:      {(result.SyncAllowed ? "allowed" : "blocked by iPhone")}");
-            if (result.MusicTrackCount.HasValue) await context.Output.WriteLineAsync($"Music tracks:    {result.MusicTrackCount}");
-            if (result.FreeBytes is not null) await context.Output.WriteLineAsync($"Free bytes:      {result.FreeBytes}");
+            await context.Output.WriteLineAsync($"Music sync:       {(result.SyncAllowed ? "allowed" : "blocked by iPhone")}");
+            if (result.MusicTrackCount.HasValue) await context.Output.WriteLineAsync($"Music tracks:     {result.MusicTrackCount}");
+            if (result.FreeBytes is not null) await context.Output.WriteLineAsync($"Free bytes:       {result.FreeBytes}");
             if (result.CatalogueReadVerified)
             {
                 await context.Output.WriteLineAsync(

@@ -17,11 +17,12 @@ internal sealed class AtcSyncTestSession : IAsyncDisposable
         AtcPeer peer,
         AfcPeer? files = null,
         TimeSpan? atcTimeout = null,
-        TimeSpan? afcTimeout = null)
+        TimeSpan? afcTimeout = null,
+        TextWriter? error = null)
     {
         this.afc = new AfcClient(files ?? new AfcPeer { AllowWrites = true }, afcTimeout ?? DefaultTimeout);
         this.client = new AtcClient(peer, atcTimeout ?? DefaultTimeout);
-        this.session = new AtcSyncSession(this.client, TextWriter.Null);
+        this.session = new AtcSyncSession(this.client, error ?? TextWriter.Null);
     }
 
     public async Task BeginAsync()

@@ -14,6 +14,9 @@ public sealed class SyncOptions : DeviceOptions
     [Option(CliSyntax.DryRun, HelpText = "Preview changes without transferring or deleting music.")]
     public bool DryRun { get; set; }
 
+    [Option(CliSyntax.Debug, HelpText = "Include per-track comparison and transfer diagnostics.")]
+    public bool Debug { get; set; }
+
     [Option(CliSyntax.AllowEmptySource, HelpText = "Allow an empty source to remove all computer-synced music.")]
     public bool AllowEmptySource { get; set; }
 

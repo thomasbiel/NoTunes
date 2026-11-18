@@ -12,6 +12,7 @@ public sealed class SourceScannerTests
     private string root = null!;
     private string cacheDirectory = null!;
     private SourceScanner scanner = null!;
+    private StringWriter error = null!;
 
     [SetUp]
     public void SetUp()
@@ -20,7 +21,59 @@ public sealed class SourceScannerTests
         Directory.CreateDirectory(this.root);
         this.cacheDirectory = Path.Combine(this.root, "cache");
         ISourceFileSystem fileSystem = OperatingSystem.IsWindows() ? new WindowsSourceFileSystem() : new LinuxSourceFileSystem();
-        this.scanner = new SourceScanner(fileSystem, new SourceHashCache(this.cacheDirectory, TextWriter.Null));
+        this.error = new StringWriter();
+        this.scanner = new SourceScanner(fileSystem, new SourceHashCache(this.cacheDirectory, TextWriter.Null), this.error);
+    }
+
+    [Test]
+    public async Task Rejects_Inventory_Changes_Between_Counting_And_Hashing([Values] bool added)
+    {
+        var path = Path.Combine(this.root, "old.mp3");
+        await File.WriteAllTextAsync(path, "abc");
+        var enumerations = 0;
+        var fileSystem = new BudgetSourceFileSystem
+        {
+            BeforeEnumeration = () =>
+            {
+                if (++enumerations != 2) return;
+
+                if (added)
+                {
+                    File.WriteAllText(Path.Combine(this.root, "new.mp3"), "xyz");
+                }
+                else
+                {
+                    File.Delete(path);
+                }
+            }
+        };
+
+        var scanner = new SourceScanner(fileSystem);
+        await Assert.ThatAsync(() => scanner.ScanAsync(this.root, CancellationToken.None),
+            Throws.TypeOf<IOException>().With.Message.Contains("inventory changed"));
+
+        Assert.That(fileSystem.Session.ActiveEnumerations, Is.Zero);
+        Assert.That(fileSystem.Session.Disposed, Is.True);
+    }
+
+    [Test]
+    public async Task Reports_Progress_For_Nested_Files_Including_Cache_Hits([Values] bool cached)
+    {
+        Directory.CreateDirectory(Path.Combine(this.root, "album"));
+        await File.WriteAllTextAsync(Path.Combine(this.root, "one.mp3"), "abc");
+        await File.WriteAllTextAsync(Path.Combine(this.root, "album", "two.mp3"), "xyz");
+        if (cached)
+        {
+            await this.scanner.ScanAsync(this.root, CancellationToken.None);
+            this.error.GetStringBuilder().Clear();
+        }
+
+        var result = await this.scanner.ScanAsync(this.root, CancellationToken.None);
+        var diagnostics = this.error.ToString();
+        Assert.That(result.Tracks, Has.Count.EqualTo(2));
+        Assert.That(diagnostics, Does.Contain("Scanning and hashing source: 0% (0/2)"));
+        Assert.That(diagnostics, Does.Contain("Scanning and hashing source: 50% (1/2)"));
+        Assert.That(diagnostics, Does.Contain("Scanning and hashing source: 100% (2/2)"));
     }
 
     [Test]
@@ -64,6 +117,7 @@ public sealed class SourceScannerTests
         File.SetLastWriteTimeUtc(file, changeLength
             ? before.Tracks[0].LastWriteTimeUtc
             : before.Tracks[0].LastWriteTimeUtc.AddMinutes(1));
+
         var after = await this.scanner.ScanAsync(this.root, CancellationToken.None);
         Assert.That(before.Tracks[0].Sha256, Is.Not.EqualTo(after.Tracks[0].Sha256));
         Assert.That(after.Tracks[0].Sha256, Is.EqualTo(Convert.ToHexString(
@@ -90,8 +144,11 @@ public sealed class SourceScannerTests
                 File.SetLastWriteTimeUtc(file, originalWriteTime.AddMinutes(1));
             }
         });
+
         var concurrentScanner = new SourceScanner(fileSystem);
-        await Assert.ThatAsync(async () => await concurrentScanner.ScanAsync(this.root, CancellationToken.None), Throws.TypeOf<IOException>().With.Message.StartsWith("File changed during the scan:"));
+        await Assert.ThatAsync(async () => await concurrentScanner.ScanAsync(this.root, CancellationToken.None),
+            Throws.TypeOf<IOException>().With.Message.StartsWith("File changed during the scan:"));
+
         Assert.That(fileSystem.Session.OpenedStream?.MutationPerformed, Is.True);
         Assert.That(fileSystem.Session.Disposed, Is.True);
     }
@@ -120,6 +177,7 @@ public sealed class SourceScannerTests
             FileMode.Open,
             FileAccess.ReadWrite,
             FileShare.None);
+
         await Assert.ThrowsAsync<IOException>(() => this.scanner.ScanAsync(this.root, CancellationToken.None));
     }
 
@@ -132,6 +190,7 @@ public sealed class SourceScannerTests
         var scanner = new SourceScanner(
             new BudgetSourceFileSystem { FailRead = true },
             new SourceHashCache(this.cacheDirectory, TextWriter.Null));
+
         await Assert.ThrowsAsync<IOException>(() => scanner.ScanAsync(this.root, CancellationToken.None));
     }
 
@@ -157,10 +216,7 @@ public sealed class SourceScannerTests
     {
         var album = Directory.CreateDirectory(Path.Combine(this.root, "album"));
         await File.WriteAllTextAsync(Path.Combine(album.FullName, "track.mp3"), "abc");
-        var fileSystem = new BudgetSourceFileSystem
-        {
-            FailRead = true
-        };
+        var fileSystem = new BudgetSourceFileSystem { FailRead = true };
         await Assert.ThrowsAsync<IOException>(() => new SourceScanner(fileSystem).ScanAsync(this.root, CancellationToken.None));
         Assert.That(fileSystem.Session.ActiveEnumerations, Is.Zero);
         Assert.That(fileSystem.Session.Disposed, Is.True);
@@ -169,6 +225,7 @@ public sealed class SourceScannerTests
     [TearDown]
     public void TearDown()
     {
+        this.error.Dispose();
         Directory.Delete(this.root, recursive: true);
     }
 }

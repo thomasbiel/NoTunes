@@ -21,11 +21,17 @@ internal static class SourcePreparation
         CancellationToken cancellationToken,
         bool artworkOnly = false,
         GroupNamePrompt? prompt = null,
-        Action<SkippedSourceFile>? onSkipped = null)
+        Action<SkippedSourceFile>? onSkipped = null,
+        TextWriter? error = null)
     {
         using var session = fileSystem.OpenSource(new DirectoryInfo(library.Root), cancellationToken);
         var artworkCache = new ArtworkCache(workspace.Root);
         var result = new List<PreparedTrack>();
+        var progress = new OperationProgress(
+            error ?? TextWriter.Null,
+            artworkOnly ? "Checking and preparing covers" : "Preparing source tracks",
+            plan.Add.Count);
+
         var ids = catalogue.OccupiedIds.ToHashSet();
         var artworkId = catalogue.ArtworkHighWaterMark;
 
@@ -55,9 +61,11 @@ internal static class SourcePreparation
 
         var rootPrefix = Path.EndsInDirectorySeparator(library.Root) ? library.Root : library.Root + Path.DirectorySeparatorChar;
 
+        var completed = 0;
         foreach (var track in plan.Add)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            progress.Report(completed++);
             var fullPath = Path.GetFullPath(Path.Combine(library.Root, track.RelativePath));
             if (!fullPath.StartsWith(rootPrefix, PathComparison)) throw new IOException("Source track escapes the library root.");
 
@@ -206,6 +214,7 @@ internal static class SourcePreparation
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        progress.Report(completed);
         return result;
 
         bool TryReadMetadata<T>(SourceTrack track, Func<T> read, out T metadata)

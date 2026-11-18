@@ -92,7 +92,7 @@ public sealed class WriterTests
             Assert.That(output.ToString(), Does.Contain("0 MP3 file(s)"));
         }
 
-        Assert.That(error.ToString(), Is.Empty);
+        Assert.That(error.ToString(), Does.Contain("Scanning and hashing source: 100% (0/0)"));
     }
 
     [Test]

@@ -29,7 +29,10 @@ public static class ApplicationServices
             services.AddSingleton(new GroupResolutionPrompt(input ?? TextReader.Null, error));
             services.AddSingleton(_ => new SourceHashCache(
                 Path.Combine(DeviceState.Root(null), SourceHashCache.DirectoryName), error));
-            services.AddTransient<SourceScanner>();
+            services.AddTransient(provider => new SourceScanner(
+                provider.GetRequiredService<Platform.ISourceFileSystem>(),
+                provider.GetRequiredService<SourceHashCache>(),
+                error));
             services.AddTransient<CoverRemover>();
             services.AddTransient(provider => new LibraryInitializer(
                 provider.GetRequiredService<Platform.IUsbMuxTransport>(), error));

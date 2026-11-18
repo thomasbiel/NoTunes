@@ -3,7 +3,10 @@ using NUnit.Framework;
 
 namespace NoTunes.Tests;
 
-internal sealed class BudgetSourceSession(DirectoryInfo rootDirectory, bool failRead) : ISourceSession
+internal sealed class BudgetSourceSession(
+    DirectoryInfo rootDirectory,
+    bool failRead,
+    Action? beforeEnumeration = null) : ISourceSession
 {
     private readonly HashSet<string> opened = new(StringComparer.Ordinal)
     {
@@ -18,6 +21,7 @@ internal sealed class BudgetSourceSession(DirectoryInfo rootDirectory, bool fail
 
     public IEnumerable<SourceEntry> EnumerateDirectory(DirectoryInfo directory)
     {
+        beforeEnumeration?.Invoke();
         Assert.That(this.opened, Does.Contain(directory.FullName));
         this.ActiveEnumerations++;
         try

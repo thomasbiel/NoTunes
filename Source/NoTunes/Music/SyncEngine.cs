@@ -10,6 +10,8 @@ public sealed class SyncEngine(
     IUsbMuxTransport transport,
     TextWriter error)
 {
+    private TextWriter debug = TextWriter.Null;
+
     internal SyncConnectionFactory OpenConnection { get; init; } = OpenDeviceConnectionAsync;
 
     internal GroupNamePrompt? PromptForGroupName { get; init; }
@@ -25,6 +27,7 @@ public sealed class SyncEngine(
 
     public async Task<SyncResult> RunAsync(SyncOptions options, CancellationToken cancellationToken)
     {
+        this.debug = options.Debug ? error : TextWriter.Null;
         await error.WriteLineAsync("Scanning and hashing source music...");
         var source = await scanner.ScanAsync(SourceSettings.ResolveFolder(options.Folder), cancellationToken);
         var timeout = TimeSpan.FromSeconds(options.Timeout);
@@ -50,7 +53,7 @@ public sealed class SyncEngine(
             cancellationToken))
         {
             identity = await LibraryIdentity.ReadAsync(phone.Afc, cancellationToken);
-            catalogue = await ReadCatalogueAsync(phone.Afc, cancellationToken);
+            catalogue = await this.ReadCatalogueAsync(phone.Afc, cancellationToken);
             await ValidateSavedAnchorsAsync(phone.Afc, catalogue, cancellationToken);
             await error.WriteLineAsync($"Comparing {source.Tracks.Count} source tracks "
                 + $"with {catalogue.Tracks.Count} local iPhone tracks...");
@@ -59,7 +62,8 @@ public sealed class SyncEngine(
                 source,
                 catalogue,
                 (track, token) => this.ReadHashAsync(phone.Afc, track, token),
-                cancellationToken);
+                cancellationToken,
+                error);
         }
 
         using var workspace = new SyncWorkspace();
@@ -73,7 +77,8 @@ public sealed class SyncEngine(
             workspace,
             cancellationToken,
             prompt: this.PromptForGroupName,
-            onSkipped: ReportSkipped);
+            onSkipped: ReportSkipped,
+            error: error);
 
         var missingArtwork = plan.Matches.Where(match => !HasRegisteredArtwork(catalogue, match.Device.Id)).ToArray();
 
@@ -91,7 +96,8 @@ public sealed class SyncEngine(
             workspace,
             cancellationToken,
             artworkOnly: true,
-            onSkipped: ReportSkipped);
+            onSkipped: ReportSkipped,
+            error: error);
 
         var matches = missingArtwork.ToDictionary(match => match.Source.RelativePath, StringComparer.Ordinal);
         var artworkUpdates = repairs
@@ -228,7 +234,7 @@ public sealed class SyncEngine(
 
         await using var syncLock = await phone.Afc.AcquireSyncLockAsync(cancellationToken);
         var currentIdentity = await LibraryIdentity.ReadAsync(phone.Afc, cancellationToken);
-        var before = await ReadCatalogueAsync(phone.Afc, cancellationToken);
+        var before = await this.ReadCatalogueAsync(phone.Afc, cancellationToken);
         RequireUnchanged(expected, before);
         if (currentIdentity != identity) throw new IOException("The iPhone library identity changed after planning.");
 
@@ -238,7 +244,7 @@ public sealed class SyncEngine(
         await RequireSpaceAsync(phone.Afc, transferBytes, cancellationToken);
 
         await RequireEmptyStagingAsync(phone.Afc, cancellationToken);
-        var session = new AtcSyncSession(phone.Atc, error);
+        var session = new AtcSyncSession(phone.Atc, error, this.debug);
         using var signer = await session.BeginAsync(identity, before.Anchor, cancellationToken);
         await phone.Afc.EnsureDirectoryAsync(SyncPaths.MetadataDirectory, cancellationToken);
         await RequireEmptyStagingAsync(phone.Afc, cancellationToken);
@@ -271,6 +277,7 @@ public sealed class SyncEngine(
             signature,
             cancellationToken);
 
+        var deletionProgress = new OperationProgress(error, "Removing obsolete iPhone tracks", deletions.Count);
         await session.FinishMetadataAsync(before.Anchor, cancellationToken);
         var retained = before.Tracks.Select(track => track.Id).Except(deletions.Select(track => track.Id)).ToHashSet();
         await session.TransferAsync(
@@ -279,13 +286,14 @@ public sealed class SyncEngine(
             retained,
             cancellationToken);
 
-        var after = await ReadCatalogueAsync(phone.Afc, cancellationToken);
+        var after = await this.ReadCatalogueAsync(phone.Afc, cancellationToken);
         VerifyResult(
             before,
             after,
             additions,
             deletions);
 
+        var verificationProgress = new OperationProgress(error, "Verifying transferred tracks", additions.Count);
         foreach (var track in additions)
         {
             await AtcSyncSession.VerifyHashAsync(
@@ -295,6 +303,7 @@ public sealed class SyncEngine(
                 cancellationToken);
 
             await VerifyArtworkAsync(phone.Afc, after, track, cancellationToken);
+            verificationProgress.Advance();
         }
 
         if (await LibraryIdentity.ReadAsync(phone.Afc, cancellationToken) != identity)
@@ -303,6 +312,7 @@ public sealed class SyncEngine(
         }
 
         journal.Complete();
+        deletionProgress.Report(deletions.Count);
         await error.WriteLineAsync($"Verified Media revision {after.Anchor}: "
             + $"{additions.Count} added, {deletions.Count} removed.");
         return after;
@@ -329,12 +339,17 @@ public sealed class SyncEngine(
                 throw new IOException("The pending operation belongs to a different library identity.");
             }
 
-            current = await ReadCatalogueAsync(phone.Afc, cancellationToken);
+            current = await this.ReadCatalogueAsync(phone.Afc, cancellationToken);
             remove.AddRange(SyncRecovery.Assess(pending, current, additions));
             if (current.Anchor != pending.Before.Anchor)
             {
-                foreach (var track in additions.Where(track => remove.All(item => item.Id != track.Id)))
+                var candidates = additions.Where(track => remove.All(item => item.Id != track.Id)).ToArray();
+                var progress = new OperationProgress(error, "Verifying interrupted transfers", candidates.Length);
+                var completed = 0;
+                foreach (var track in candidates)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    progress.Report(completed++);
                     var actual = current.Tracks.SingleOrDefault(item => item.Id == track.Id);
                     if (actual is null)
                     {
@@ -375,6 +390,8 @@ public sealed class SyncEngine(
 
                     await VerifyArtworkAsync(phone.Afc, current, track, cancellationToken);
                 }
+
+                progress.Report(completed);
             }
 
             await DeviceStaging.RemoveMatchingAsync(
@@ -395,7 +412,8 @@ public sealed class SyncEngine(
                 using var signer = await session.BeginAsync(pending.Identity, current.Anchor, cancellationToken);
             }
 
-            RequireUnchanged(current, await ReadCatalogueAsync(phone.Afc, cancellationToken));
+            RequireUnchanged(current, await this.ReadCatalogueAsync(phone.Afc, cancellationToken));
+            var cleanupProgress = new OperationProgress(error, "Reconciling staged transfers", additions.Length);
             foreach (var track in additions)
             {
                 await DeviceStaging.RemoveMatchingAsync(
@@ -418,6 +436,8 @@ public sealed class SyncEngine(
                         art.Bytes,
                         cancellationToken);
                 }
+
+                cleanupProgress.Advance();
             }
 
             if (remove.Count == 0 && retryArtwork.Count == 0)
@@ -553,7 +573,7 @@ public sealed class SyncEngine(
             throw new IOException($"The catalogue file size disagrees with the iPhone file: {track.Title}");
         }
 
-        await error.WriteLineAsync($"Compare: {track.Title}");
+        await this.debug.WriteLineAsync($"Compare: {track.Title}");
         return await afc.HashFileAsync(path, track.Size, cancellationToken);
     }
 
@@ -620,9 +640,9 @@ public sealed class SyncEngine(
         }
     }
 
-    private static async Task<DeviceCatalogue> ReadCatalogueAsync(AfcClient afc, CancellationToken cancellationToken)
+    private async Task<DeviceCatalogue> ReadCatalogueAsync(AfcClient afc, CancellationToken cancellationToken)
     {
-        var snapshot = await CatalogueSnapshot.CaptureWithRetryAsync(afc, cancellationToken);
+        var snapshot = await CatalogueSnapshot.CaptureWithRetryAsync(afc, cancellationToken, error);
         var catalogue = await CatalogueReader.ReadAsync(snapshot, cancellationToken);
         return catalogue with
         {

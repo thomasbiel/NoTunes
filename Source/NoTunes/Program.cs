@@ -19,7 +19,8 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
-        return await RunAsync(args, Console.Out, Console.Error);
+        using var error = new ProgressTextWriter(Console.Error, !Console.IsErrorRedirected);
+        return await RunAsync(args, Console.Out, error);
     }
 
     private static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error)
