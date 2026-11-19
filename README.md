@@ -207,16 +207,17 @@ After building, the equivalent executable is
   enumerates held directory descriptors and opens files relative to them with
   `openat` and `O_NOFOLLOW`, so replacing a pathname cannot redirect file reads.
   Size and modification time are checked on the opened file handle on both platforms.
-- `sync [folder] [--dry-run] [--device <UDID>]` mirrors local MP3 files to
+- `sync [folder] [--dry-run] [--repair-covers] [--device <UDID>]` mirrors local MP3 files to
   computer-synced, local Music tracks. Cloud purchases, remote items, videos and
   other media types are preserved. Tracks are matched by their complete SHA-256
   hashes, including duplicate counts; a renamed file does not trigger a transfer.
   Replacing changed bytes uses an insertion followed by removal of the old track;
   it creates a new track identity. Unchanged tracks retain their identities.
-  Embedded covers are registered with new tracks. Missing covers on byte-identical
-  existing tracks are repaired with artwork-only updates that retain their audio,
-  metadata and track identities. Dry-run lists these under `Artwork` in JSON or
-  as `~ Cover:` entries in text output.
+  Embedded covers are registered with new tracks. Existing tracks' covers are
+  checked only with `--repair-covers`, which repairs missing covers on byte-identical
+  tracks with artwork-only updates that retain their audio, metadata and track
+  identities. Use `sync [folder] --repair-covers --dry-run` to preview these repairs
+  under `Artwork` in JSON or as `~ Cover:` entries in text output.
 - `remove-cover <file> [--folder <path>] [--json]` removes all embedded pictures
   from exactly one local MP3, including pictures that cannot be decoded. Absolute
   paths select the file directly; relative paths resolve below `MusicSourceFolder`
@@ -327,7 +328,8 @@ attribute is detected by a full readback. The source hash cache is independent
 and remains enabled. Newly transferred audio and separate artwork are always
 read back and verified regardless of cache hits or this option.
 Embedded pictures participate in the MP3 hash. Separate registered iPhone artwork
-is not audited by `--full-readback`; existing cover checks and repairs are unchanged.
+is not audited by `--full-readback`; checking and repairing missing covers on
+existing tracks requires `--repair-covers` independently of this option.
 No device-side file-hash operation is used. Diagnostics include cache-hit/read
 counts on stderr; `--json` prints the plan, dry-run flag and verified batch count
 to stdout.
@@ -354,7 +356,8 @@ stable file attributes. Retries repeat reads, never signed sync operations.
 Before writes, all new source files are copied to a private temporary directory,
 checked against the scan hashes and read with TagLibSharp. Source access continues
 to use the platform's directory and file guards. This requires temporary disk
-space for the additions and any missing-cover repairs. Tracks without embedded
+space for the additions and any missing-cover repairs requested with `--repair-covers`.
+Existing tracks are not read for cover preparation by default. Tracks without embedded
 covers are checked through a guarded read-only tag stream without making a copy.
 Validated JPEGs are also stored in the temporary directory and loaded as needed,
 so allow disk space for these cover files as well. A bounded content cache reuses

@@ -12,6 +12,7 @@ internal sealed class SyncSourcePreparation(
         SyncPlan plan,
         DeviceCatalogue catalogue,
         SyncWorkspace workspace,
+        bool repairCovers,
         CancellationToken cancellationToken)
     {
         var skipped = new List<SkippedSourceFile>();
@@ -30,34 +31,38 @@ internal sealed class SyncSourcePreparation(
                 Error = error
             });
 
-        var missingArtwork = plan.Matches
-            .Where(match => !catalogue.TrackArtwork.TryGetValue(match.Device.Id, out var artwork) || artwork.Path is null)
-            .ToArray();
+        IReadOnlyList<PreparedTrack> artworkUpdates = [];
+        if (repairCovers)
+        {
+            var missingArtwork = plan.Matches
+                .Where(match => !catalogue.TrackArtwork.TryGetValue(match.Device.Id, out var artwork) || artwork.Path is null)
+                .ToArray();
 
-        var lastArtworkId = prepared
-            .Where(track => track.Metadata.Artwork is not null)
-            .Select(track => track.Metadata.Artwork!.CacheId)
-            .DefaultIfEmpty(catalogue.ArtworkHighWaterMark)
-            .Max();
+            var lastArtworkId = prepared
+                .Where(track => track.Metadata.Artwork is not null)
+                .Select(track => track.Metadata.Artwork!.CacheId)
+                .DefaultIfEmpty(catalogue.ArtworkHighWaterMark)
+                .Max();
 
-        var repairs = await SourcePreparation.PrepareAsync(
-            source,
-            plan with { Add = [.. missingArtwork.Select(match => match.Source)] },
-            catalogue with { ArtworkHighWaterMark = lastArtworkId },
-            fileSystem,
-            workspace,
-            cancellationToken,
-            new SourcePreparationOptions { ArtworkOnly = true, OnSkipped = ReportSkipped, Error = error });
+            var repairs = await SourcePreparation.PrepareAsync(
+                source,
+                plan with { Add = [.. missingArtwork.Select(match => match.Source)] },
+                catalogue with { ArtworkHighWaterMark = lastArtworkId },
+                fileSystem,
+                workspace,
+                cancellationToken,
+                new SourcePreparationOptions { ArtworkOnly = true, OnSkipped = ReportSkipped, Error = error });
 
-        var matches = missingArtwork.ToDictionary(match => match.Source.RelativePath, StringComparer.Ordinal);
-        var artworkUpdates = repairs
-            .Select(track => track with
-            {
-                Id = matches[track.Source.RelativePath].Device.Id,
-                IsArtworkOnly = true,
-                ExistingDevicePath = matches[track.Source.RelativePath].Device.Path
-            })
-            .ToArray();
+            var matches = missingArtwork.ToDictionary(match => match.Source.RelativePath, StringComparer.Ordinal);
+            artworkUpdates = repairs
+                .Select(track => track with
+                {
+                    Id = matches[track.Source.RelativePath].Device.Id,
+                    IsArtworkOnly = true,
+                    ExistingDevicePath = matches[track.Source.RelativePath].Device.Path
+                })
+                .ToArray();
+        }
 
         plan = plan with
         {

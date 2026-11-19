@@ -20,6 +20,9 @@ public sealed class SyncOptions : DeviceOptions
     [Option(CliSyntax.FullReadback, HelpText = "Read all comparison candidates from the iPhone and refresh cached hashes.")]
     public bool FullReadback { get; set; }
 
+    [Option(CliSyntax.RepairCovers, HelpText = "Also check and repair missing covers on existing, unchanged tracks.")]
+    public bool RepairCovers { get; set; }
+
     [Option(CliSyntax.AllowEmptySource, HelpText = "Allow an empty source to remove all computer-synced music.")]
     public bool AllowEmptySource { get; set; }
 

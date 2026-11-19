@@ -10,7 +10,9 @@ namespace NoTunes.Tests;
 public sealed class SyncProgressTests
 {
     [Test]
-    public async Task Reports_All_Write_Phases_And_Only_Enables_Track_Diagnostics_When_Requested([Values] bool debug)
+    public async Task Reports_All_Write_Phases_And_Only_Enables_Track_Diagnostics_When_Requested(
+        [Values] bool debug,
+        [Values] bool repairCovers)
     {
         using var source = new SyncWorkspace();
         using var state = new SyncWorkspace();
@@ -35,19 +37,23 @@ public sealed class SyncProgressTests
             Folder = source.Root,
             StateFolder = state.Root,
             Timeout = SimulatedSyncDevice.RequestTimeoutSeconds,
-            Debug = debug
+            Debug = debug,
+            RepairCovers = repairCovers
         }, CancellationToken.None);
 
         var diagnostics = error.ToString();
         foreach (var phase in new[]
         {
             "Scanning and hashing source", "Reading iPhone catalogue", "Comparing iPhone tracks",
-            "Preparing source tracks", "Checking and preparing covers", "Transferring assets",
+            "Preparing source tracks", "Transferring assets",
             "Verifying transferred tracks", "Removing obsolete iPhone tracks"
         })
         {
             Assert.That(diagnostics, Does.Contain($"{phase}: 100%"));
         }
+
+        Assert.That(diagnostics.Contains("Checking and preparing covers:", StringComparison.Ordinal),
+            Is.EqualTo(repairCovers));
 
         Assert.That(diagnostics.Contains("Compare: ", StringComparison.Ordinal), Is.EqualTo(debug));
         Assert.That(diagnostics.Contains("Transfer: ", StringComparison.Ordinal), Is.EqualTo(debug));

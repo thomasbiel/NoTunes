@@ -116,6 +116,7 @@ public sealed class SyncEngine(
                 plan,
                 catalogue,
                 workspace,
+                options.RepairCovers,
                 cancellationToken);
 
         plan = prepared.Plan;

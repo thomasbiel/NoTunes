@@ -74,7 +74,8 @@ internal sealed class SimulatedSyncDevice : IDisposable
         string source,
         string state,
         bool dryRun = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool repairCovers = false)
     {
         await using var services = new ServiceCollection().AddNoTunes(TextWriter.Null, TextWriter.Null)
             .BuildServiceProvider();
@@ -89,7 +90,8 @@ internal sealed class SimulatedSyncDevice : IDisposable
             Folder = source,
             StateFolder = state,
             Timeout = RequestTimeoutSeconds,
-            DryRun = dryRun
+            DryRun = dryRun,
+            RepairCovers = repairCovers
         };
 
         return await engine.RunAsync(options, cancellationToken);

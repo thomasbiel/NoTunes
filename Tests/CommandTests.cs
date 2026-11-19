@@ -34,6 +34,16 @@ public sealed class CommandTests
         Assert.That(result, Is.TypeOf<NotParsed<object>>());
     }
 
+    [Test]
+    public void Repairs_Existing_Covers_Only_When_Requested([Values] bool repairCovers)
+    {
+        using var parser = new Parser(settings => settings.HelpWriter = null);
+        var result = parser.ParseArguments<SyncOptions>(repairCovers ? ["--repair-covers"] : []);
+
+        Assert.That(result, Is.TypeOf<Parsed<SyncOptions>>());
+        Assert.That(((Parsed<SyncOptions>)result).Value.RepairCovers, Is.EqualTo(repairCovers));
+    }
+
     [TestCase("scan")]
     [TestCase("sync")]
     public void Allows_The_Source_Folder_To_Be_Read_From_Configuration(string command)

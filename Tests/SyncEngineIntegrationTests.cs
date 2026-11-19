@@ -89,7 +89,9 @@ public sealed class SyncEngineIntegrationTests
     }
 
     [Test]
-    public async Task Skips_A_Broken_Cover_Repair_And_Continues_Audio_Additions([Values] bool dryRun)
+    public async Task Skips_A_Broken_Cover_Repair_Only_When_Requested_And_Continues_Audio_Additions(
+        [Values] bool dryRun,
+        [Values] bool repairCovers)
     {
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
         this.CreateSource(1);
@@ -103,12 +105,17 @@ public sealed class SyncEngineIntegrationTests
         var bytes = await File.ReadAllBytesAsync(path);
         device.SetExistingAudio(bytes);
 
-        var (before, result, after) = await this.RunAndReadAsync(device, dryRun);
+        var (before, result, after) = await this.RunAndReadAsync(device, dryRun, repairCovers);
 
         Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
         Assert.That(result.Plan.Artwork, Is.Empty);
-        Assert.That(result.Plan.Skipped.Single().RelativePath, Is.EqualTo("covered.mp3"));
-        Assert.That(result.Plan.Skipped.Single().ArtworkOnly, Is.True);
+        Assert.That(result.Plan.Skipped, Has.Count.EqualTo(repairCovers ? 1 : 0));
+        if (repairCovers)
+        {
+            Assert.That(result.Plan.Skipped.Single().RelativePath, Is.EqualTo("covered.mp3"));
+            Assert.That(result.Plan.Skipped.Single().ArtworkOnly, Is.True);
+        }
+
         Assert.That(result.Plan.Unchanged, Is.EqualTo(1));
         Assert.That(result.Plan.DeferredDeletions, Is.Empty);
         Assert.That(result.VerifiedBatches, Is.EqualTo(dryRun ? 0 : 1));
@@ -263,17 +270,62 @@ public sealed class SyncEngineIntegrationTests
     }
 
     [Test]
-    public async Task Repairs_Only_Artwork_While_Preserving_Existing_Audio_Identity_And_Metadata()
+    public async Task Only_Transfers_Covers_For_New_Tracks_By_Default([Values] bool dryRun, [Values] bool addTrack)
+    {
+        using var device = new SimulatedSyncDevice(keepExistingTrack: true);
+        var (path, bytes) = await this.PrepareCoverRepairAsync(device, addTrack ? 2 : 1);
+
+        var (before, result, after) = await this.RunAndReadAsync(device, dryRun);
+
+        Assert.That(result.Plan.Artwork, Is.Empty);
+        Assert.That(result.Plan.Skipped, Is.Empty);
+        Assert.That(result.Plan.Delete, Is.Empty);
+        Assert.That(result.Plan.Unchanged, Is.EqualTo(1));
+        Assert.That(result.Plan.Add, Has.Count.EqualTo(addTrack ? 1 : 0));
+        Assert.That(result.VerifiedBatches, Is.EqualTo(addTrack && !dryRun ? 1 : 0));
+        Assert.That(after.Tracks.Single(track => track.Id == SimulatedSyncCatalogue.ExistingTrackId),
+            Is.EqualTo(before.Tracks.Single()));
+
+        Assert.That(after.TrackArtwork.ContainsKey(SimulatedSyncCatalogue.ExistingTrackId), Is.False);
+        Assert.That(device.Files[SimulatedSyncCatalogue.ExistingTrackPath], Is.EqualTo(bytes));
+        if (addTrack && !dryRun)
+        {
+            var added = after.Tracks.Single(track => track.Id != SimulatedSyncCatalogue.ExistingTrackId);
+            SimulatedSyncDeviceAssertions.HasArtworkFrom(
+                device,
+                after,
+                added.Id,
+                path);
+        }
+        else
+        {
+            SimulatedSyncDeviceAssertions.HasNoWrites(device);
+        }
+
+        this.AssertSettled(device, addTrack && !dryRun ? 1 : 0);
+    }
+
+    [Test]
+    public async Task Repairs_Only_Artwork_While_Preserving_Existing_Audio_Identity_And_Metadata([Values] bool dryRun)
     {
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
 
         var (path, bytes) = await this.PrepareCoverRepairAsync(device);
-        var (before, result, after) = await this.RunAndReadAsync(device);
+        var (before, result, after) = await this.RunAndReadAsync(device, dryRun, repairCovers: true);
 
         Assert.That(result.Plan.Add, Is.Empty);
         Assert.That(result.Plan.Delete, Is.Empty);
         Assert.That(result.Plan.Artwork, Has.Count.EqualTo(1));
         Assert.That(result.Plan.Unchanged, Is.EqualTo(1));
+        if (dryRun)
+        {
+            Assert.That(result.VerifiedBatches, Is.Zero);
+            SimulatedSyncDeviceAssertions.HasNoWrites(device);
+            SyncEngine.RequireUnchanged(before, after);
+            this.AssertSettled(device, 0);
+            return;
+        }
+
         Assert.That(result.VerifiedBatches, Is.EqualTo(1));
         Assert.That(
             device.Batches.Single().Single().Text(MediaKeys.Operation),
@@ -297,7 +349,7 @@ public sealed class SyncEngineIntegrationTests
         using var device = new SimulatedSyncDevice(keepExistingTrack: true);
 
         var (path, bytes) = await this.PrepareCoverRepairAsync(device, 2);
-        var (before, result, after) = await this.RunAndReadAsync(device);
+        var (before, result, after) = await this.RunAndReadAsync(device, repairCovers: true);
 
         Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
         Assert.That(result.Plan.Artwork, Has.Count.EqualTo(1));
@@ -530,14 +582,18 @@ public sealed class SyncEngineIntegrationTests
         Assert.That(device.Connections.All(connection => connection.IsDisposed), Is.True);
     }
 
-    private async Task<SyncResult> RunAsync(SimulatedSyncDevice device, bool dryRun = false)
+    private async Task<SyncResult> RunAsync(
+        SimulatedSyncDevice device,
+        bool dryRun = false,
+        bool repairCovers = false)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(RunTimeoutSeconds));
         return await device.RunAsync(
             this.source.Root,
             this.state.Root,
             dryRun,
-            deadline.Token);
+            deadline.Token,
+            repairCovers);
     }
 
     [Test]
@@ -565,10 +621,11 @@ public sealed class SyncEngineIntegrationTests
 
     private async Task<(DeviceCatalogue Before, SyncResult Result, DeviceCatalogue After)> RunAndReadAsync(
         SimulatedSyncDevice device,
-        bool dryRun = false)
+        bool dryRun = false,
+        bool repairCovers = false)
     {
         var before = await device.ReadCatalogueAsync();
-        var result = await this.RunAsync(device, dryRun);
+        var result = await this.RunAsync(device, dryRun, repairCovers);
         var after = await device.ReadCatalogueAsync();
         return (before, result, after);
     }
@@ -587,7 +644,7 @@ public sealed class SyncEngineIntegrationTests
     {
         var (path, _) = await this.PrepareCoverRepairAsync(device);
         var before = await device.ReadCatalogueAsync();
-        await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device));
+        await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device, repairCovers: true));
         return (path, before);
     }
 
