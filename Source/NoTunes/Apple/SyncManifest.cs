@@ -11,10 +11,26 @@ internal static class SyncManifest
         IReadOnlySet<long> retained)
     {
         var manifest = parameters.Dictionary(AtcKeys.AssetManifest);
-        if (manifest.Keys.Any(key => key != AtcKeys.Media) || manifest.GetValueOrDefault(AtcKeys.Media) is not object[] entries
-            || entries.Length > SyncProtocol.ManifestLimit)
+        if (manifest.Keys.Any(key => key != AtcKeys.Media))
         {
-            throw new InvalidDataException("Unsupported ATC asset manifest.");
+            throw new InvalidDataException("Unsupported ATC asset manifest keys: "
+                + string.Join(", ", manifest.Keys.Order(StringComparer.Ordinal)) + ".");
+        }
+
+        var media = manifest.GetValueOrDefault(AtcKeys.Media);
+        if (media is not object[] entries)
+        {
+            throw new InvalidDataException($"ATC asset manifest {AtcKeys.Media} must be an array; "
+                + $"received {media?.GetType().Name ?? "missing or null"}.");
+        }
+
+        // Each known track ID may occur once; artwork-only updates also belong to the retained set.
+        var maximumEntries = (long)retained.Count + additions.Count(track => !retained.Contains(track.Id));
+        if (entries.Length > maximumEntries)
+        {
+            throw new InvalidDataException($"ATC asset manifest contains {entries.Length} entries, "
+                + $"but only {maximumEntries} distinct track IDs are expected "
+                + $"({additions.Count} additions/updates, {retained.Count} retained).");
         }
 
         var own = additions.ToDictionary(track => track.AssetId, StringComparer.Ordinal);

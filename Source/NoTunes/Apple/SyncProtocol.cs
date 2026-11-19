@@ -12,7 +12,6 @@ internal static class SyncProtocol
     public const long GeniusPart = 4;
     public const long AudioWithGenius = AudioPart | GeniusPart;
     public const int MessageLimit = 10000;
-    public const int ManifestLimit = 1024;
     public const int MaxTrackChanges = 499;
     public const int MaxOperationBytes = 4 * 1024 * 1024;
     public const int MaxCatalogueBytes = 64 * 1024 * 1024;

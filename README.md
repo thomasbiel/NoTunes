@@ -467,6 +467,14 @@ the track's registered token, preferred artwork token and permanent JPEG origina
 The source MP3 is unchanged. The image codecs and their licenses are documented in
 `THIRD-PARTY-NOTICES.md`.
 
+ATC asset manifests may include cover or Genius requests for existing tracks as
+well as the current additions or artwork updates. Their entry limit is the number
+of distinct track IDs in those sets, rather than a fixed 1,024 entries. Every entry
+is validated before any asset is uploaded; unknown IDs, duplicate IDs and unexpected
+asset parts are rejected. Device messages remain bounded to 16 MiB. Manifest errors
+report unsupported keys, unexpected Media value types or counts exceeding the
+expected number of distinct tracks.
+
 Compilation flags and explicit album artists are retained. A compilation without
 an album artist is rejected during source preparation, before device writes;
 set the album artist in its MP3 tags first. Existing album, artist and composer
