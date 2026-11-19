@@ -59,7 +59,8 @@ internal sealed class SyncRecoveryRunner(
 
         if (remove.Count != 0)
         {
-            await context.Error.WriteLineAsync($"Reconciled {remove.Count} unfinished insertions; verified tracks were retained.");
+            await context.Error.WriteLineAsync(
+                $"Reconciled {DisplayFormat.Number(remove.Count)} unfinished insertions; verified tracks were retained.");
         }
     }
 

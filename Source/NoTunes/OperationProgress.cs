@@ -6,16 +6,22 @@ internal sealed class OperationProgress
     private readonly TextWriter output;
     private readonly string operation;
     private readonly long total;
+    private readonly ProgressUnit unit;
     private int lastPercentage = -1;
     private long completed;
 
-    public OperationProgress(TextWriter output, string operation, long total)
+    public OperationProgress(
+        TextWriter output,
+        string operation,
+        long total,
+        ProgressUnit unit = ProgressUnit.Items)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(total);
 
         this.output = output;
         this.operation = operation;
         this.total = total;
+        this.unit = unit;
         this.Report(0);
     }
 
@@ -39,7 +45,11 @@ internal sealed class OperationProgress
         if (percentage <= this.lastPercentage) return;
 
         this.lastPercentage = percentage;
-        var message = $"{this.operation}: {percentage}% ({completed}/{this.total})";
+        var quantities = this.unit == ProgressUnit.Bytes
+            ? $"{DisplayFormat.Bytes(completed)} / {DisplayFormat.Bytes(this.total)}"
+            : $"{DisplayFormat.Number(completed)}/{DisplayFormat.Number(this.total)}";
+
+        var message = $"{this.operation}: {percentage}% ({quantities})";
         if (this.output is ProgressTextWriter progressOutput)
         {
             progressOutput.WriteProgress(this.operation, message, percentage == MaximumPercentage);

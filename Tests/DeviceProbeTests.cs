@@ -62,8 +62,26 @@ public sealed class DeviceProbeTests
         Assert.That(output.ToString(), Does.Not.Contain("pairing:").And.Not.Contain("Music changed:").And.Not.Contain("OK"));
         if (includeOptionalDetails)
         {
-            Assert.That(lines, Does.Contain("Database size:    256 bytes"));
+            Assert.That(lines, Does.Contain("Database size:    256 B"));
         }
+    }
+
+    [Test]
+    public async Task Formats_Large_Track_Counts_And_Storage_Quantities_For_Text_Output()
+    {
+        var result = CreateResult() with
+        {
+            MusicTrackCount = 12345,
+            FreeBytes = "12345678900",
+            CatalogueBytes = 16486400,
+            CatalogueReadVerified = true
+        };
+
+        using var output = new StringWriter();
+        await ProbeOptions.WriteTextAsync(output, result, "Network");
+        Assert.That(output.ToString(), Does.Contain("Music tracks:     12,345"));
+        Assert.That(output.ToString(), Does.Contain("Free space:       12.3 GB"));
+        Assert.That(output.ToString(), Does.Contain("Database size:    16.5 MB"));
     }
 
     [Test]

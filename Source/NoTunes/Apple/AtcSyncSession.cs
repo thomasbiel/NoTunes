@@ -157,7 +157,11 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
             (asset.Track!.IsArtworkOnly ? 0 : asset.Track.Source.Size)
             + (asset.Track.Metadata.Artwork?.Length ?? 0) + 1);
 
-        var progress = new OperationProgress(error, "Transferring assets", total);
+        var progress = new OperationProgress(
+            error,
+            "Transferring assets",
+            total,
+            ProgressUnit.Bytes);
         long completed = 0;
         foreach (var asset in manifest.Where(asset => asset.Track is not null))
         {

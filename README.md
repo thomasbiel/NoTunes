@@ -355,8 +355,10 @@ to stdout.
 
 `scan` and `sync` report percentage progress to stderr for each work phase:
 source hashing, catalogue reads, device comparison, source and cover preparation,
-asset transfers, verification and recovery. Transfer progress uses bytes; other
-phases use their known file or read counts. Each percentage is printed once per
+asset transfers, verification and recovery. Transfer progress displays data sizes
+in B/KB/MB/GB (and larger units), with one decimal place for KB and above. Units
+use decimal multiples: 1 KB = 1,000 bytes. Other phases use file or read counts
+with comma thousands separators. Each percentage is printed once per
 phase. In an interactive terminal, updates replace the current progress line;
 completion, errors and debug messages finish that line. Redirected stderr keeps
 ordinary log lines without cursor-control characters.
@@ -450,6 +452,13 @@ compensating session before the source plan retries them. Interrupted artwork-on
 updates retry their cover registration without deleting the existing track.
 Compensating deletions of incomplete tracks remain recoverable across further
 interruptions, including partially applied cleanup batches.
+Recovery also checks album and artist rows created before audio arrived. A changed
+group sync ID is accepted only for the same internal row with unchanged names,
+sorting and membership, and only when the signed request specified that new ID.
+Retained tracks may reflect that proven change in their derived group sync ID;
+unrelated metadata changes remain errors. Receiver spelling variants additionally
+require the recorded insertion's actual internal group association. The original
+signed operation and journal are never rewritten to accommodate these differences.
 Partially applied removals are reconciled against the observed inventory; the
 fresh source plan removes only the entries that are still present.
 An uncertain operation is never blindly replayed. Only staging files equal to the
@@ -497,9 +506,11 @@ expected number of distinct tracks.
 Compilation flags and explicit album artists are retained. A compilation without
 an album artist is rejected during source preparation, before device writes;
 set the album artist in its MP3 tags first. Existing album, artist and composer
-sort names are preserved when new tracks join their groups. ASCII case variants
-reuse group identities; names containing non-ASCII characters require an exact
-match in each album or artist name.
+sort names are preserved when new tracks join their groups. ASCII letters are
+compared without case even inside Unicode names. If no exact group exists, a
+unique receiver spelling that differs only by case or diacritics is reused, such
+as `Celine Dion` / `Céline Dion`. Multiple possible groups require an interactive
+selection; source MP3 tags remain unchanged.
 
 Existing album and album-artist rows may share a nonzero host sync ID, including
 rows with different name spellings. NoTunes reads those rows separately by their

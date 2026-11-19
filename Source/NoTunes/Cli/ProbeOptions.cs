@@ -46,12 +46,19 @@ public sealed class ProbeOptions : DeviceOptions
         await WriteRowAsync(output, "Connection:", connectionType == "Network" ? "Wi-Fi" : connectionType);
         await WriteRowAsync(output, "Music library:", result.MusicDatabasePresent ? "present" : "not initialized");
         await WriteRowAsync(output, "Music sync:", result.SyncAllowed ? "allowed" : "blocked by iPhone");
-        if (result.MusicTrackCount.HasValue) await WriteRowAsync(output, "Music tracks:", result.MusicTrackCount.Value);
-        if (result.FreeBytes is not null) await WriteRowAsync(output, "Free bytes:", result.FreeBytes);
+        if (result.MusicTrackCount.HasValue)
+        {
+            await WriteRowAsync(output, "Music tracks:", DisplayFormat.Number(result.MusicTrackCount.Value));
+        }
+
+        if (result.FreeBytes is not null)
+        {
+            await WriteRowAsync(output, "Free space:", DisplayFormat.Bytes(result.FreeBytes));
+        }
 
         if (result.CatalogueReadVerified)
         {
-            await WriteRowAsync(output, "Database size:", $"{result.CatalogueBytes:G0} bytes");
+            await WriteRowAsync(output, "Database size:", DisplayFormat.Bytes(result.CatalogueBytes.GetValueOrDefault()));
         }
     }
 

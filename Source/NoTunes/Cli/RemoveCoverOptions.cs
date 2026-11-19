@@ -34,7 +34,7 @@ public sealed class RemoveCoverOptions : CommandOptions
         {
             await context.Output.WriteLineAsync(result.RemovedCovers == 0
                 ? $"No embedded covers found: {result.Path}"
-                : $"Removed {result.RemovedCovers} embedded cover(s): {result.Path}");
+                : $"Removed {DisplayFormat.Number(result.RemovedCovers)} embedded cover(s): {result.Path}");
         }
 
         return ExitCodes.Success;

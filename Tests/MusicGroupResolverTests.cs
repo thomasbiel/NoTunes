@@ -6,6 +6,61 @@ namespace NoTunes.Tests;
 [TestFixture]
 public sealed class MusicGroupResolverTests
 {
+    [TestCase("Die Ärzte", "DIe Ärzte")]
+    [TestCase("Beyoncé feat. Jay-Z", "Beyoncé Feat. Jay-Z")]
+    [TestCase("Céline Dion", "Celine Dion")]
+    public async Task Reuses_The_Unique_Receiver_Spelling_For_Known_Group_Names(string existing, string requested)
+    {
+        const long sharedId = 1011;
+        var resolver = CreateResolver(
+            rows: [Artist(11, sharedId, existing)],
+            occupied: new HashSet<long> { sharedId });
+
+        var result = await ResolveAsync(resolver, requested);
+        Assert.That(result.Name, Is.EqualTo(existing));
+        Assert.That(result.Id, Is.EqualTo(sharedId));
+    }
+
+    [Test]
+    public async Task Asks_When_Multiple_Existing_Names_Match_The_Receiver_Spelling()
+    {
+        var prompts = 0;
+        var resolver = CreateResolver(
+            rows: [Artist(11, 1011, "Céline Dion"), Artist(22, 1022, "Cèline Dion")],
+            occupied: new HashSet<long> { 1011, 1022 },
+            prompt: (description, _) =>
+            {
+                prompts++;
+                Assert.That(description, Does.Contain("Céline Dion").And.Contain("Cèline Dion"));
+                return ValueTask.FromResult<string?>("Separate Artist");
+            });
+
+        var result = await ResolveAsync(resolver, "Celine Dion");
+        Assert.That(prompts, Is.EqualTo(1));
+        Assert.That(result.Name, Is.EqualTo("Separate Artist"));
+        Assert.That(result.Id, Is.Not.AnyOf(1011L, 1022L));
+    }
+
+    [Test]
+    public async Task Keeps_Album_And_Artist_Boundaries_When_Comparing_Receiver_Spellings()
+    {
+        const long existingAlbumId = 1012;
+        var resolver = CreateResolver(
+            kind: MusicGroupKind.Album,
+            rows: [new CatalogueGroup(
+                12,
+                existingAlbumId,
+                "AB",
+                "AB",
+                11,
+                "C")],
+            occupied: new HashSet<long> { existingAlbumId });
+
+        var result = await ResolveAsync(resolver, "A", albumArtist: "BC");
+        Assert.That(result.Name, Is.EqualTo("A"));
+        Assert.That(result.Id, Is.Not.EqualTo(existingAlbumId));
+    }
+
     [TestCase("Boney M.", "Boney M")]
     [TestCase("R.E.M.", "REM")]
     public async Task Chooses_The_First_Receiver_Row_For_A_Dotted_Alias(string canonical, string alias)

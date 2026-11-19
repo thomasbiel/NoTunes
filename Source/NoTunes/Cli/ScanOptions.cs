@@ -27,10 +27,11 @@ public sealed class ScanOptions : CommandOptions
             await context.Output.WriteLineAsync($"Source: {library.Root}");
             foreach (var track in library.Tracks)
             {
-                await context.Output.WriteLineAsync($"{track.Size,12}  {track.RelativePath}");
+                await context.Output.WriteLineAsync($"{DisplayFormat.Bytes(track.Size),12}  {track.RelativePath}");
             }
 
-            await context.Output.WriteLineAsync($"{library.Tracks.Count} MP3 file(s), {library.TotalBytes} byte(s).");
+            await context.Output.WriteLineAsync(
+                $"{DisplayFormat.Number(library.Tracks.Count)} MP3 file(s), {DisplayFormat.Bytes(library.TotalBytes)}.");
         }
 
         return ExitCodes.Success;

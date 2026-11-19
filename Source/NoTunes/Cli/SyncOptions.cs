@@ -56,15 +56,22 @@ public sealed class SyncOptions : DeviceOptions
                 await context.Output.WriteLineAsync($"~ Cover: {track.RelativePath}");
             }
 
-            var covers = result.Plan.Artwork.Count == 0 ? string.Empty : $", {result.Plan.Artwork.Count} cover(s) repaired";
-            var skipped = result.Plan.Skipped.Count == 0 ? string.Empty : $", {result.Plan.Skipped.Count} file(s) skipped";
+            var covers = result.Plan.Artwork.Count == 0
+                ? string.Empty
+                : $", {DisplayFormat.Number(result.Plan.Artwork.Count)} cover(s) repaired";
+
+            var skipped = result.Plan.Skipped.Count == 0
+                ? string.Empty
+                : $", {DisplayFormat.Number(result.Plan.Skipped.Count)} file(s) skipped";
+
             var deferred = result.Plan.DeferredDeletions.Count == 0
                 ? string.Empty
-                : $", {result.Plan.DeferredDeletions.Count} deletion(s) deferred";
+                : $", {DisplayFormat.Number(result.Plan.DeferredDeletions.Count)} deletion(s) deferred";
 
             await context.Output.WriteLineAsync($"{(result.DryRun ? "Preview" : "Verified")}: "
-                + $"{result.Plan.Add.Count} added, {result.Plan.Delete.Count} removed, "
-                + $"{result.Plan.Unchanged} unchanged{covers}{skipped}{deferred}.");
+                + $"{DisplayFormat.Number(result.Plan.Add.Count)} added, "
+                + $"{DisplayFormat.Number(result.Plan.Delete.Count)} removed, "
+                + $"{DisplayFormat.Number(result.Plan.Unchanged)} unchanged{covers}{skipped}{deferred}.");
         }
 
         return result.Plan.Skipped.Count == 0 ? ExitCodes.Success : ExitCodes.PartialSuccess;

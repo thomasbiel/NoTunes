@@ -137,8 +137,10 @@ public sealed class SyncEngine(
             await SyncDeviceContext.RequireSpaceAsync(phone.Afc, transferBytes, cancellationToken);
         }
 
-        await error.WriteLineAsync($"Plan: add {plan.Add.Count}, delete {plan.Delete.Count}, "
-            + $"repair {prepared.Artwork.Count} covers, unchanged {plan.Unchanged}.");
+        await error.WriteLineAsync(
+            $"Plan: add {DisplayFormat.Number(plan.Add.Count)}, delete {DisplayFormat.Number(plan.Delete.Count)}, "
+            + $"repair {DisplayFormat.Number(prepared.Artwork.Count)} covers, "
+            + $"unchanged {DisplayFormat.Number(plan.Unchanged)}.");
 
         var batches = await executor!.ExecutePlanAsync(
             identity,

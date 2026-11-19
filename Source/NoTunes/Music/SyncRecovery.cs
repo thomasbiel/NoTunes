@@ -58,7 +58,7 @@ internal static class SyncRecovery
         var presentIds = actual.Tracks.Select(track => track.Id).ToHashSet();
         var appliedDeletions = pending.Deletions.Where(track => !presentIds.Contains(track.Id)).ToArray();
         SyncEngine.VerifyResult(
-            before,
+            RecoveryGroupProjection.Create(before, actual, additions),
             projected,
             [.. additions.Where(track => presentIds.Contains(track.Id) && !incompleteIds.Contains(track.Id))],
             appliedDeletions);

@@ -55,7 +55,9 @@ internal sealed class MusicGroupResolver(
 
     private string DescribeConflict(string key, string name, string sourcePath, string? albumArtist)
     {
-        var candidates = this.rowsByKey.GetValueOrDefault(key) ?? [];
+        var candidates = this.rowsByKey.GetValueOrDefault(key)
+            ?? rows?.Where(row => ReceiverGroupName.Matches(row.Key, key)).ToArray() ?? [];
+
         var label = kind switch
         {
             MusicGroupKind.Album => "album",
@@ -98,6 +100,26 @@ internal sealed class MusicGroupResolver(
         {
             var selected = GroupAliasResolution.Resolve(rows, key);
             return selected is null ? null : new ResolvedMusicGroup(selected.Name, selected.SyncId, selected.SortName);
+        }
+
+        if (rows is not null)
+        {
+            var aliases = rows.Where(row => ReceiverGroupName.Matches(row.Key, key)).Take(2).ToArray();
+            if (aliases.Length != 0)
+            {
+                var selected = aliases.Length == 1 ? GroupAliasResolution.Resolve(rows, aliases[0].Key) : null;
+                return selected is null ? null : new ResolvedMusicGroup(selected.Name, selected.SyncId, selected.SortName);
+            }
+        }
+
+        if (this.groupIds is null && !this.sorts.ContainsKey(key))
+        {
+            var aliases = this.sorts.Keys.Where(existing => ReceiverGroupName.Matches(existing, key)).Take(2).ToArray();
+            if (aliases.Length != 0)
+            {
+                return aliases.Length == 1 && this.sorts[aliases[0]] is { } knownSort
+                    ? new ResolvedMusicGroup(aliases[0], 0, knownSort) : null;
+            }
         }
 
         if (this.sorts.ContainsKey(key) && sort is null) return null;

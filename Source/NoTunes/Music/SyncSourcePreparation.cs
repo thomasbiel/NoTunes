@@ -75,7 +75,9 @@ internal sealed class SyncSourcePreparation(
 
         if (plan.DeferredDeletions.Count != 0)
         {
-            await error.WriteLineAsync($"Deferred {plan.DeferredDeletions.Count} deletion(s) because source files were skipped.");
+            await error.WriteLineAsync(
+                $"Deferred {DisplayFormat.Number(plan.DeferredDeletions.Count)} deletion(s) "
+                + "because source files were skipped.");
         }
 
         return new PreparedSync(plan, prepared, artworkUpdates);

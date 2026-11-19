@@ -18,9 +18,27 @@ public sealed class OperationProgressTests
 
         var lines = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
         Assert.That(lines, Has.Length.EqualTo(101));
-        Assert.That(lines[0], Is.EqualTo("Work: 0% (0/1000)"));
-        Assert.That(lines[50], Is.EqualTo("Work: 50% (500/1000)"));
-        Assert.That(lines[^1], Is.EqualTo("Work: 100% (1000/1000)"));
+        Assert.That(lines[0], Is.EqualTo("Work: 0% (0/1,000)"));
+        Assert.That(lines[50], Is.EqualTo("Work: 50% (500/1,000)"));
+        Assert.That(lines[^1], Is.EqualTo("Work: 100% (1,000/1,000)"));
+    }
+
+    [Test]
+    public void Displays_Human_Readable_Byte_Progress_In_Interactive_And_Redirected_Output([Values] bool interactive)
+    {
+        using var output = new StringWriter();
+        using var writer = new ProgressTextWriter(output, interactive);
+        var progress = new OperationProgress(
+            writer,
+            "Transferring assets",
+            45_600_000,
+            ProgressUnit.Bytes);
+
+        progress.Report(12_300_000);
+        progress.Report(45_600_000);
+
+        Assert.That(output.ToString(), Does.Contain("Transferring assets: 26% (12.3 MB / 45.6 MB)"));
+        Assert.That(output.ToString(), Does.Contain("Transferring assets: 100% (45.6 MB / 45.6 MB)"));
     }
 
     [Test]

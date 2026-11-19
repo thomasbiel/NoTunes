@@ -50,17 +50,17 @@ internal sealed record CatalogueCheckpoint(
             this.ContainerId,
             this.Anchor,
             [.. this.Tracks.Select(track => track with { Metadata = this.TrackMetadata.GetValueOrDefault(track.Id) })],
-            new Dictionary<string, long>(this.Albums, GroupNameComparer.Instance),
-            new Dictionary<string, long>(this.Artists, GroupNameComparer.Instance),
+            RestoreIds(this.Albums),
+            RestoreIds(this.Artists),
             this.OccupiedIds.ToHashSet())
         {
             AlbumGroups = this.AlbumGroups,
             ArtistGroups = this.ArtistGroups,
             SortNames = new GroupSortNames(
-                new Dictionary<string, string?>(this.SortNames.Albums, GroupNameComparer.Instance),
-                new Dictionary<string, string?>(this.SortNames.AlbumArtists, GroupNameComparer.Instance),
-                new Dictionary<string, string?>(this.SortNames.Artists, GroupNameComparer.Instance),
-                new Dictionary<string, string?>(this.SortNames.Composers, GroupNameComparer.Instance)),
+                RestoreSortNames(this.SortNames.Albums),
+                RestoreSortNames(this.SortNames.AlbumArtists),
+                RestoreSortNames(this.SortNames.Artists),
+                RestoreSortNames(this.SortNames.Composers)),
             ProtectedItems =
             [
                 .. this.ProtectedItems.Select(item => item with
@@ -72,5 +72,27 @@ internal sealed record CatalogueCheckpoint(
             ArtworkHighWaterMark = this.ArtworkHighWaterMark,
             TrackArtwork = this.TrackArtwork
         };
+    }
+
+    private static Dictionary<string, long> RestoreIds(IReadOnlyDictionary<string, long> saved)
+    {
+        var result = new Dictionary<string, long>(GroupNameComparer.Instance);
+        foreach (var (name, id) in saved)
+        {
+            if (!result.TryAdd(name, id)) result[name] = 0;
+        }
+
+        return result;
+    }
+
+    private static Dictionary<string, string?> RestoreSortNames(IReadOnlyDictionary<string, string?> saved)
+    {
+        var result = new Dictionary<string, string?>(GroupNameComparer.Instance);
+        foreach (var (name, sort) in saved)
+        {
+            if (!result.TryAdd(name, sort) && !StringComparer.Ordinal.Equals(result[name], sort)) result[name] = null;
+        }
+
+        return result;
     }
 }

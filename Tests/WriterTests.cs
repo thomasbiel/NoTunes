@@ -103,6 +103,28 @@ public sealed class WriterTests
     }
 
     [Test]
+    public async Task Formats_Scan_Byte_Sizes_Without_Changing_Json_Numbers([Values] bool json)
+    {
+        using var source = new SyncWorkspace();
+        const int size = 12345;
+        await File.WriteAllBytesAsync(Path.Combine(source.Root, "song.mp3"), new byte[size]);
+        var options = new ScanOptions { Folder = source.Root, Json = json };
+        await options.Execute(this.services.GetRequiredService<CommandContext>(), CancellationToken.None);
+
+        if (json)
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(this.output.ToString());
+            Assert.That(document.RootElement.GetProperty("TotalBytes").GetInt64(), Is.EqualTo(size));
+            Assert.That(document.RootElement.GetProperty("Tracks")[0].GetProperty("Size").GetInt64(), Is.EqualTo(size));
+        }
+        else
+        {
+            Assert.That(this.output.ToString(), Does.Contain("12.3 KB  song.mp3"));
+            Assert.That(this.output.ToString(), Does.Contain("1 MP3 file(s), 12.3 KB."));
+        }
+    }
+
+    [Test]
     public async Task Writes_Sync_Diagnostics_Only_To_The_Provided_Error_Writer()
     {
         using var workspace = new SyncWorkspace();

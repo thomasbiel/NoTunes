@@ -119,7 +119,7 @@ internal sealed class SyncBatchExecutor(SyncDeviceContext context, SyncJournal j
         journal.Complete();
         deletionProgress.Report(deletions.Count);
         await context.Error.WriteLineAsync($"Verified Media revision {after.Anchor}: "
-            + $"{additions.Count} added, {deletions.Count} removed.");
+            + $"{DisplayFormat.Number(additions.Count)} added, {DisplayFormat.Number(deletions.Count)} removed.");
 
         return after;
     }

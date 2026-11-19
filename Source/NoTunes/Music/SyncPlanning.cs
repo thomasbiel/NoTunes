@@ -34,8 +34,8 @@ internal sealed class SyncPlanning(SyncDeviceContext context, string? cacheDirec
 
         var source = await sourceTask.WaitAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        await context.Error.WriteLineAsync($"Comparing {source.Tracks.Count} source tracks "
-            + $"with {catalogue.Tracks.Count} local iPhone tracks...");
+        await context.Error.WriteLineAsync($"Comparing {DisplayFormat.Number(source.Tracks.Count)} source tracks "
+            + $"with {DisplayFormat.Number(catalogue.Tracks.Count)} local iPhone tracks...");
 
         var plan = await SyncPlanner.CreateAsync(
             context.Udid,
@@ -47,7 +47,9 @@ internal sealed class SyncPlanning(SyncDeviceContext context, string? cacheDirec
 
         cancellationToken.ThrowIfCancellationRequested();
         hashes.Save();
-        await context.Error.WriteLineAsync($"Device hashes: {hashes.Hits} cached, {hashes.Reads} read from iPhone.");
+        await context.Error.WriteLineAsync(
+            $"Device hashes: {DisplayFormat.Number(hashes.Hits)} cached, "
+            + $"{DisplayFormat.Number(hashes.Reads)} read from iPhone.");
         return (identity, catalogue, plan);
     }
 }
