@@ -63,7 +63,7 @@ public abstract class DeviceOptions : CommandOptions
             return Task.FromResult(devices);
         }
 
-        return mux.ListDevicesAsync(this.Wifi, token);
+        return mux.FindDevicesAsync(this.Wifi, this.Device, token);
     }
 
     internal async Task<UsbDevice> SelectDeviceAsync(UsbMuxClient mux, CancellationToken token)
@@ -77,14 +77,20 @@ public abstract class DeviceOptions : CommandOptions
         if (udid is not null)
         {
             var normalized = DeviceUdid.Normalize(udid);
-            return devices.FirstOrDefault(d => StringComparer.OrdinalIgnoreCase.Equals(DeviceUdid.Normalize(d.Udid), normalized)) ?? throw new IOException($"No {connection} device matches UDID '{udid}'.");
+            return devices.FirstOrDefault(d =>
+                StringComparer.OrdinalIgnoreCase.Equals(DeviceUdid.Normalize(d.Udid), normalized))
+                ?? throw new IOException(network
+                    ? $"No Wi-Fi device matches UDID '{udid}' after Apple service and Bonjour discovery. "
+                        + "Unlock the paired iPhone on the same network, enable Wi-Fi sync, or use --address <IP>."
+                    : $"No {connection} device matches UDID '{udid}'.");
         }
 
         var distinctDevices = devices.DistinctBy(d => DeviceUdid.Normalize(d.Udid), StringComparer.OrdinalIgnoreCase).ToArray();
         return distinctDevices.Length switch
         {
             0 => throw new IOException(network
-                ? "No Wi-Fi iPhone found. Unlock the paired phone on the same network, enable Wi-Fi sync in Apple Devices/iTunes, or use --address <IP> --device <UDID>."
+                ? "No Wi-Fi iPhone found. Specify --device <UDID> or DeviceUdid in app.config for Bonjour discovery, "
+                    + "or use --address <IP> --device <UDID>."
                 : "No USB iPhone found. Connect it, unlock it and trust this computer."),
             1 => distinctDevices[0],
             _ => throw new IOException($"Multiple {connection} Apple devices found. Select an iPhone with --device <UDID>.")

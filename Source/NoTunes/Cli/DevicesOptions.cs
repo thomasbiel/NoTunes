@@ -22,7 +22,8 @@ public sealed class DevicesOptions : DeviceOptions
         else if (devices.Count == 0)
         {
             await context.Output.WriteLineAsync(this.Wifi
-                ? "No Wi-Fi Apple devices found. Unlock the paired iPhone on the same network or use --address <IP> --device <UDID>."
+                ? "No Wi-Fi Apple devices found. Specify --device <UDID> or DeviceUdid in app.config for Bonjour discovery, "
+                    + "or use --address <IP> --device <UDID>."
                 : "No USB Apple devices found. Connect and unlock the iPhone.");
         }
         else

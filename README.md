@@ -254,22 +254,40 @@ dotnet run --project Source/NoTunes/NoTunes.csproj -- devices --wifi
 dotnet run --project Source/NoTunes/NoTunes.csproj -- sync --wifi --dry-run
 ```
 
-`app.config` supplies the defaults `DeviceUdid=00008030-00112CE23A86402E` and
-`DeviceAddress=192.168.0.42`. Device commands use the configured UDID when
-`--device` is omitted. `--wifi` also uses the configured address, so
-`sync --wifi --dry-run` is sufficient for this iPhone. Explicit `--device` and
-`--address` arguments override their corresponding defaults independently.
+`app.config` supplies the default `DeviceUdid=00008030-00112CE23A86402E` and leaves
+`DeviceAddress` blank for automatic discovery. Device commands use the configured
+UDID when `--device` is omitted, so `sync --wifi --dry-run` is sufficient for this
+iPhone when it advertises Wi-Fi sync. A nonblank `DeviceAddress` selects a direct
+connection instead. Explicit `--device` and `--address` arguments override their
+corresponding defaults independently.
 Without `--wifi` or an explicit `--address`, USB remains the selected transport.
 
-When no address is configured or supplied, Wi-Fi selection uses the network
-devices published by the local multiplexer; availability depends on Apple device
-support/usbmuxd. NoTunes does not run its own Bonjour browser. `--address` implies
-Wi-Fi and requires either `--device` or a configured `DeviceUdid` to choose the
-existing trusted pairing. It accepts IPv4 and IPv6, including scoped link-local
-addresses. Both devices must be on a network that permits direct connections.
-Missing or blank device settings preserve discovery. `devices --wifi --json`
-describes a configured direct target without checking reachability; use `probe`
-to verify the connection.
+When no address is configured or supplied, Wi-Fi selection first uses network
+devices published by the local Apple service/usbmuxd. If the selected UDID is
+missing, NoTunes falls back to its own Bonjour/mDNS browser for
+`_apple-mobdev2._tcp.local`. This fallback requires `--device` or `DeviceUdid` to
+choose the trusted pairing. It does not infer identity from a device name or MAC
+address: discovered candidates must authenticate with the saved pairing certificate
+and return the matching UDID inside the encrypted session. Other devices and stale
+addresses are skipped. It does not create new pairings or change music.
+
+The built-in browser follows [RFC 6762's legacy query behavior](https://www.rfc-editor.org/rfc/rfc6762#section-6.7)
+and sends mDNS queries from ephemeral UDP ports on active
+multicast-capable IPv4/IPv6 interfaces; no Bonjour installation or exclusive use of
+UDP port 5353 is needed. It collects responses for up to three seconds, resolves
+split PTR/SRV/A/AAAA answers, and retains interface scopes for link-local IPv6.
+Bonjour supplies candidate addresses; the advertised service port need not be
+lockdown's port. Pairing verification and subsequent lockdown connections use
+the standard port 62078.
+Candidate checks take up to three seconds each within an overall authentication
+budget set by `--timeout`. The iPhone must be awake and advertise Wi-Fi sync, and
+the network/firewall must allow mDNS multicast and its unicast responses.
+
+`--address` implies Wi-Fi and requires either `--device` or a configured
+`DeviceUdid`. It accepts IPv4 and IPv6, including scoped link-local addresses.
+Both devices must be on a network that permits direct connections.
+`devices --wifi --json` authenticates Bonjour-discovered targets, while a configured
+direct target is listed without checking reachability; use `probe` to verify it.
 
 ```powershell
 dotnet run --project Source/NoTunes/NoTunes.csproj -- probe --address 192.168.0.42 --device 00008030-00112CE23A86402E --read-catalog
@@ -292,7 +310,8 @@ assertion renewals cancel the operation; write outcomes continue to use the exis
 recovery journal. A per-device local lock excludes overlapping NoTunes Wi-Fi commands,
 including probes and dry-runs, even with different `--state-folder` values.
 Other Apple synchronization programs should finish before starting NoTunes.
-NoTunes does not automatically wake a sleeping phone or track changing IP addresses.
+NoTunes does not automatically wake a sleeping phone. Automatic discovery runs for
+each command; an address change during a running command still requires a retry.
 
 ### Synchronization and recovery
 

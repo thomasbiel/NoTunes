@@ -2,7 +2,7 @@ namespace NoTunes.Apple;
 
 public sealed class LockdownClient : IAsyncDisposable
 {
-    private const ushort LockdownPort = 62078;
+    internal const ushort LockdownPort = 62078;
     private const string UnknownError = "UnknownError";
     private readonly UsbMuxClient mux;
     private readonly UsbDevice device;

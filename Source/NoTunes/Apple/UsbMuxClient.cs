@@ -22,6 +22,8 @@ public sealed class UsbMuxClient
     private readonly TimeSpan timeout;
     private int nextTag;
 
+    internal Func<string, CancellationToken, Task<IReadOnlyList<UsbDevice>>>? BrowseBonjour { get; init; }
+
     public UsbMuxClient(IUsbMuxTransport transport, TimeSpan timeout)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
@@ -32,6 +34,24 @@ public sealed class UsbMuxClient
     public Task<IReadOnlyList<UsbDevice>> ListUsbDevicesAsync(CancellationToken cancellationToken)
     {
         return this.ListDevicesAsync(network: false, cancellationToken);
+    }
+
+    internal async Task<IReadOnlyList<UsbDevice>> FindDevicesAsync(
+        bool network,
+        string? udid,
+        CancellationToken cancellationToken)
+    {
+        var devices = await this.ListDevicesAsync(network, cancellationToken);
+        if (!network || string.IsNullOrWhiteSpace(udid) || devices.Any(device =>
+            StringComparer.OrdinalIgnoreCase.Equals(DeviceUdid.Normalize(device.Udid), DeviceUdid.Normalize(udid))))
+        {
+            return devices;
+        }
+
+        var found = await (this.BrowseBonjour ?? new BonjourDeviceDiscovery(this, this.timeout).FindAsync)(
+            udid, cancellationToken);
+
+        return [.. devices, .. found];
     }
 
     public async Task<IReadOnlyList<UsbDevice>> ListDevicesAsync(bool network, CancellationToken cancellationToken)
