@@ -295,6 +295,17 @@ NoTunes does not automatically wake a sleeping phone or track changing IP addres
 
 ### Synchronization and recovery
 
+Source discovery and hashing run alongside iPhone connection setup, verified
+catalogue capture and file-attribute reads. When source sizes are not yet known,
+the attribute read covers all complete local iPhone tracks. Audio hashing still
+uses the completed source inventory to restrict reads to matching file sizes.
+Comparison and source preparation wait for both inventories. If either side
+fails, the other is cancelled and awaited before the command returns; no new
+write session starts with an incomplete source. Recovery of a pending write also
+waits for a successful source scan before it can modify the phone.
+Interactive progress combines overlapping operations on the current console line;
+redirected diagnostics retain complete individual progress lines.
+
 Each comparison can take time: candidate device files are read over the selected connection and
 hashed on the host. Only files whose size occurs in the source need hashing.
 Verified device hashes are cached under the local NoTunes data folder in

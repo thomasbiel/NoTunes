@@ -10,9 +10,19 @@ public sealed class SourceScanner(
 {
     private const string Mp3Extension = ".mp3";
 
-    public async Task<SourceLibrary> ScanAsync(string folder, CancellationToken cancellationToken)
+    public Task<SourceLibrary> ScanAsync(string folder, CancellationToken cancellationToken)
+    {
+        return this.ScanAsync(GetSourceDirectory(folder), cancellationToken);
+    }
+
+    internal Task<SourceLibrary> ScanInBackgroundAsync(string folder, CancellationToken cancellationToken)
     {
         var root = GetSourceDirectory(folder);
+        return Task.Run(() => this.ScanAsync(root, cancellationToken), cancellationToken);
+    }
+
+    private async Task<SourceLibrary> ScanAsync(DirectoryInfo root, CancellationToken cancellationToken)
+    {
         using var paths = fileSystem.OpenSource(root, cancellationToken);
         var cached = hashCache?.Load(root.FullName);
         if (error is not null) await error.WriteLineAsync("Discovering source MP3 files...");

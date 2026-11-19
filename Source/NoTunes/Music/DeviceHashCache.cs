@@ -64,12 +64,13 @@ internal sealed class DeviceHashCache
 
     internal async Task PrefetchAsync(
         AfcClient afc,
-        SourceLibrary source,
+        SourceLibrary? source,
         DeviceCatalogue catalogue,
         CancellationToken cancellationToken)
     {
-        var sizes = source.Tracks.Select(track => track.Size).ToHashSet();
-        var paths = catalogue.Tracks.Where(track => SyncPlanner.IsHashCandidate(track, sizes))
+        var sizes = source?.Tracks.Select(track => track.Size).ToHashSet();
+        var paths = catalogue.Tracks.Where(track => !track.IsIncomplete
+                && (sizes is null || SyncPlanner.IsHashCandidate(track, sizes)))
             .Select(track => track.Path!).Distinct(StringComparer.Ordinal).ToArray();
 
         var progress = new OperationProgress(this.error, "Reading iPhone file attributes", paths.Length);

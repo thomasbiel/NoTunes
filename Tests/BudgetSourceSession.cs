@@ -6,7 +6,8 @@ namespace NoTunes.Tests;
 internal sealed class BudgetSourceSession(
     DirectoryInfo rootDirectory,
     bool failRead,
-    Action? beforeEnumeration = null) : ISourceSession
+    Action? beforeEnumeration = null,
+    Action? beforeRead = null) : ISourceSession
 {
     private readonly HashSet<string> opened = new(StringComparer.Ordinal)
     {
@@ -48,6 +49,7 @@ internal sealed class BudgetSourceSession(
 
     public FileStream OpenRead(FileInfo file)
     {
+        beforeRead?.Invoke();
         Assert.That(this.opened, Does.Contain(file.Directory!.FullName));
         if (failRead) throw new IOException("Simulated read failure.");
 

@@ -26,6 +26,8 @@ public static class ApplicationServices
         {
             ArgumentNullException.ThrowIfNull(output);
             ArgumentNullException.ThrowIfNull(error);
+            if (error is not ProgressTextWriter) error = new ProgressTextWriter(error, interactive: false);
+
             services.AddSingleton(new GroupResolutionPrompt(input ?? TextReader.Null, error));
             services.AddSingleton(_ => new SourceHashCache(
                 Path.Combine(DeviceState.Root(null), SourceHashCache.DirectoryName), error));

@@ -32,7 +32,33 @@ public sealed class SyncEngine(
     public async Task<SyncResult> RunAsync(SyncOptions options, CancellationToken cancellationToken)
     {
         await error.WriteLineAsync("Scanning and hashing source music...");
-        var source = await scanner.ScanAsync(SourceSettings.ResolveFolder(options.Folder), cancellationToken);
+        using var preparation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var source = CancelOnFailureAsync(scanner.ScanInBackgroundAsync(
+            SourceSettings.ResolveFolder(options.Folder), preparation.Token), preparation);
+
+        var sync = CancelOnFailureAsync(this.RunWithDeviceAsync(options, source, preparation.Token), preparation);
+        await Task.WhenAll(source, sync);
+        return await sync;
+    }
+
+    private static async Task<T> CancelOnFailureAsync<T>(Task<T> operation, CancellationTokenSource cancellation)
+    {
+        try
+        {
+            return await operation;
+        }
+        catch
+        {
+            await cancellation.CancelAsync();
+            throw;
+        }
+    }
+
+    private async Task<SyncResult> RunWithDeviceAsync(
+        SyncOptions options,
+        Task<SourceLibrary> source,
+        CancellationToken cancellationToken)
+    {
         var timeout = TimeSpan.FromSeconds(options.Timeout);
         var mux = new UsbMuxClient(transport, timeout);
         var device = await options.SelectDeviceAsync(mux, cancellationToken);
@@ -52,7 +78,7 @@ public sealed class SyncEngine(
 
     private async Task<SyncResult> RunOnDeviceAsync(
         SyncOptions options,
-        SourceLibrary source,
+        Task<SourceLibrary> sourceTask,
         UsbMuxClient mux,
         UsbDevice device,
         TimeSpan timeout,
@@ -73,11 +99,15 @@ public sealed class SyncEngine(
         var executor = journal is null ? null : new SyncBatchExecutor(context, journal);
         if (journal is { HasPending: true })
         {
+            // Recovery can modify the iPhone, so it must wait for a complete source inventory too.
+            await sourceTask.WaitAsync(cancellationToken);
             await new SyncRecoveryRunner(context, journal, executor!).RunAsync(cancellationToken);
         }
 
         var (identity, catalogue, plan) = await new SyncPlanning(context, this.DeviceHashCacheDirectory)
-            .CreateAsync(source, options, cancellationToken);
+            .CreateAsync(sourceTask, options, cancellationToken);
+
+        var source = await sourceTask;
 
         using var workspace = new SyncWorkspace();
         var prepared = await new SyncSourcePreparation(fileSystem, this.PromptForGroupName, error)

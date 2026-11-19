@@ -6,7 +6,7 @@ namespace NoTunes.Music;
 internal sealed class SyncPlanning(SyncDeviceContext context, string? cacheDirectory)
 {
     public async Task<(LibraryIdentity Identity, DeviceCatalogue Catalogue, SyncPlan Plan)> CreateAsync(
-        SourceLibrary source,
+        Task<SourceLibrary> sourceTask,
         SyncOptions options,
         CancellationToken cancellationToken)
     {
@@ -14,9 +14,6 @@ internal sealed class SyncPlanning(SyncDeviceContext context, string? cacheDirec
         var identity = await LibraryIdentity.ReadAsync(phone.Afc, cancellationToken);
         var catalogue = await context.ReadCatalogueAsync(phone.Afc, cancellationToken);
         await SyncDeviceContext.ValidateSavedAnchorsAsync(phone.Afc, catalogue, cancellationToken);
-        await context.Error.WriteLineAsync($"Comparing {source.Tracks.Count} source tracks "
-            + $"with {catalogue.Tracks.Count} local iPhone tracks...");
-
         var hashes = DeviceHashCache.Open(
             cacheDirectory,
             context.Udid,
@@ -30,10 +27,15 @@ internal sealed class SyncPlanning(SyncDeviceContext context, string? cacheDirec
         {
             await hashes.PrefetchAsync(
                 phone.Afc,
-                source,
+                sourceTask.IsCompletedSuccessfully ? sourceTask.Result : null,
                 catalogue,
                 cancellationToken);
         }
+
+        var source = await sourceTask.WaitAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await context.Error.WriteLineAsync($"Comparing {source.Tracks.Count} source tracks "
+            + $"with {catalogue.Tracks.Count} local iPhone tracks...");
 
         var plan = await SyncPlanner.CreateAsync(
             context.Udid,

@@ -42,7 +42,7 @@ internal sealed class OperationProgress
         var message = $"{this.operation}: {percentage}% ({completed}/{this.total})";
         if (this.output is ProgressTextWriter progressOutput)
         {
-            progressOutput.WriteProgress(message, percentage == MaximumPercentage);
+            progressOutput.WriteProgress(this.operation, message, percentage == MaximumPercentage);
         }
         else
         {

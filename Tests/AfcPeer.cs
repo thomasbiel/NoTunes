@@ -58,6 +58,8 @@ internal sealed class AfcPeer : NonSeekableTestStream
 
     public Action<string>? OnFileClosed { get; set; }
 
+    public Action<string>? OnFileInfoRead { get; set; }
+
     public Func<CancellationToken, Task>? BeforeFileWriteReplyAsync { get; init; }
 
     public Func<CancellationToken, Task>? BeforeFileReadReplyAsync { get; init; }
@@ -166,6 +168,7 @@ internal sealed class AfcPeer : NonSeekableTestStream
                 return;
             case AfcOperation.GetFileInfo:
                 this.ReadFileInfo(id, body);
+                this.OnFileInfoRead?.Invoke(Encoding.UTF8.GetString(body).TrimEnd('\0'));
                 return;
             case AfcOperation.FileOpen:
                 this.OpenFile(id, body);
