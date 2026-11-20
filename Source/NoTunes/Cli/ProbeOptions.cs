@@ -58,7 +58,10 @@ public sealed class ProbeOptions : DeviceOptions
 
         if (result.CatalogueReadVerified)
         {
-            await WriteRowAsync(output, "Database size:", DisplayFormat.Bytes(result.CatalogueBytes.GetValueOrDefault()));
+            await WriteRowAsync(
+                output,
+                "Database size:",
+                DisplayFormat.Bytes(result.CatalogueBytes.GetValueOrDefault()));
         }
     }
 

@@ -26,7 +26,7 @@ public sealed class AtcSyncSessionTests
         }
 
         var diagnostics = error.ToString();
-        Assert.That(diagnostics, Does.Contain("Transferring assets: 0%"));
+        Assert.That(diagnostics, Does.Contain("Transferring assets: 0% (0 B / "));
         Assert.That(diagnostics.Contains("Transferring assets: 100%", StringComparison.Ordinal), Is.EqualTo(!corrupt));
         Assert.That(diagnostics, Does.Not.Contain("Transfer: "));
     }

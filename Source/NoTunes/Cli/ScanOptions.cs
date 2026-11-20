@@ -31,7 +31,8 @@ public sealed class ScanOptions : CommandOptions
             }
 
             await context.Output.WriteLineAsync(
-                $"{DisplayFormat.Number(library.Tracks.Count)} MP3 file(s), {DisplayFormat.Bytes(library.TotalBytes)}.");
+                $"{DisplayFormat.Number(library.Tracks.Count)} MP3 file(s), "
+                + $"{DisplayFormat.Bytes(library.TotalBytes)}.");
         }
 
         return ExitCodes.Success;
