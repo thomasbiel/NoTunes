@@ -1,8 +1,11 @@
-using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 
 namespace NoTunes.Music;
 
-internal sealed record ArtworkFile(string Path, int Length, string Sha256)
+internal sealed record ArtworkFile(
+    string Path,
+    int Length,
+    [property: JsonPropertyName(ContentHash.AlgorithmName)] string Hash)
 {
     public static ArtworkFile Save(string path, byte[] bytes)
     {
@@ -15,7 +18,7 @@ internal sealed record ArtworkFile(string Path, int Length, string Sha256)
             output.Write(bytes);
         }
 
-        var file = new ArtworkFile(path, bytes.Length, Convert.ToHexString(SHA256.HashData(bytes)));
+        var file = new ArtworkFile(path, bytes.Length, ContentHash.Compute(bytes));
         file.Validate();
         return file;
     }
@@ -27,7 +30,7 @@ internal sealed record ArtworkFile(string Path, int Length, string Sha256)
         var bytes = new byte[this.Length];
         input.ReadExactly(bytes);
         this.RequireLength(input);
-        this.RequireHash(SHA256.HashData(bytes));
+        this.RequireHash(ContentHash.Compute(bytes));
         return bytes;
     }
 
@@ -35,7 +38,7 @@ internal sealed record ArtworkFile(string Path, int Length, string Sha256)
     {
         using var input = File.OpenRead(this.Path);
         this.RequireLength(input);
-        var hash = SHA256.HashData(input);
+        var hash = ContentHash.Compute(input);
         this.RequireLength(input);
         this.RequireHash(hash);
     }
@@ -48,9 +51,9 @@ internal sealed record ArtworkFile(string Path, int Length, string Sha256)
         }
     }
 
-    private void RequireHash(byte[] hash)
+    private void RequireHash(string hash)
     {
-        if (!StringComparer.Ordinal.Equals(Convert.ToHexString(hash), this.Sha256))
+        if (!StringComparer.Ordinal.Equals(hash, this.Hash))
         {
             throw new IOException("Prepared artwork bytes differ from their verified record.");
         }

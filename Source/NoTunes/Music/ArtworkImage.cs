@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 using NoTunes.Apple;
 using StbImageSharp;
 using StbImageWriteSharp;
@@ -33,7 +33,8 @@ internal sealed record ArtworkImage
 
     public uint Checksum => checked((uint)this.Length + SinglePictureCount);
 
-    public string Sha256 => this.file?.Sha256 ?? Convert.ToHexString(SHA256.HashData(this.bytes!));
+    [JsonPropertyName(ContentHash.AlgorithmName)]
+    public string Hash => this.file?.Hash ?? ContentHash.Compute(this.bytes!);
 
     public ArtworkImage(byte[] bytes, uint cacheId = 0)
     {

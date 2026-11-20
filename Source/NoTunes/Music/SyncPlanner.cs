@@ -28,8 +28,10 @@ internal static class SyncPlanner
             progress.Advance();
             if (hash is null)
                 continue;
+
             if (!byHash.TryGetValue(hash, out var matches))
                 byHash[hash] = matches = new Queue<DeviceTrack>();
+
             matches.Enqueue(track);
         }
 
@@ -39,7 +41,7 @@ internal static class SyncPlanner
         foreach (var track in source.Tracks)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (byHash.TryGetValue(track.Sha256, out var matches) && matches.TryDequeue(out var match))
+            if (byHash.TryGetValue(track.Hash, out var matches) && matches.TryDequeue(out var match))
             {
                 retained.Add(match.Id);
                 sourceMatches.Add(new SourceMatch(track, match));

@@ -574,7 +574,7 @@ public sealed class SyncEngineIntegrationTests
         this.CreateSource(1);
         var exception = await Assert.ThrowsAsync<IOException>(() => this.RunAsync(device));
 
-        Assert.That(exception!.Message, Does.Contain("read-back differs"));
+        Assert.That(exception!.Message, Does.Contain("audio hash differs"));
         Assert.That(device.Batches, Has.Count.EqualTo(1));
         Assert.That(this.ReadPending().Additions, Has.Length.EqualTo(1));
         Assert.That(device.Files.ContainsKey(SimulatedSyncCatalogue.ExistingTrackPath), Is.True);

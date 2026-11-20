@@ -52,7 +52,7 @@ public sealed class AtcKeepAliveTests
     }
 
     [Test]
-    public async Task Keeps_The_Atc_Link_Alive_While_Afc_Readback_Is_Blocked()
+    public async Task Keeps_The_Atc_Link_Alive_While_Afc_Verification_Is_Blocked([Values] bool deviceHash)
     {
         using var deadline = new CancellationTokenSource(RequestTimeout);
         var track = SyncTestData.Track();
@@ -80,14 +80,18 @@ public sealed class AtcKeepAliveTests
             }
         };
 
+        async Task WaitForVerificationAsync(CancellationToken token)
+        {
+            readbackStarted.TrySetResult();
+            await readbackPing.Task.WaitAsync(token);
+        }
+
         var files = new AfcPeer
         {
             AllowWrites = true,
-            BeforeFileReadReplyAsync = async token =>
-            {
-                readbackStarted.TrySetResult();
-                await readbackPing.Task.WaitAsync(token);
-            }
+            FileHashError = deviceHash ? null : AfcStatusCode.OperationNotSupported,
+            BeforeFileReadReplyAsync = deviceHash ? null : WaitForVerificationAsync,
+            BeforeFileHashReplyAsync = deviceHash ? WaitForVerificationAsync : null
         };
 
         await using var afc = new AfcClient(files, RequestTimeout);

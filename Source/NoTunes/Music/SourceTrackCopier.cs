@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using NoTunes.Apple;
 using NoTunes.Platform;
 
@@ -46,8 +45,8 @@ internal sealed class SourceTrackCopier(
         }
 
         await using var copy = File.OpenRead(localPath);
-        var actual = Convert.ToHexString(await SHA256.HashDataAsync(copy, cancellationToken));
-        if (copy.Length != track.Size || !StringComparer.Ordinal.Equals(actual, track.Sha256))
+        var actual = await ContentHash.ComputeAsync(copy, cancellationToken);
+        if (copy.Length != track.Size || !StringComparer.Ordinal.Equals(actual, track.Hash))
         {
             throw new IOException($"Source bytes changed after scanning: {track.RelativePath}");
         }

@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Security.Cryptography;
 using NoTunes.Platform;
 
 namespace NoTunes.Music;
@@ -193,7 +192,7 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
         stream.Position = start;
         var remaining = end - start;
         var buffer = ArrayPool<byte>.Shared.Rent(SourceFileDefaults.ReadBufferBytes);
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using var hash = ContentHash.CreateIncremental();
         try
         {
             while (remaining != 0)
@@ -207,7 +206,7 @@ public sealed class CoverRemover(ISourceFileSystem fileSystem)
                 remaining -= read;
             }
 
-            return Convert.ToHexString(hash.GetHashAndReset());
+            return ContentHash.Finish(hash);
         }
         finally
         {

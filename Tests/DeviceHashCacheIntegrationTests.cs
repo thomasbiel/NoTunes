@@ -86,7 +86,7 @@ public sealed class DeviceHashCacheIntegrationTests
     }
 
     [Test]
-    public async Task Cache_Hits_Do_Not_Skip_Readback_Of_New_Audio_Or_Separate_Covers()
+    public async Task Cache_Hits_Do_Not_Skip_Verification_Of_New_Audio_Or_Separate_Covers()
     {
         await this.RunAsync();
         this.WriteTrack("added.mp3", artwork: true);
@@ -95,11 +95,11 @@ public sealed class DeviceHashCacheIntegrationTests
         var after = await this.device.ReadCatalogueAsync();
         var added = after.Tracks.Single(track => track.Id != SimulatedSyncCatalogue.ExistingTrackId);
         var artwork = Apple.SyncPaths.ArtworkOriginals + after.TrackArtwork[added.Id].Path;
-        var paths = this.device.FileConnections.SelectMany(peer => peer.ReadPaths).ToArray();
+        var paths = this.device.FileConnections.SelectMany(peer => peer.HashPaths).ToArray();
         Assert.That(result.Plan.Add, Has.Count.EqualTo(1));
         Assert.That(paths, Does.Contain(added.Path));
         Assert.That(paths, Does.Contain(artwork));
-        Assert.That(this.error.ToString(), Does.Contain("Device hashes: 1 cached, 0 read from iPhone."));
+        Assert.That(this.error.ToString(), Does.Contain("Device hashes: 1 cached, 0 checked."));
     }
 
     [Test]

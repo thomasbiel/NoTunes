@@ -73,11 +73,11 @@ public sealed class ArtworkCacheTests
         using var workspace = new SyncWorkspace();
         var image = new ArtworkCache(workspace.Root).Read(FeatureTestData.Png());
         var length = image.Length;
-        var hash = image.Sha256;
+        var hash = image.Hash;
         File.Delete(image.LocalPath!);
         Assert.That(image.Length, Is.EqualTo(length));
         Assert.That(image.Checksum, Is.EqualTo(length + 1));
-        Assert.That(image.Sha256, Is.EqualTo(hash));
+        Assert.That(image.Hash, Is.EqualTo(hash));
         Assert.Throws<FileNotFoundException>(() => _ = image.Bytes);
     }
 }

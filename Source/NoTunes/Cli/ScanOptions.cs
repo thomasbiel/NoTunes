@@ -2,7 +2,7 @@ using CommandLine;
 
 namespace NoTunes.Cli;
 
-[Verb(CliSyntax.Scan, HelpText = "Recursively scan the source folder for MP3 files and compute SHA-256 hashes.")]
+[Verb(CliSyntax.Scan, HelpText = "Recursively scan the source folder for MP3 files and compute content hashes.")]
 public sealed class ScanOptions : CommandOptions
 {
     [Value(1, Hidden = true)]
@@ -11,7 +11,7 @@ public sealed class ScanOptions : CommandOptions
     [Value(0, MetaName = CliSyntax.Folder, HelpText = "Source folder; defaults to MusicSourceFolder in app.config.")]
     public string? Folder { get; set; }
 
-    [Option(CliSyntax.Json, HelpText = "Print the file list including SHA-256 hashes as JSON.")]
+    [Option(CliSyntax.Json, HelpText = "Print the file list including content hashes as JSON.")]
     public bool Json { get; set; }
 
     public override async Task<int> Execute(CommandContext context, CancellationToken token)

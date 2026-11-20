@@ -167,7 +167,7 @@ public sealed class SyncEngine(
 
         var path = SyncPaths.ArtworkOriginals + artwork.Path;
         var hash = await afc.HashFileAsync(path, expected.Length, cancellationToken);
-        if (hash != expected.Sha256) throw new IOException("Permanent artwork differs from the prepared JPEG.");
+        if (hash != expected.Hash) throw new IOException("Permanent artwork differs from the prepared JPEG.");
     }
 
     internal static void VerifyResult(

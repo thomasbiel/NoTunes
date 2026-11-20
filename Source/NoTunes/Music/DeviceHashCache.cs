@@ -15,6 +15,7 @@ internal sealed class DeviceHashCache
     private readonly DeviceHashSnapshot context;
     private readonly string? path;
     private readonly TextWriter error;
+    private readonly bool fullReadback;
     private Dictionary<long, DeviceHashEntry> cached = [];
     private readonly Dictionary<long, DeviceHashEntry> verified = [];
     private IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>?>? attributes;
@@ -23,15 +24,16 @@ internal sealed class DeviceHashCache
 
     internal int Hits { get; private set; }
 
-    internal int Reads { get; private set; }
+    internal int Checks { get; private set; }
 
     internal string? FilePath => this.path;
 
-    private DeviceHashCache(DeviceHashSnapshot context, string? path, TextWriter error)
+    private DeviceHashCache(DeviceHashSnapshot context, string? path, TextWriter error, bool fullReadback)
     {
         this.context = context;
         this.path = path;
         this.error = error;
+        this.fullReadback = fullReadback;
     }
 
     internal static DeviceHashCache Open(
@@ -55,7 +57,8 @@ internal sealed class DeviceHashCache
         var cache = new DeviceHashCache(
             context,
             directory is null ? null : System.IO.Path.Combine(directory, key + CacheExtension),
-            error);
+            error,
+            fullReadback);
 
         if (!fullReadback) cache.Load();
 
@@ -101,16 +104,17 @@ internal sealed class DeviceHashCache
         {
             this.verified[track.Id] = previous;
             this.Hits++;
-            return previous.Sha256;
+            return previous.Hash;
         }
 
         var hash = await afc.HashFileAsync(
             devicePath,
             track.Size,
             cancellationToken,
-            info);
+            info,
+            this.fullReadback);
 
-        this.Reads++;
+        this.Checks++;
         if (reusable)
         {
             this.verified[track.Id] = new DeviceHashEntry(
@@ -167,10 +171,10 @@ internal sealed class DeviceHashCache
         foreach (var track in snapshot.Tracks)
         {
             if (track is null || track.Id == 0 || string.IsNullOrEmpty(track.Path) || track.Size < 0
-                || !Sha256Text.IsValid(track.Sha256) || track.Attributes is null
+                || !ContentHash.IsValid(track.Hash) || track.Attributes is null
                 || !HasModificationTime(track.Attributes)
                 || AfcClient.ValidateFileInfo(track.Path, track.Attributes, track.Size) != track.Size
-                || !tracks.TryAdd(track.Id, track with { Sha256 = track.Sha256.ToUpperInvariant() }))
+                || !tracks.TryAdd(track.Id, track with { Hash = track.Hash.ToUpperInvariant() }))
             {
                 throw new InvalidDataException("Invalid device hash cache entry.");
             }

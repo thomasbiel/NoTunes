@@ -175,8 +175,8 @@ internal sealed class SyncJournal : IDisposable
             FileShare.None);
 
         audio.Flush(flushToDisk: true);
-        var actual = Convert.ToHexString(await SHA256.HashDataAsync(audio, cancellationToken));
-        if (audio.Length != track.Source.Size || actual != track.Source.Sha256)
+        var actual = await ContentHash.ComputeAsync(audio, cancellationToken);
+        if (audio.Length != track.Source.Size || actual != track.Source.Hash)
         {
             throw new IOException("Durable recovery audio failed verification.");
         }

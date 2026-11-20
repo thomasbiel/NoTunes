@@ -68,8 +68,8 @@ public sealed class CoverRemoverTests
         Assert.That(customAfter.Text, Is.EqualTo(["Unchanged value"]));
         var rescanned = await SourceTestData.ScanAsync(source.Root);
         Assert.That(
-            rescanned.Tracks.Single(track => track.RelativePath == "song.MP3").Sha256,
-            Is.Not.EqualTo(scanned.Tracks.Single(track => track.RelativePath == "song.MP3").Sha256));
+            rescanned.Tracks.Single(track => track.RelativePath == "song.MP3").Hash,
+            Is.Not.EqualTo(scanned.Tracks.Single(track => track.RelativePath == "song.MP3").Hash));
     }
 
     [Test]
@@ -211,6 +211,6 @@ public sealed class CoverRemoverTests
         var bytes = File.ReadAllBytes(path);
         var start = checked((int)file.InvariantStartPosition);
         var length = checked((int)(file.InvariantEndPosition - file.InvariantStartPosition));
-        return Convert.ToHexString(SHA256.HashData(bytes.AsSpan(start, length)));
+        return Convert.ToHexString(SHA1.HashData(bytes.AsSpan(start, length)));
     }
 }

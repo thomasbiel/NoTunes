@@ -88,7 +88,7 @@ public sealed class SourceScannerTests
         Assert.That(library.Tracks, Has.Count.EqualTo(2));
         Assert.That(library.TotalBytes, Is.EqualTo(6));
         var track = library.Tracks.Single(t => t.RelativePath == "one.mp3");
-        Assert.That(track.Sha256, Is.EqualTo("BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"));
+        Assert.That(track.Hash, Is.EqualTo("A9993E364706816ABA3E25717850C26C9CD0D89D"));
         Assert.That(library.Tracks.Any(t => t.RelativePath == Path.Combine("Album", "two.MP3")), Is.True);
     }
 
@@ -119,9 +119,9 @@ public sealed class SourceScannerTests
             : before.Tracks[0].LastWriteTimeUtc.AddMinutes(1));
 
         var after = await this.scanner.ScanAsync(this.root, CancellationToken.None);
-        Assert.That(before.Tracks[0].Sha256, Is.Not.EqualTo(after.Tracks[0].Sha256));
-        Assert.That(after.Tracks[0].Sha256, Is.EqualTo(Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(file)))));
+        Assert.That(before.Tracks[0].Hash, Is.Not.EqualTo(after.Tracks[0].Hash));
+        Assert.That(after.Tracks[0].Hash, Is.EqualTo(Convert.ToHexString(
+            System.Security.Cryptography.SHA1.HashData(await File.ReadAllBytesAsync(file)))));
     }
 
     [Test]

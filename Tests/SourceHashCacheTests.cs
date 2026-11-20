@@ -37,7 +37,7 @@ public sealed class SourceHashCacheTests
         File.SetLastWriteTimeUtc(otherFile, File.GetLastWriteTimeUtc(file));
         var first = await this.CreateScanner().ScanAsync(this.source, CancellationToken.None);
         var second = await this.CreateScanner().ScanAsync(other, CancellationToken.None);
-        Assert.That(second.Tracks[0].Sha256, Is.Not.EqualTo(first.Tracks[0].Sha256));
+        Assert.That(second.Tracks[0].Hash, Is.Not.EqualTo(first.Tracks[0].Hash));
         Assert.That(Directory.GetFiles(this.cacheDirectory), Has.Length.EqualTo(2));
     }
 
@@ -66,18 +66,18 @@ public sealed class SourceHashCacheTests
         Directory.CreateDirectory(this.cacheDirectory);
         await File.WriteAllTextAsync(this.CreateCache().PathFor(this.source), contents);
         var result = await this.CreateScanner().ScanAsync(this.source, CancellationToken.None);
-        Assert.That(result.Tracks.Single().Sha256, Is.EqualTo(Convert.ToHexString(SHA256.HashData("abc"u8))));
+        Assert.That(result.Tracks.Single().Hash, Is.EqualTo(Convert.ToHexString(SHA1.HashData("abc"u8))));
         Assert.That(this.error.ToString(), Does.Contain("Source hash cache could not be read"));
         Assert.That(this.CreateCache().Load(this.source).Values, Is.EqualTo(result.Tracks));
         Assert.That(Directory.GetFiles(this.cacheDirectory, "*.tmp"), Is.Empty);
     }
 
     [Test]
-    public async Task Rejects_Invalid_Cached_Hashes()
+    public async Task Rejects_Invalid_Cached_Hashes([Values] bool oldSha256)
     {
         await File.WriteAllTextAsync(Path.Combine(this.source, "track.mp3"), "abc");
         var library = await this.CreateScanner().ScanAsync(this.source, CancellationToken.None);
-        var invalidTrack = library.Tracks.Single() with { Sha256 = "invalid" };
+        var invalidTrack = library.Tracks.Single() with { Hash = oldSha256 ? new string('A', 64) : "invalid" };
         await File.WriteAllTextAsync(this.CreateCache().PathFor(this.source), JsonSerializer.Serialize(
             new SourceHashSnapshot(1, this.source, [invalidTrack])));
 

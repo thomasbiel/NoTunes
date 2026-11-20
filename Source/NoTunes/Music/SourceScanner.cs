@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using NoTunes.Platform;
 
 namespace NoTunes.Music;
@@ -148,11 +147,11 @@ public sealed class SourceScanner(
         if (cached is not null && cached.TryGetValue(relativePath, out var previous)
             && previous.Size == size && previous.LastWriteTimeUtc == modified)
         {
-            hash = previous.Sha256;
+            hash = previous.Hash;
         }
         else
         {
-            hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+            hash = await ContentHash.ComputeAsync(stream, cancellationToken);
         }
 
         if (stream.Length != size || File.GetLastWriteTimeUtc(stream.SafeFileHandle) != modified)

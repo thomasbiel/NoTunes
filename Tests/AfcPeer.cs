@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text;
 using NoTunes.Apple;
 using NUnit.Framework;
@@ -74,6 +75,16 @@ internal sealed class AfcPeer : NonSeekableTestStream
 
     public List<string> ReadPaths { get; } = [];
 
+    public List<string> HashPaths { get; } = [];
+
+    public AfcStatusCode? FileHashError { get; set; }
+
+    public byte[]? FileHashReply { get; set; }
+
+    public Action<string>? OnFileHashed { get; set; }
+
+    public Func<CancellationToken, Task>? BeforeFileHashReplyAsync { get; init; }
+
     public int OpenHandles => this.handles.Count;
 
     public override bool CanRead => true;
@@ -125,6 +136,13 @@ internal sealed class AfcPeer : NonSeekableTestStream
         {
             await this.BeforeFileReadReplyAsync(cancellationToken);
         }
+
+        if (this.BeforeFileHashReplyAsync is not null
+            && BinaryPrimitives.ReadUInt64LittleEndian(buffer.Span[ProtocolFrames.AfcOperationOffset..])
+                == (ulong)AfcOperation.GetFileHash)
+        {
+            await this.BeforeFileHashReplyAsync(cancellationToken);
+        }
     }
 
     public override void Write(byte[] buffer, int offset, int count) => this.Handle([.. buffer.AsSpan(offset, count)]);
@@ -175,6 +193,9 @@ internal sealed class AfcPeer : NonSeekableTestStream
                 return;
             case AfcOperation.FileRead:
                 this.ReadFile(id, body);
+                return;
+            case AfcOperation.GetFileHash:
+                this.HashFile(id, body);
                 return;
             case AfcOperation.FileWrite when this.AllowWrites:
                 this.WriteFile(id, request);
@@ -286,8 +307,30 @@ internal sealed class AfcPeer : NonSeekableTestStream
         var content = body[sizeof(ulong)..].ToArray();
         if (this.CorruptWrite && content.Length > 0)
             content[0] ^= 1;
+
         this.Files[target.Path] = [.. this.Files[target.Path], .. content];
         this.Status(id, 0);
+    }
+
+    private void HashFile(ulong id, ReadOnlySpan<byte> body)
+    {
+        Assert.That(body[^1], Is.Zero, "GetFileHash requires a null-terminated path.");
+        var path = Encoding.UTF8.GetString(body[..^1]);
+        this.HashPaths.Add(path);
+        if (this.FileHashError is { } error)
+        {
+            this.Status(id, (ulong)error);
+            return;
+        }
+
+        if (!this.Files.TryGetValue(path, out var bytes))
+        {
+            this.Status(id, (ulong)AfcStatusCode.ObjectNotFound);
+            return;
+        }
+
+        this.Response(id, AfcOperation.Data, this.FileHashReply ?? SHA1.HashData(bytes));
+        this.OnFileHashed?.Invoke(path);
     }
 
     private void CloseFile(ulong id, ReadOnlySpan<byte> body)

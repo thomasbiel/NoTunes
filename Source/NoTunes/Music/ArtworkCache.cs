@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using NoTunes.Apple;
 
 namespace NoTunes.Music;
@@ -17,7 +16,7 @@ internal sealed class ArtworkCache(string directory, int maximumEntries = Artwor
             throw new InvalidDataException("Embedded cover exceeds its size limit.");
         }
 
-        var key = Convert.ToHexString(SHA256.HashData(bytes));
+        var key = ContentHash.Compute(bytes);
         if (this.images.TryGetValue(key, out var image)) return image;
 
         var path = Path.Combine(directory, Guid.NewGuid().ToString("N") + SyncPaths.JpegExtension);

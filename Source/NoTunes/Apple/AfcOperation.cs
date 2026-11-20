@@ -15,5 +15,6 @@ internal enum AfcOperation : ulong
     FileWrite = 16,
     FileClose = 20,
     RenamePath = 24,
-    FileLock = 27
+    FileLock = 27,
+    GetFileHash = 29
 }

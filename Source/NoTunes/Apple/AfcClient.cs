@@ -30,6 +30,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
     private static ReadOnlySpan<byte> Magic => "CFA6LPAA"u8;
 
     private ulong sequence;
+    private bool fileHashUnsupported;
 
     internal bool IsBroken { get; private set; }
 
@@ -415,9 +416,12 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
         string path,
         long size,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<string, string>? attributes = null)
+        IReadOnlyDictionary<string, string>? attributes = null,
+        bool fullReadback = false)
     {
+        ValidatePath(path);
         ArgumentOutOfRangeException.ThrowIfNegative(size);
+        cancellationToken.ThrowIfCancellationRequested();
 
         attributes ??= (await this.ReadFileInfoAsync(path, size, cancellationToken)).Attributes;
         if (ValidateFileInfo(path, attributes, size) != size)
@@ -425,7 +429,60 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
             throw new IOException($"The iPhone file size differs from its expected size: {path}");
         }
 
-        using var hash = SHA256.Create();
+        if (!fullReadback && ContentHash.SupportsAfcFileHash && !this.fileHashUnsupported)
+        {
+            var digest = await this.TryGetFileHashAsync(path, cancellationToken);
+            if (digest is not null)
+            {
+                var after = await this.GetFileInfoAsync(path, cancellationToken);
+                if (!SameAttributes(attributes, after))
+                {
+                    throw new IOException($"iPhone file changed while being hashed: {path}");
+                }
+
+                return ContentHash.Format(digest);
+            }
+        }
+
+        return await this.HashFileByReadingAsync(
+            path,
+            size,
+            attributes,
+            cancellationToken);
+    }
+
+    private async Task<byte[]?> TryGetFileHashAsync(string path, CancellationToken cancellationToken)
+    {
+        byte[] digest;
+        try
+        {
+            digest = await this.RequestAsync(
+                AfcOperation.GetFileHash,
+                Encoding.UTF8.GetBytes(path + '\0'),
+                cancellationToken);
+        }
+        catch (AfcException exception) when (exception.Code is
+            (ulong)AfcStatusCode.UnknownPacketType or (ulong)AfcStatusCode.OperationNotSupported)
+        {
+            this.fileHashUnsupported = true;
+            return null;
+        }
+
+        if (digest.Length != ContentHash.DigestBytes)
+        {
+            throw new InvalidDataException("Invalid AFC content hash digest length.");
+        }
+
+        return digest;
+    }
+
+    private async Task<string> HashFileByReadingAsync(
+        string path,
+        long size,
+        IReadOnlyDictionary<string, string> attributes,
+        CancellationToken cancellationToken)
+    {
+        using var hash = ContentHash.CreateAlgorithm();
         await using var sink = new CryptoStream(
             Stream.Null,
             hash,
@@ -440,7 +497,7 @@ public sealed class AfcClient(Stream stream, TimeSpan timeout) : IAsyncDisposabl
             cancellationToken);
 
         await sink.FlushFinalBlockAsync(cancellationToken);
-        return Convert.ToHexString(hash.Hash!);
+        return ContentHash.Format(hash.Hash!);
     }
 
     public static bool SameAttributes(

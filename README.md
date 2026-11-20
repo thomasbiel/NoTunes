@@ -187,7 +187,7 @@ After building, the equivalent executable is
   With `--read-catalog`, it also reads the database and its WAL twice and checks
   that both contents and file attributes agree. These captures stay in memory.
 - `scan` recursively enumerates `.mp3` files, including `.MP3`, and hashes their
-  complete bytes using SHA-256. This is an inventory, not MP3 audio validation.
+  complete bytes using SHA-1. This is an inventory, not MP3 audio validation.
   `scan` and `sync` persist source hashes in the user's local NoTunes data folder:
   `%LOCALAPPDATA%\NoTunes\hash-cache` on Windows and
   `$XDG_DATA_HOME/NoTunes/hash-cache` (normally `~/.local/share/NoTunes/hash-cache`)
@@ -209,7 +209,7 @@ After building, the equivalent executable is
   Size and modification time are checked on the opened file handle on both platforms.
 - `sync [folder] [--dry-run] [--repair-covers] [--device <UDID>]` mirrors local MP3 files to
   computer-synced, local Music tracks. Cloud purchases, remote items, videos and
-  other media types are preserved. Tracks are matched by their complete SHA-256
+  other media types are preserved. Tracks are matched by their complete SHA-1
   hashes, including duplicate counts; a renamed file does not trigger a transfer.
   Replacing changed bytes uses an insertion followed by removal of the old track;
   it creates a new track identity. Unchanged tracks retain their identities.
@@ -326,8 +326,12 @@ waits for a successful source scan before it can modify the phone.
 Interactive progress combines overlapping operations on the current console line;
 redirected diagnostics retain complete individual progress lines.
 
-Each comparison can take time: candidate device files are read over the selected connection and
-hashed on the host. Only files whose size occurs in the source need hashing.
+Candidate device files are hashed on the iPhone using AFC `GetFileHash`; only the
+20-byte SHA-1 digest crosses the connection. Only files whose size occurs in the
+source need hashing. If AFC explicitly reports that file hashing is unsupported,
+NoTunes reads the file and computes the same SHA-1 digest on the host. Unsupported
+hashing is remembered for that connection. Other service errors, malformed digests
+and files whose attributes change during hashing abort the operation.
 Verified device hashes are cached under the local NoTunes data folder in
 `device-hash-cache`, separately from source hashes and recovery journals.
 `--state-folder` does not relocate either hash cache. Cache entries belong to one
@@ -337,21 +341,35 @@ time. Access time is ignored. Missing or unusable modification times disable reu
 Candidate file attributes are queried in batches of at most 64 requests; audio
 reads and writes remain sequential. A missing file cannot become a cache hit.
 Cache files are validated, bounded in size and replaced atomically after a
-successful comparison. Invalid caches trigger full reads; cache persistence
+successful comparison. Invalid caches trigger new hash checks; cache persistence
 failures are reported and do not abort synchronization.
 
 `sync --full-readback` bypasses cached device hashes and refreshes them from full
-USB reads of every comparison candidate. The default assumes content changes are
+reads over the selected connection of every comparison candidate, bypassing AFC
+`GetFileHash` as well. The default assumes content changes are
 reflected in file attributes; replacing bytes while preserving every stable
 attribute is detected by a full readback. The source hash cache is independent
 and remains enabled. Newly transferred audio and separate artwork are always
-read back and verified regardless of cache hits or this option.
+verified against their source SHA-1 using AFC `GetFileHash`, with the same readback
+fallback, regardless of cache hits.
 Embedded pictures participate in the MP3 hash. Separate registered iPhone artwork
 is not audited by `--full-readback`; checking and repairing missing covers on
 existing tracks requires `--repair-covers` independently of this option.
-No device-side file-hash operation is used. Diagnostics include cache-hit/read
+Music and cover content hashes, including source/device cache entries and recovery
+assets, use SHA-1. Cache and journal version numbers are unchanged; rebuild old
+hash caches after this change. Cryptographic signatures and library-identity hashes
+retain their existing algorithms. Diagnostics include cache-hit/hash-check
 counts on stderr; `--json` prints the plan, dry-run flag and verified batch count
 to stdout.
+
+Content hashing is centralized in `Source/NoTunes/ContentHash.cs`. Change its
+`AlgorithmName` constant to select another supported algorithm. Byte arrays,
+streams, incremental checks, digest validation and persisted hash field names
+all follow that setting. C# models expose an algorithm-neutral `Hash` property;
+the current setting retains the existing `Sha1` JSON fields. AFC file hashing
+is used only for SHA-1; another selected algorithm automatically uses readback.
+Protocol signatures, library identities and storage-directory keys are independent
+of the content hash selection.
 
 `scan` and `sync` report percentage progress to stderr for each work phase:
 source hashing, catalogue reads, device comparison, source and cover preparation,

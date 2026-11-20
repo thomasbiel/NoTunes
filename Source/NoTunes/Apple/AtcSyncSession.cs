@@ -162,6 +162,7 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
             "Transferring assets",
             total,
             ProgressUnit.Bytes);
+
         long completed = 0;
         foreach (var asset in manifest.Where(asset => asset.Track is not null))
         {
@@ -258,9 +259,9 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
     internal static async Task VerifyHashAsync(AfcClient afc, string path, SourceTrack source, CancellationToken cancellationToken)
     {
         var actual = await afc.HashFileAsync(path, source.Size, cancellationToken);
-        if (!StringComparer.Ordinal.Equals(actual, source.Sha256))
+        if (!StringComparer.Ordinal.Equals(actual, source.Hash))
         {
-            throw new IOException($"iPhone audio read-back differs: {source.RelativePath}");
+            throw new IOException($"iPhone audio hash differs: {source.RelativePath}");
         }
     }
 
@@ -306,6 +307,7 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
 
             if (message.Number(AtcKeys.Session) != SyncProtocol.Session)
                 continue;
+
             if (command is AtcCommands.SyncFailed or AtcCommands.FileError)
             {
                 throw new IOException($"The iPhone reported {command} during music synchronization.");
@@ -323,6 +325,7 @@ internal sealed class AtcSyncSession(AtcClient client, TextWriter error, TextWri
 
             if (expected.Contains(command, StringComparer.Ordinal))
                 return message;
+
             if (command is not (AtcCommands.Pong or AtcCommands.Progress or AtcCommands.AssetMetrics or AtcCommands.InstalledAssets or AtcCommands.Capabilities))
             {
                 throw new InvalidDataException($"Unexpected ATC sync command: {command}");

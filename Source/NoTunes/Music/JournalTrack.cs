@@ -29,7 +29,7 @@ internal sealed record JournalTrack(
                 (AudioKey, track.Metadata.Audio),
                 (AlbumKey, track.Metadata.Album),
                 (AlbumArtistKey, track.Metadata.AlbumArtist))),
-            track.Metadata.Artwork is { } art ? new JournalArtwork(art.CacheId, art.Length, art.Sha256) : null,
+            track.Metadata.Artwork is { } art ? new JournalArtwork(art.CacheId, art.Length, art.Hash) : null,
             track.IsArtworkOnly,
             track.ExistingDevicePath);
     }

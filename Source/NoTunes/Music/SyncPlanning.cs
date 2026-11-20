@@ -49,7 +49,8 @@ internal sealed class SyncPlanning(SyncDeviceContext context, string? cacheDirec
         hashes.Save();
         await context.Error.WriteLineAsync(
             $"Device hashes: {DisplayFormat.Number(hashes.Hits)} cached, "
-            + $"{DisplayFormat.Number(hashes.Reads)} read from iPhone.");
+            + $"{DisplayFormat.Number(hashes.Checks)} checked.");
+
         return (identity, catalogue, plan);
     }
 }

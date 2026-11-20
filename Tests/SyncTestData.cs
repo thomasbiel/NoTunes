@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using NoTunes.Apple;
 using NoTunes.Music;
 
@@ -18,7 +17,7 @@ internal static class SyncTestData
             FixtureName,
             bytes.Length,
             File.GetLastWriteTimeUtc(FixturePath),
-            Convert.ToHexString(SHA256.HashData(bytes)));
+            ContentHash.Compute(bytes));
 
         return new PreparedTrack(
             source,

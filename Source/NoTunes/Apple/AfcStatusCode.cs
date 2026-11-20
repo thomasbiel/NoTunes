@@ -3,5 +3,7 @@ namespace NoTunes.Apple;
 internal enum AfcStatusCode : ulong
 {
     Success = 0,
-    ObjectNotFound = 8
+    UnknownPacketType = 6,
+    ObjectNotFound = 8,
+    OperationNotSupported = 15
 }

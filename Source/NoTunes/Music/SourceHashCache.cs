@@ -34,7 +34,7 @@ public sealed class SourceHashCache(string directory, TextWriter error)
         foreach (var track in snapshot.Tracks)
         {
             if (track is null || string.IsNullOrEmpty(track.RelativePath) || track.Size < 0
-                || !Sha256Text.IsValid(track.Sha256) || !tracks.TryAdd(track.RelativePath, track))
+                || !ContentHash.IsValid(track.Hash) || !tracks.TryAdd(track.RelativePath, track))
             {
                 throw new InvalidDataException("Invalid source hash cache entry.");
             }

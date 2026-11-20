@@ -63,18 +63,20 @@ public sealed class DeviceHashCacheTests
         }
 
         var hash = await cache.ReadAsync(this.afc, Track, CancellationToken.None);
-        Assert.That(hash, Is.EqualTo(Convert.ToHexString(SHA256.HashData("abc"u8))));
+        Assert.That(hash, Is.EqualTo(Convert.ToHexString(SHA1.HashData("abc"u8))));
         Assert.That(cache.Hits, Is.EqualTo(1));
-        Assert.That(cache.Reads, Is.Zero);
+        Assert.That(cache.Checks, Is.Zero);
         Assert.That(this.peer.Reads, Is.EqualTo(reads));
         Assert.That(this.peer.Operations.Count(operation => operation == AfcOperation.GetFileInfo), Is.EqualTo(queries + 1));
     }
 
     [Test]
-    public async Task Reads_A_Miss_With_Exactly_Two_Attribute_Queries()
+    public async Task Hashes_A_Miss_On_The_Device_With_Exactly_Two_Attribute_Queries()
     {
         await this.PrimeAsync();
         Assert.That(this.peer.Operations.Count(operation => operation == AfcOperation.GetFileInfo), Is.EqualTo(2));
+        Assert.That(this.peer.HashPaths, Is.EqualTo([Track.Path]));
+        Assert.That(this.peer.ReadPaths, Is.Empty);
     }
 
     [Test]
@@ -86,9 +88,9 @@ public sealed class DeviceHashCacheTests
         Assert.That(await cached.ReadAsync(this.afc, Track, CancellationToken.None), Is.EqualTo(original));
         var full = this.Open(fullReadback: true);
         var actual = await this.ReadAndSaveAsync(full);
-        Assert.That(actual, Is.EqualTo(Convert.ToHexString(SHA256.HashData("xyz"u8))));
+        Assert.That(actual, Is.EqualTo(Convert.ToHexString(SHA1.HashData("xyz"u8))));
         Assert.That(full.Hits, Is.Zero);
-        Assert.That(full.Reads, Is.EqualTo(1));
+        Assert.That(full.Checks, Is.EqualTo(1));
         Assert.That(await this.Open().ReadAsync(this.afc, Track, CancellationToken.None), Is.EqualTo(actual));
     }
 
@@ -174,12 +176,13 @@ public sealed class DeviceHashCacheTests
         var cache = this.Open();
         await cache.ReadAsync(this.afc, Track, CancellationToken.None);
         cache.Save();
-        Assert.That(cache.Reads, Is.EqualTo(1));
+        Assert.That(cache.Checks, Is.EqualTo(1));
         Assert.That(this.error.ToString(), Does.Contain("Device hash cache could not be read"));
         Assert.That(Directory.GetFiles(this.workspace.Root, "*.tmp"), Is.Empty);
     }
 
     [TestCase("hash")]
+    [TestCase("sha256")]
     [TestCase("duplicate")]
     [TestCase("attributes")]
     public async Task Rejects_Invalid_Cache_Entries(string changed)
@@ -190,7 +193,8 @@ public sealed class DeviceHashCacheTests
         var track = snapshot.Tracks.Single();
         var invalid = changed switch
         {
-            "hash" => snapshot with { Tracks = [track with { Sha256 = "invalid" }] },
+            "hash" => snapshot with { Tracks = [track with { Hash = "invalid" }] },
+            "sha256" => snapshot with { Tracks = [track with { Hash = new string('A', 64) }] },
             "duplicate" => snapshot with { Tracks = [track, track] },
             _ => snapshot with { Tracks = [track with { Attributes = null! }] }
         };
@@ -214,14 +218,20 @@ public sealed class DeviceHashCacheTests
             this.error);
 
         var hash = await this.ReadAndSaveAsync(cache);
-        Assert.That(hash, Is.EqualTo(Convert.ToHexString(SHA256.HashData("abc"u8))));
+        Assert.That(hash, Is.EqualTo(Convert.ToHexString(SHA1.HashData("abc"u8))));
         Assert.That(this.error.ToString(), Does.Contain("Device hash cache could not be saved"));
     }
 
     [Test]
     public async Task Incomplete_Readback_Does_Not_Create_A_Cache_Entry()
     {
-        await using var broken = new AfcPeer { EarlyEof = true, Files = this.peer.Files };
+        await using var broken = new AfcPeer
+        {
+            EarlyEof = true,
+            Files = this.peer.Files,
+            FileHashError = AfcStatusCode.OperationNotSupported
+        };
+
         await using var afc = new AfcClient(broken, TimeSpan.FromSeconds(2));
         var cache = this.Open();
         await Assert.ThrowsAsync<InvalidDataException>(() => cache.ReadAsync(afc, Track, CancellationToken.None));
@@ -242,7 +252,7 @@ public sealed class DeviceHashCacheTests
 
         var cache = this.Open();
         await cache.ReadAsync(this.afc, Track, CancellationToken.None);
-        Assert.That(cache.Reads, Is.EqualTo(1));
+        Assert.That(cache.Checks, Is.EqualTo(1));
         Assert.That(this.error.ToString(), Does.Contain("exceeds its size limit"));
     }
 
@@ -273,12 +283,23 @@ public sealed class DeviceHashCacheTests
     }
 
     [Test]
-    public async Task Changed_Attributes_During_Hashing_Do_Not_Create_A_Cache_Entry()
+    public async Task Changed_Attributes_During_Hashing_Do_Not_Create_A_Cache_Entry([Values] bool fullReadback)
     {
-        this.peer.OnClose = () => this.peer.FileInfoOverrides[Track.Path!] = new() { [AfcKeys.ModificationTime] = "2" };
-        var cache = this.Open();
+        void ChangeAttributes() =>
+            this.peer.FileInfoOverrides[Track.Path!] = new() { [AfcKeys.ModificationTime] = "2" };
+
+        if (fullReadback)
+        {
+            this.peer.OnClose = ChangeAttributes;
+        }
+        else
+        {
+            this.peer.OnFileHashed = _ => ChangeAttributes();
+        }
+
+        var cache = this.Open(fullReadback);
         await Assert.ThrowsAsync<IOException>(() => cache.ReadAsync(this.afc, Track, CancellationToken.None));
-        Assert.That(cache.Reads, Is.Zero);
+        Assert.That(cache.Checks, Is.Zero);
         Assert.That(File.Exists(cache.FilePath), Is.False);
     }
 
@@ -286,7 +307,7 @@ public sealed class DeviceHashCacheTests
     {
         await cache.ReadAsync(this.afc, track ?? Track, CancellationToken.None);
         Assert.That(cache.Hits, Is.Zero);
-        Assert.That(cache.Reads, Is.EqualTo(1));
+        Assert.That(cache.Checks, Is.EqualTo(1));
     }
 
     private DeviceHashCache Open(bool fullReadback = false)

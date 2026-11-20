@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using NoTunes.Platform;
 
 namespace NoTunes.Apple;
@@ -105,7 +104,7 @@ internal static class DeviceStaging
             throw new IOException("A recovery staging file is not owned by this operation: " + path);
         }
 
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using var hash = ContentHash.CreateIncremental();
         var buffer = new byte[SourceFileDefaults.ReadBufferBytes];
         var remaining = length;
         while (remaining > 0)
@@ -118,7 +117,7 @@ internal static class DeviceStaging
         }
 
         var actual = await afc.HashFileAsync(path, length, cancellationToken);
-        if (!StringComparer.Ordinal.Equals(actual, Convert.ToHexString(hash.GetHashAndReset()))
+        if (!StringComparer.Ordinal.Equals(actual, ContentHash.Finish(hash))
             || !AfcClient.SameAttributes(info, await afc.GetFileInfoAsync(path, cancellationToken)))
         {
             throw new IOException("Refusing to remove foreign or changed staging data: " + path);
