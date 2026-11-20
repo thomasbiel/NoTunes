@@ -77,11 +77,9 @@ internal sealed class SyncBatchExecutor(SyncDeviceContext context, SyncJournal j
             cancellationToken,
             replacePending);
 
-        if (replacePending)
-        {
-            var pending = journal.ReadPending();
-            additions = [.. pending.Additions.Select(track => track.Restore(journal.Assets(pending)))];
-        }
+        var pending = journal.ReadPending();
+        var assets = journal.Assets(pending);
+        additions = [.. pending.Additions.Select(track => track.Restore(assets))];
 
         await DeviceStaging.WriteMetadataAsync(
             phone.Afc,
@@ -130,7 +128,9 @@ internal sealed class SyncBatchExecutor(SyncDeviceContext context, SyncJournal j
         IReadOnlyList<PreparedTrack> additions,
         CancellationToken cancellationToken)
     {
-        var verificationProgress = new OperationProgress(context.Error, "Verifying transferred tracks", additions.Count);
+        var verificationProgress = new OperationProgress(
+            context.Error, "Verifying transferred tracks", additions.Count);
+
         foreach (var track in additions)
         {
             await AtcSyncSession.VerifyHashAsync(
@@ -148,5 +148,4 @@ internal sealed class SyncBatchExecutor(SyncDeviceContext context, SyncJournal j
             verificationProgress.Advance();
         }
     }
-
 }

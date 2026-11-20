@@ -37,21 +37,38 @@ internal sealed class SyncJournal : IDisposable
         if (this.HasPending && !allowPending)
         {
             this.lease.Dispose();
-            throw new IOException($"An earlier sync has an unverified outcome. Inspect {this.pending} and run --dry-run before recovery. No operations were replayed.");
+            throw new IOException(
+                $"An earlier sync has an unverified outcome. Inspect {this.pending} "
+                + "and run --dry-run before recovery. No operations were replayed.");
+        }
+
+        try
+        {
+            // The device lease excludes any live preparation workspace in this directory.
+            SyncWorkspace.CleanAbandoned(directory);
+        }
+        catch
+        {
+            this.lease.Dispose();
+            throw;
         }
     }
 
     public PendingSync ReadPending()
     {
         using var file = File.OpenRead(this.pending);
-        if (file.Length > MaximumJournalBytes) throw new InvalidDataException("The recovery journal exceeds its size limit.");
+        if (file.Length > MaximumJournalBytes)
+        {
+            throw new InvalidDataException("The recovery journal exceeds its size limit.");
+        }
 
         var state = JsonSerializer.Deserialize<PendingSync>(file);
         if (state is null || state.Version != RecoverableFormatVersion || state.Before is null || state.Identity is null
             || state.Operation is null || state.Operation.Length is < 1 or > SyncProtocol.MaxOperationBytes
             || state.Signature is null || state.Additions is null || state.Deletions is null)
         {
-            throw new IOException("This journal cannot be recovered automatically; retain it for manual reconciliation.");
+            throw new IOException(
+                "This journal cannot be recovered automatically; retain it for manual reconciliation.");
         }
 
         return state;
@@ -83,15 +100,18 @@ internal sealed class SyncJournal : IDisposable
             signature);
 
         var directory = this.Assets(state);
+        var reusesPendingAssets = previous is not null
+            && StringComparer.Ordinal.Equals(this.Assets(previous), directory);
+
         try
         {
             Directory.CreateDirectory(directory);
-            await CopyAssetsAsync(batch, directory, cancellationToken);
+            await PrepareAssetsAsync(batch, directory, cancellationToken);
             DeviceState.Save(this.pending, state, MaximumJournalBytes);
         }
         catch
         {
-            if (previous is null || !StringComparer.Ordinal.Equals(this.Assets(previous), directory))
+            if (!reusesPendingAssets)
             {
                 this.CleanAssets(state);
             }
@@ -99,35 +119,17 @@ internal sealed class SyncJournal : IDisposable
             throw;
         }
 
-        if (previous is not null && !StringComparer.Ordinal.Equals(this.Assets(previous), directory))
+        if (previous is not null && !reusesPendingAssets)
         {
             this.CleanAssets(previous);
         }
     }
 
-    private static async Task CopyAssetsAsync(SyncBatch batch, string directory, CancellationToken cancellationToken)
+    private static async Task PrepareAssetsAsync(SyncBatch batch, string directory, CancellationToken cancellationToken)
     {
         foreach (var track in batch.Additions)
         {
-            var path = JournalTrack.AssetPath(directory, track.Id, SyncPaths.Mp3Extension);
-            await using (var input = File.OpenRead(track.LocalPath))
-            await using (var output = new FileStream(
-                path,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None))
-            {
-                await input.CopyToAsync(output, cancellationToken);
-                output.Flush(flushToDisk: true);
-            }
-
-            await using var copy = File.OpenRead(path);
-            if (copy.Length != track.Source.Size || Convert.ToHexString(await SHA256.HashDataAsync(copy, cancellationToken))
-                != track.Source.Sha256)
-            {
-                throw new IOException("Durable recovery audio failed verification.");
-            }
-
+            await PrepareAudioAsync(track, directory, cancellationToken);
             if (track.Metadata.Artwork is { } artwork)
             {
                 await using var cover = new FileStream(
@@ -142,21 +144,59 @@ internal sealed class SyncJournal : IDisposable
         }
     }
 
+    private static async Task PrepareAudioAsync(
+        PreparedTrack track,
+        string directory,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = JournalTrack.AssetPath(directory, track.Id, SyncPaths.Mp3Extension);
+        if (track.Workspace?.Owns(track.LocalPath) == true)
+        {
+            // Preparation uses the journal volume, so this transfers ownership without copying the MP3.
+            File.Move(track.LocalPath, path);
+        }
+        else
+        {
+            await using var input = File.OpenRead(track.LocalPath);
+            await using var output = new FileStream(
+                path,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None);
+
+            await input.CopyToAsync(output, cancellationToken);
+        }
+
+        await using var audio = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None);
+
+        audio.Flush(flushToDisk: true);
+        var actual = Convert.ToHexString(await SHA256.HashDataAsync(audio, cancellationToken));
+        if (audio.Length != track.Source.Size || actual != track.Source.Sha256)
+        {
+            throw new IOException("Durable recovery audio failed verification.");
+        }
+    }
+
     public void ResolveUnapplied()
     {
-        this.ArchivePending(UnappliedPrefix);
+        this.ArchivePending(UnappliedPrefix, this.ReadPending());
     }
 
     public void ResolveObserved()
     {
-        this.ArchivePending(ReconciledPrefix);
+        this.ArchivePending(ReconciledPrefix, this.ReadPending());
     }
 
-    private void ArchivePending(string prefix)
+    private void ArchivePending(string prefix, PendingSync? state)
     {
-        var state = this.ReadPending();
-        File.Move(this.pending, Path.Combine(this.DirectoryPath, prefix + Guid.NewGuid().ToString("N") + JournalExtension));
-        this.CleanAssets(state);
+        var name = prefix + Guid.NewGuid().ToString("N") + JournalExtension;
+        File.Move(this.pending, Path.Combine(this.DirectoryPath, name));
+        if (state is not null) this.CleanAssets(state);
     }
 
     public void Start(LibraryIdentity identity, SyncPlan plan, byte[] operation, byte[] signature)
@@ -192,8 +232,7 @@ internal sealed class SyncJournal : IDisposable
             // Explicit completion of a legacy record remains available to verified callers.
         }
 
-        File.Move(this.pending, Path.Combine(Path.GetDirectoryName(this.pending)!, VerifiedPrefix + Guid.NewGuid().ToString("N") + JournalExtension));
-        if (state is not null) this.CleanAssets(state);
+        this.ArchivePending(VerifiedPrefix, state);
     }
 
     private void CleanAssets(PendingSync state)

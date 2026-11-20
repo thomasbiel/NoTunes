@@ -374,16 +374,26 @@ Sync catalogue checks retry transient read inconsistencies up to five times.
 Every successful check still requires two matching database/WAL captures and
 stable file attributes. Retries repeat reads, never signed sync operations.
 
-Before writes, all new source files are copied to a private temporary directory,
-checked against the scan hashes and read with TagLibSharp. Source access continues
-to use the platform's directory and file guards. This requires temporary disk
-space for the additions and any missing-cover repairs requested with `--repair-covers`.
+Before writes, all new source files are copied to a private workspace,
+checked against the scan hashes and read with TagLibSharp. Copying and hash verification
+of the next file overlap metadata and cover processing of the current file. Only one
+file is prefetched; metadata processing, group prompts and ID allocation remain ordered.
+Source access continues to use the platform's directory and file guards. A failure or
+cancellation stops and joins the outstanding copy before closing its source session.
+This requires workspace disk space for the additions and any missing-cover repairs
+requested with `--repair-covers`.
+Write runs create the workspace on the recovery journal's volume. Verified MP3 copies
+are moved into each batch's durable assets instead of copied a second time. They are
+flushed and hash-checked before publishing the journal, and transfers use those durable
+paths. Dry runs use the system temporary directory. Abandoned preparation workspaces
+are cleaned on the next write run while holding the exclusive device lease.
 Existing tracks are not read for cover preparation by default. Tracks without embedded
 covers are checked through a guarded read-only tag stream without making a copy.
-Validated JPEGs are also stored in the temporary directory and loaded as needed,
+Validated JPEGs are also stored in the workspace and loaded as needed,
 so allow disk space for these cover files as well. A bounded content cache reuses
 decoding and conversion for identical embedded images while retaining distinct
 track artwork IDs.
+These shared cover files are still copied into each track's recovery assets.
 Files with unreadable or unsupported MP3 metadata or invalid embedded covers are
 reported individually and skipped. Valid additions and cover repairs continue.
 If any file is skipped, **all planned deletions are deferred for that run** so an

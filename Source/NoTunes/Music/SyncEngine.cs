@@ -109,7 +109,7 @@ public sealed class SyncEngine(
 
         var source = await sourceTask;
 
-        using var workspace = new SyncWorkspace();
+        using var workspace = new SyncWorkspace(journal?.DirectoryPath);
         var prepared = await new SyncSourcePreparation(fileSystem, this.PromptForGroupName, error)
             .PrepareAsync(
                 source,
@@ -197,7 +197,9 @@ public sealed class SyncEngine(
         RequireCompleteAudio(catalogue);
         if (source.Tracks.Count == 0 && !allowEmptySource)
         {
-            throw new IOException("The source contains no MP3 files. Use --allow-empty-source to deliberately remove all synced music.");
+            throw new IOException(
+                "The source contains no MP3 files. "
+                + "Use --allow-empty-source to deliberately remove all synced music.");
         }
 
         if ((long)catalogue.Tracks.Count + plan.Add.Count > CatalogueReader.MaximumTracks)
